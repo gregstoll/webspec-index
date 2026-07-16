@@ -129,7 +129,8 @@ pub fn resolve_url(url: &str) -> Option<(String, String, String)> {
                 let canonical = canonical_ietf_name(rest);
                 let base = format!("https://datatracker.ietf.org/doc/html/{}", rest);
                 (canonical, base)
-            } else if let Some(rest) = path.strip_prefix("doc/") {
+            } else {
+                let rest = path.strip_prefix("doc/")?;
                 let doc_name = rest.trim_end_matches('/');
                 if doc_name.starts_with("rfc") || doc_name.starts_with("draft-") {
                     let canonical = canonical_ietf_name(doc_name);
@@ -138,14 +139,13 @@ pub fn resolve_url(url: &str) -> Option<(String, String, String)> {
                 } else {
                     return None;
                 }
-            } else {
-                return None;
             }
         }
 
         "www.rfc-editor.org" => {
             let path = path.trim_matches('/');
-            if let Some(rest) = path.strip_prefix("rfc/") {
+            {
+                let rest = path.strip_prefix("rfc/")?;
                 let doc_name = rest.trim_end_matches(".html");
                 if doc_name.starts_with("rfc") {
                     let (canonical, base) = rfc_name_and_url(doc_name);
@@ -153,14 +153,13 @@ pub fn resolve_url(url: &str) -> Option<(String, String, String)> {
                 } else {
                     return None;
                 }
-            } else {
-                return None;
             }
         }
 
         "www.ietf.org" => {
             let path = path.trim_matches('/');
-            if let Some(rest) = path.strip_prefix("archive/id/") {
+            {
+                let rest = path.strip_prefix("archive/id/")?;
                 let doc_name = rest.trim_end_matches(".html").trim_end_matches(".txt");
                 if doc_name.starts_with("draft-") {
                     let canonical = canonical_ietf_name(doc_name);
@@ -169,8 +168,6 @@ pub fn resolve_url(url: &str) -> Option<(String, String, String)> {
                 } else {
                     return None;
                 }
-            } else {
-                return None;
             }
         }
 
