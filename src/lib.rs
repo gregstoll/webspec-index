@@ -56,6 +56,19 @@ pub fn parse_spec_anchor(input: &str) -> Result<(String, String, Option<String>)
     Ok((parts[0].to_string(), parts[1].to_string(), None))
 }
 
+/// Resolve the spec name for a whole-PR `--diff`, which needs only the spec (no
+/// `#anchor`). A genuine bare name (no `#`, not a URL) is accepted as-is; a
+/// malformed `SPEC#anchor` or unrecognized URL surfaces `parse_spec_anchor`'s
+/// clear error rather than being passed through to fail later as an opaque
+/// "Unknown spec".
+pub fn diff_spec_name(spec_anchor: &str) -> Result<String> {
+    match parse_spec_anchor(spec_anchor) {
+        Ok((name, _, _)) => Ok(name),
+        Err(e) if spec_anchor.contains('#') || spec_anchor.contains("://") => Err(e),
+        Err(_) => Ok(spec_anchor.to_string()),
+    }
+}
+
 /// Return indexed/discovered spec base URLs
 pub fn spec_urls() -> Vec<model::SpecUrlEntry> {
     let conn = match db::open_or_create_db() {
@@ -150,7 +163,7 @@ pub async fn query_section(
         let _ =
             ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
                 .await?;
-        let (pr_snap, base_snap) = fetch::whatpr::ensure_pr_indexed(
+        let (pr_snap, base_snap) = fetch::pr::ensure_pr_indexed(
             &conn,
             &canonical_name,
             &base_url,
@@ -278,7 +291,7 @@ pub async fn check_exists(
         let _ =
             ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
                 .await?;
-        let (pr_snap, base_snap) = fetch::whatpr::ensure_pr_indexed(
+        let (pr_snap, base_snap) = fetch::pr::ensure_pr_indexed(
             &conn,
             &canonical_name,
             &base_url,
@@ -430,7 +443,7 @@ pub async fn find_anchors(
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, spec_name, None)?;
         let _ = ensure_indexed_for_spec_name(&conn, &registry, spec_name, None).await?;
-        let (pr_snap, base_snap) = fetch::whatpr::ensure_pr_indexed(
+        let (pr_snap, base_snap) = fetch::pr::ensure_pr_indexed(
             &conn,
             &canonical_name,
             &base_url,
@@ -495,7 +508,7 @@ pub async fn search_sections(
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, spec_name, None)?;
         let _ = ensure_indexed_for_spec_name(&conn, &registry, spec_name, None).await?;
-        let (pr_snap, base_snap) = fetch::whatpr::ensure_pr_indexed(
+        let (pr_snap, base_snap) = fetch::pr::ensure_pr_indexed(
             &conn,
             &canonical_name,
             &base_url,
@@ -610,7 +623,7 @@ pub async fn list_headings(
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, spec, None)?;
         let _ = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
-        let (pr_snap, _base_snap) = fetch::whatpr::ensure_pr_indexed(
+        let (pr_snap, _base_snap) = fetch::pr::ensure_pr_indexed(
             &conn,
             &canonical_name,
             &base_url,
@@ -1420,7 +1433,7 @@ pub async fn query_idl(
         if let Some(pr_opts) = pr {
             let (canonical_name, base_url, provider) =
                 resolve_spec_metadata(&conn, &registry, spec_name, None)?;
-            let _ = fetch::whatpr::ensure_pr_indexed(
+            let _ = fetch::pr::ensure_pr_indexed(
                 &conn,
                 &canonical_name,
                 &base_url,
@@ -1437,7 +1450,7 @@ pub async fn query_idl(
         if let Some(pr_opts) = pr {
             let (canonical_name, base_url, provider) =
                 resolve_spec_metadata(&conn, &registry, &spec_name, base_url_hint.as_deref())?;
-            let _ = fetch::whatpr::ensure_pr_indexed(
+            let _ = fetch::pr::ensure_pr_indexed(
                 &conn,
                 &canonical_name,
                 &base_url,
@@ -1474,7 +1487,7 @@ pub async fn find_references(
             if let Some(pr_opts) = pr {
                 let (canonical_name, base_url, provider) =
                     resolve_spec_metadata(&conn, &registry, &canonical_spec_name, None)?;
-                let _ = fetch::whatpr::ensure_pr_indexed(
+                let _ = fetch::pr::ensure_pr_indexed(
                     &conn,
                     &canonical_name,
                     &base_url,
@@ -1498,7 +1511,7 @@ pub async fn pr_diff(spec: &str, pr_opts: &model::PrOpts) -> Result<model::PrDif
     let registry = spec_registry::SpecRegistry::new();
     let (canonical_name, base_url, provider) = resolve_spec_metadata(&conn, &registry, spec, None)?;
     let _ = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
-    let (pr_snap_id, base_snap_id) = fetch::whatpr::ensure_pr_indexed(
+    let (pr_snap_id, base_snap_id) = fetch::pr::ensure_pr_indexed(
         &conn,
         &canonical_name,
         &base_url,
@@ -1933,6 +1946,31 @@ mod tests {
     fn parse_spec_anchor_unknown_url() {
         let result = parse_spec_anchor("https://example.com/#foo");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn diff_spec_name_accepts_bare_name() {
+        // A whole-PR --diff takes a bare spec name; there is no #anchor to parse.
+        assert_eq!(diff_spec_name("HTML").unwrap(), "HTML");
+    }
+
+    #[test]
+    fn diff_spec_name_extracts_from_spec_anchor() {
+        // A valid SPEC#anchor still yields just the spec name.
+        assert_eq!(diff_spec_name("HTML#navigate").unwrap(), "HTML");
+    }
+
+    #[test]
+    fn diff_spec_name_rejects_malformed_spec_anchor() {
+        // A '#' present but unparseable must surface the parse error, not be
+        // passed through as a literal name that fails later as "Unknown spec".
+        assert!(diff_spec_name("HTML#a#b").is_err());
+    }
+
+    #[test]
+    fn diff_spec_name_rejects_unrecognized_url() {
+        // A URL that doesn't resolve must surface the parse error too.
+        assert!(diff_spec_name("https://example.com/#foo").is_err());
     }
 
     #[test]

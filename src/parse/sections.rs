@@ -358,12 +358,26 @@ fn extract_idl_content(element: &scraper::ElementRef) -> Option<String> {
 
 /// Parse a generic anchor-bearing element (tr, dt, section, li) into a ParsedSection.
 /// W3C specs use these as named targets that don't fit the dfn/heading pattern.
+/// Convert an element's full HTML to trimmed markdown, or `None` if it renders
+/// empty. Shared by the anchor and grammar-production parsers, which both use
+/// the element's own HTML as its content.
+fn element_content_text(
+    element: &scraper::ElementRef,
+    converter: &HtmlToMarkdown,
+) -> Option<String> {
+    let md = super::markdown::element_to_markdown_from_html(&element.html(), converter);
+    let trimmed = md.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 pub fn parse_anchor_element(
     element: &scraper::ElementRef,
     converter: &HtmlToMarkdown,
 ) -> Result<Option<ParsedSection>> {
-    use super::markdown;
-
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
         None => return Ok(None),
@@ -388,16 +402,7 @@ pub fn parse_anchor_element(
         Some(truncated)
     };
 
-    let content_text = {
-        let html = element.html();
-        let md = markdown::element_to_markdown_from_html(&html, converter);
-        let trimmed = md.trim().to_string();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    };
+    let content_text = element_content_text(element, converter);
 
     Ok(Some(ParsedSection {
         anchor,
@@ -459,6 +464,49 @@ pub fn parse_emu_clause_element(
     }))
 }
 
+/// Parse an ecmarkup `<emu-production>` element into a ParsedSection.
+/// TC39/ecmarkup specs emit grammar productions as
+/// `<emu-production name="ImportCall" id="prod-ImportCall">…</emu-production>`,
+/// where the `id` is the canonical `#prod-*` anchor and `name` is the
+/// nonterminal's name. The production's right-hand side becomes the content.
+pub fn parse_emu_production_element(
+    element: &scraper::ElementRef,
+    converter: &HtmlToMarkdown,
+) -> Result<Option<ParsedSection>> {
+    let anchor = match element.value().attr("id") {
+        Some(id) => id.to_string(),
+        None => return Ok(None), // No id, skip this production
+    };
+
+    // Prefer the nonterminal name (e.g. "ImportCall"); fall back to text.
+    let title = element
+        .value()
+        .attr("name")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            let text = element.text().collect::<String>().trim().to_string();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        });
+
+    let content_text = element_content_text(element, converter);
+
+    Ok(Some(ParsedSection {
+        anchor,
+        title,
+        content_text,
+        section_type: SectionType::Definition,
+        parent_anchor: None,
+        prev_anchor: None,
+        next_anchor: None,
+        depth: None,
+    }))
+}
+
 /// Extract the depth from a secnum span inside a heading.
 /// Parses `<span class="secnum">7.1.17</span>` → count parts → depth = parts + 1.
 /// Returns None if no secnum is found.
@@ -504,7 +552,10 @@ fn extract_emu_clause_content(
                 continue;
             }
 
-            // For emu-alg, use the dedicated algorithm renderer on its inner <ol>
+            // For emu-alg, use the dedicated algorithm renderer on its inner
+            // <ol>. Source-form emu-alg (ECMA-262's committed spec.html) has no
+            // built <ol> — its steps are markdown text — so fall back to the
+            // source renderer, keeping algorithm bodies in the section content.
             if tag == "emu-alg" {
                 if let Some(ol) = child_elem
                     .children()
@@ -512,6 +563,11 @@ fn extract_emu_clause_content(
                     .find(|c| c.value().name() == "ol")
                 {
                     algo_steps = Some(algorithms::render_algorithm_ol(&ol, converter));
+                } else {
+                    let steps = algorithms::render_algorithm_source(&child_elem);
+                    if !steps.is_empty() {
+                        algo_steps = Some(steps);
+                    }
                 }
                 continue;
             }
@@ -1088,6 +1144,65 @@ mod tests {
         assert_eq!(sections[0].anchor, "def-1");
         assert_eq!(sections[1].anchor, "def-2");
         assert_eq!(sections[2].anchor, "def-3");
+    }
+
+    fn first_emu_production(html: &str) -> Option<ParsedSection> {
+        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("emu-production").unwrap();
+        let element = document.select(&selector).next().unwrap();
+        parse_emu_production_element(&element, &converter).unwrap()
+    }
+
+    #[test]
+    fn test_emu_production_parsed() {
+        // ecmarkup grammar production: id is the #prod-* anchor, name is the
+        // nonterminal, and the right-hand side becomes the content.
+        let html = r#"
+            <emu-production name="ImportCall" params="Yield, Await" id="prod-ImportCall">
+                <emu-nt>ImportCall</emu-nt>
+                <emu-geq>:</emu-geq>
+                <emu-t>import</emu-t>
+                <emu-t>(</emu-t>
+                <emu-nt>AssignmentExpression</emu-nt>
+                <emu-t>)</emu-t>
+            </emu-production>
+        "#;
+
+        let section = first_emu_production(html).expect("production should parse");
+        assert_eq!(section.anchor, "prod-ImportCall");
+        assert_eq!(section.title, Some("ImportCall".to_string()));
+        assert_eq!(section.section_type, SectionType::Definition);
+        assert_eq!(section.depth, None);
+        let content = section
+            .content_text
+            .expect("production should have content");
+        assert!(
+            content.contains("AssignmentExpression"),
+            "content should render the RHS, got: {content}"
+        );
+    }
+
+    #[test]
+    fn test_emu_production_without_id_skipped() {
+        let html = r#"<emu-production name="Foo"><emu-nt>Foo</emu-nt></emu-production>"#;
+        assert!(
+            first_emu_production(html).is_none(),
+            "a production without an id has no queryable anchor and must be skipped"
+        );
+    }
+
+    #[test]
+    fn test_emu_production_title_falls_back_to_text() {
+        // No name attribute -> title is derived from the element text.
+        let html = r#"<emu-production id="prod-Bar"><emu-nt>Bar</emu-nt><emu-geq>:</emu-geq><emu-t>baz</emu-t></emu-production>"#;
+        let section = first_emu_production(html).expect("production should parse");
+        assert_eq!(section.anchor, "prod-Bar");
+        let title = section.title.expect("title should fall back to text");
+        assert!(
+            title.contains("Bar"),
+            "title should include text, got: {title}"
+        );
     }
 
     #[test]
