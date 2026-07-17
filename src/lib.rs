@@ -8,6 +8,7 @@ pub mod db;
 pub mod fetch;
 pub mod format;
 pub mod ietf;
+pub mod itu;
 pub mod lsp;
 pub mod model;
 pub mod parse;
