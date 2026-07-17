@@ -1,5 +1,6 @@
 // Fetch orchestration: coordinate HTML fetching, parsing, and database writes
 pub mod github;
+pub mod itu;
 pub mod pr;
 pub mod snapshot;
 pub mod tc39_pr;
@@ -29,15 +30,19 @@ fn index_is_current(state: &queries::UpdateCheckState) -> bool {
 /// freshness window AND have been produced by the current build. A version
 /// upgrade invalidates the freshness window so the next query re-indexes even if
 /// the 24h check has not elapsed.
-fn cache_is_current(state: &queries::UpdateCheckState, now: &DateTime<Utc>) -> bool {
+pub(crate) fn cache_is_current(state: &queries::UpdateCheckState, now: &DateTime<Utc>) -> bool {
     is_fresh(&state.last_checked, now) && index_is_current(state)
 }
 
-fn hash_html(html: &str) -> String {
+pub(crate) fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(html.as_bytes());
+    hasher.update(bytes);
     let digest = hasher.finalize();
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn hash_html(html: &str) -> String {
+    hash_bytes(html.as_bytes())
 }
 
 fn store_update_check(
@@ -200,6 +205,10 @@ async fn sync_known_spec(
     force: bool,
     allow_fallback: bool,
 ) -> Result<(i64, bool)> {
+    if provider_name == "itu" {
+        return itu::sync_known_spec_pdf(conn, spec_name, base_url, force, allow_fallback).await;
+    }
+
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
     let previous_snapshot_id = queries::get_snapshot(conn, spec_name)?;
     let state = queries::get_update_check(conn, spec_id)?;
