@@ -254,4 +254,34 @@ mod tests {
         );
         assert_eq!(snap1, snap2);
     }
+
+    #[tokio::test]
+    #[ignore = "hits the live network — run manually with `cargo test --lib fetch::itu:: -- --ignored`"]
+    async fn itu_live_h265_d328_end_to_end() {
+        let (canonical, pdf_url) = crate::itu::discover_spec("H.265")
+            .await
+            .unwrap()
+            .expect("H.265 should resolve to a real edition");
+        assert_eq!(canonical, "H.265");
+
+        let conn = db::open_test_db().unwrap();
+        let (snapshot_id, updated) = sync_known_spec_pdf(&conn, &canonical, &pdf_url, false, false)
+            .await
+            .unwrap();
+        assert!(updated);
+
+        let section = queries::get_section(&conn, snapshot_id, "D.3.28")
+            .unwrap()
+            .expect("D.3.28 should be indexed");
+        assert!(
+            section
+                .title
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("mastering display"),
+            "unexpected title: {:?}",
+            section.title
+        );
+    }
 }

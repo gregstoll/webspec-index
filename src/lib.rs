@@ -134,6 +134,13 @@ async fn ensure_indexed_for_spec_name(
                 anyhow::bail!("IETF document not found: {}", spec_name);
             }
         }
+        Err(_) if itu::is_itu_name(spec_name) => {
+            if let Some((name, url)) = itu::discover_spec(spec_name).await? {
+                (name, url, "itu".to_string())
+            } else {
+                anyhow::bail!("ITU-T Recommendation not found: {}", spec_name);
+            }
+        }
         Err(_) => {
             spec_list::fetch_and_seed(conn)?;
             resolve_spec_metadata(conn, registry, spec_name, base_url_hint)?

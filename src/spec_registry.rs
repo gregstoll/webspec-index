@@ -366,6 +366,9 @@ pub fn provider_for_base_url(base_url: &str) -> &'static str {
     ) {
         return "ietf";
     }
+    if host == "www.itu.int" {
+        return "itu";
+    }
     if host == "gpuweb.github.io" {
         return "gpuweb";
     }
@@ -461,6 +464,16 @@ mod tests {
         assert_eq!(
             provider_for_base_url("https://datatracker.ietf.org/doc/html/rfc9110"),
             "ietf"
+        );
+    }
+
+    #[test]
+    fn itu_provider_inference() {
+        assert_eq!(
+            provider_for_base_url(
+                "https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-H.265-201802-I!!PDF-E&type=items"
+            ),
+            "itu"
         );
     }
 
