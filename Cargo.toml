@@ -64,6 +64,9 @@ libc = "0.2"
 # Diffing
 similar = "2"
 
+# PDF parsing (ITU-T Recommendations)
+lopdf = "0.36"
+pdf-extract = "0.9"
 
 [build-dependencies]
 serde_json = "1.0"

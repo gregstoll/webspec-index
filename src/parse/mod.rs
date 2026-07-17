@@ -1,6 +1,7 @@
 pub mod algorithms;
 pub mod idl;
 pub mod idl_defs;
+pub mod itu_pdf;
 pub mod markdown;
 pub mod references;
 pub mod sections;
