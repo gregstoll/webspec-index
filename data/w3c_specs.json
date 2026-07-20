@@ -1908,8 +1908,14 @@
     "github_repo": "w3c/N3"
   },
   {
-    "name": "NAV-SPECULATION",
-    "base_url": "https://wicg.github.io/nav-speculation",
+    "name": "NAV-SPECULATION-PREFETCH",
+    "base_url": "https://wicg.github.io/nav-speculation/prefetch.html",
+    "provider": "w3c",
+    "github_repo": "WICG/nav-speculation"
+  },
+  {
+    "name": "NAV-SPECULATION-PRERENDERING",
+    "base_url": "https://wicg.github.io/nav-speculation/prerendering.html",
     "provider": "w3c",
     "github_repo": "WICG/nav-speculation"
   },

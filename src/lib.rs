@@ -261,7 +261,11 @@ pub async fn query_section(
     let base_url = db::queries::get_spec_meta(&conn, &spec_name)?
         .map(|(_, base_url, _)| base_url)
         .unwrap_or_default();
-    let url = format!("{base_url}/#{}", section.anchor);
+    let url = if base_url.ends_with(".html") {
+        format!("{base_url}#{}", section.anchor)
+    } else {
+        format!("{base_url}/#{}", section.anchor)
+    };
 
     Ok(model::QueryResult {
         spec: spec_name.clone(),

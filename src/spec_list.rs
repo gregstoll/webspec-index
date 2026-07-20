@@ -180,6 +180,26 @@ fn collect_standalone(groups_dir: &Path) -> Result<Vec<SpecEntry>> {
             continue;
         }
 
+        let splits: Vec<_> = crate::spec_registry::SPLIT_REPO_SPECS
+            .iter()
+            .filter(|(o, rp, _, _)| o.eq_ignore_ascii_case(owner) && *rp == repo_name)
+            .collect();
+        if !splits.is_empty() {
+            for (split_owner, split_repo, name, path) in splits {
+                entries.push(SpecEntry {
+                    name: name.to_string(),
+                    base_url: crate::spec_registry::split_repo_base_url(
+                        split_owner,
+                        split_repo,
+                        path,
+                    ),
+                    provider: "w3c".to_string(),
+                    github_repo: format!("{owner}/{repo_name}"),
+                });
+            }
+            continue;
+        }
+
         let hp_raw = r
             .get("homepageUrl")
             .and_then(|v| v.as_str())
@@ -345,6 +365,30 @@ mod tests {
         let entries = collect_standalone(dir.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "KEYBOARD-LOCK");
+    }
+
+    #[test]
+    fn test_collect_standalone_splits_nav_speculation() {
+        let repos = serde_json::json!([make_repo(
+            "WICG",
+            "nav-speculation",
+            "https://wicg.github.io/nav-speculation/",
+            &["cg-report"]
+        )]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("repositories.json"), repos.to_string()).unwrap();
+        let entries = collect_standalone(dir.path()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "NAV-SPECULATION-PREFETCH");
+        assert_eq!(
+            entries[0].base_url,
+            "https://wicg.github.io/nav-speculation/prefetch.html"
+        );
+        assert_eq!(entries[1].name, "NAV-SPECULATION-PRERENDERING");
+        assert_eq!(
+            entries[1].base_url,
+            "https://wicg.github.io/nav-speculation/prerendering.html"
+        );
     }
 
     #[test]

@@ -4,6 +4,39 @@ use crate::ietf;
 
 const AUTO_SPEC_PREFIX: &str = "AUTOURL-";
 
+/// One-off repos whose GitHub Pages homepage is just a landing page linking
+/// to the real documents, rather than the spec content itself. Each entry
+/// is (owner, repo, spec_name, path); the path is indexed directly instead
+/// of the homepage.
+///
+/// WICG/nav-speculation publishes two documents (prefetch.html,
+/// prerendering.html) from a single repo whose index.html is a manually
+/// written redirect page (see https://wicg.github.io/nav-speculation/).
+pub const SPLIT_REPO_SPECS: &[(&str, &str, &str, &str)] = &[
+    (
+        "WICG",
+        "nav-speculation",
+        "NAV-SPECULATION-PREFETCH",
+        "prefetch.html",
+    ),
+    (
+        "WICG",
+        "nav-speculation",
+        "NAV-SPECULATION-PRERENDERING",
+        "prerendering.html",
+    ),
+];
+
+/// Build the base URL for a `SPLIT_REPO_SPECS` entry.
+pub fn split_repo_base_url(owner: &str, repo: &str, path: &str) -> String {
+    format!(
+        "https://{}.github.io/{}/{}",
+        owner.to_ascii_lowercase(),
+        repo,
+        path
+    )
+}
+
 const WHATWG_SPECS: &[&str] = &[
     "COMPAT",
     "COMPRESSION",
@@ -237,6 +270,12 @@ fn normalize_spec_token(raw: &str) -> String {
 }
 
 fn derive_spec_name_for_base_url(base_url: &str) -> Option<String> {
+    for (owner, repo, name, path) in SPLIT_REPO_SPECS {
+        if base_url == split_repo_base_url(owner, repo, path) {
+            return Some(name.to_string());
+        }
+    }
+
     let parsed = url::Url::parse(base_url).ok()?;
     let host = parsed.host_str()?.to_ascii_lowercase();
 
@@ -318,8 +357,19 @@ fn auto_base_url_from_url(url: &str) -> Option<(String, String)> {
         host.as_str(),
         "drafts.csswg.org" | "w3c.github.io" | "wicg.github.io" | "webaudio.github.io" | "tc39.es"
     ) {
-        let first = parsed.path_segments()?.find(|seg| !seg.is_empty())?;
-        format!("{scheme}://{host}/{first}")
+        let mut segs = parsed.path_segments()?.filter(|s| !s.is_empty());
+        let first = segs.next()?;
+        let second = segs.next();
+        match second {
+            Some(second)
+                if SPLIT_REPO_SPECS
+                    .iter()
+                    .any(|(_, repo, _, path)| *repo == first && *path == second) =>
+            {
+                format!("{scheme}://{host}/{first}/{second}")
+            }
+            _ => format!("{scheme}://{host}/{first}"),
+        }
     } else if host == "webassembly.github.io" {
         let segs: Vec<&str> = parsed.path_segments()?.filter(|s| !s.is_empty()).collect();
         match segs.as_slice() {
@@ -428,6 +478,23 @@ mod tests {
         let spec = auto_spec_name_for_base_url(base_url);
         assert!(spec.starts_with(AUTO_SPEC_PREFIX));
         assert_eq!(auto_spec_base_url(&spec).as_deref(), Some(base_url));
+    }
+
+    #[test]
+    fn resolve_split_repo_urls() {
+        let registry = SpecRegistry::new();
+
+        let (spec, anchor) = registry
+            .resolve_url("https://wicg.github.io/nav-speculation/prefetch.html#foo")
+            .unwrap();
+        assert_eq!(spec, "NAV-SPECULATION-PREFETCH");
+        assert_eq!(anchor, "foo");
+
+        let (spec, anchor) = registry
+            .resolve_url("https://wicg.github.io/nav-speculation/prerendering.html#bar")
+            .unwrap();
+        assert_eq!(spec, "NAV-SPECULATION-PRERENDERING");
+        assert_eq!(anchor, "bar");
     }
 
     #[test]
