@@ -359,6 +359,17 @@ enum Command {
                     (used with --output-dir to map source paths to analysis paths)"
         )]
         strip_prefix: Option<std::path::PathBuf>,
+
+        #[arg(
+            long,
+            help = "Write the resolved spec-sections map to this path instead of inside \
+                    --output-dir. Use this when --output-dir feeds a consumer (e.g. \
+                    searchfox's analysis-file sweep) that expects every file in that \
+                    directory to be a per-file record stream, since spec-sections.json \
+                    is a single aggregate JSON object, not one of those. \
+                    Requires --output-format=searchfox"
+        )]
+        sections_output: Option<std::path::PathBuf>,
     },
 
     /// List indexed/discovered spec names and base URLs
@@ -707,6 +718,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             output_format,
             output_dir,
             strip_prefix,
+            sections_output,
         } => {
             run_analyze(
                 &path,
@@ -715,6 +727,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 &output_format,
                 output_dir.as_deref(),
                 strip_prefix.as_deref(),
+                sections_output.as_deref(),
             )
             .await?;
             Ok(ExitCode::SUCCESS)
@@ -768,12 +781,15 @@ async fn run_analyze(
     format: &AnalyzeFormat,
     output_dir: Option<&std::path::Path>,
     strip_prefix: Option<&std::path::Path>,
+    sections_output: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     use webspec_index::analyze::file::FileAnalysisView;
     use webspec_index::analyze::searchfox::to_searchfox_records;
 
-    if output_dir.is_some() && !matches!(format, AnalyzeFormat::Searchfox) {
-        anyhow::bail!("--output-dir requires --output-format=searchfox");
+    if (output_dir.is_some() || sections_output.is_some())
+        && !matches!(format, AnalyzeFormat::Searchfox)
+    {
+        anyhow::bail!("--output-dir/--sections-output require --output-format=searchfox");
     }
 
     let run =
@@ -831,10 +847,15 @@ async fn run_analyze(
         files_with_refs += 1;
     }
 
-    if let Some(out_dir) = output_dir {
+    let sections_path = sections_output
+        .map(|p| p.to_path_buf())
+        .or_else(|| output_dir.map(|d| d.join("spec-sections.json")));
+    if let Some(sections_path) = sections_path {
         let sections = &run.resolved_sections;
         if !sections.is_empty() {
-            let sections_path = out_dir.join("spec-sections.json");
+            if let Some(parent) = sections_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             let json = serde_json::to_string(sections)?;
             std::fs::write(&sections_path, json)?;
             eprintln!(
