@@ -3222,6 +3222,7 @@ dependencies = [
  "clap",
  "dashmap 6.1.0",
  "dirs",
+ "euclid",
  "htmd",
  "libc",
  "lopdf",

@@ -258,10 +258,15 @@ pub async fn query_section(
         })
         .collect();
 
-    let base_url = db::queries::get_spec_meta(&conn, &spec_name)?
-        .map(|(_, base_url, _)| base_url)
+    let (base_url, provider) = db::queries::get_spec_meta(&conn, &spec_name)?
+        .map(|(_, base_url, provider)| (base_url, provider))
         .unwrap_or_default();
-    let url = if base_url.ends_with(".html") {
+    let url = if provider == "itu" {
+        // ITU-T Recommendations are single PDFs, not per-anchor HTML pages —
+        // a "#clause" fragment is meaningless on a PDF URL, so the clause
+        // number isn't appended (unlike every other provider's base_url).
+        base_url
+    } else if base_url.ends_with(".html") {
         format!("{base_url}#{}", section.anchor)
     } else {
         format!("{base_url}/#{}", section.anchor)

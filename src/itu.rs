@@ -51,13 +51,18 @@ struct Edition {
 
 fn edition_pattern(name: &str) -> Result<Regex> {
     let escaped = regex::escape(name);
-    let pattern = format!(r"T-REC-{escaped}-(\d{{6}})-([A-Za-z]+)");
+    // Require the `!!PDF-E` marker: the rec.aspx page also links amendments
+    // and corrigenda as `T-REC-<name>-<date>-<status>!Cor1`/`!Amd1` etc.,
+    // which match the bare `T-REC-...-status` prefix too but aren't full
+    // editions with a free PDF at the URL `pdf_url_for` builds — matching
+    // them picks a "latest edition" that 404s instead of the real one.
+    let pattern = format!(r"T-REC-{escaped}-(\d{{6}})-([A-Za-z]+)!!PDF-E");
     Regex::new(&pattern)
         .map_err(|e| anyhow::anyhow!("Invalid ITU-T edition regex for '{}': {}", name, e))
 }
 
-/// Parse every `T-REC-<name>-<YYYYMM>-<STATUS>` occurrence out of a rec.aspx
-/// listing page. `name` must already be canonicalized (uppercase).
+/// Parse every `T-REC-<name>-<YYYYMM>-<STATUS>!!PDF-E` occurrence out of a
+/// rec.aspx listing page. `name` must already be canonicalized (uppercase).
 fn parse_editions(html: &str, name: &str) -> Result<Vec<Edition>> {
     let re = edition_pattern(name)?;
     let mut seen = std::collections::HashSet::new();
@@ -203,6 +208,26 @@ mod discover_tests {
     fn test_parse_editions_no_match_returns_empty() {
         let editions = parse_editions("<html>nothing here</html>", "H.265").unwrap();
         assert!(editions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_editions_ignores_corrigenda_and_amendments() {
+        // Real-world regression: ITU-T T.81's rec.aspx page links its 1992
+        // base edition ("...199209-I!!PDF-E", a real downloadable PDF) and
+        // a later corrigendum ("...200401-I!Cor1", a details page with no
+        // `!!PDF-E` PDF at that URL). Picking the corrigendum as "the
+        // latest I edition" builds a URL that 404s.
+        let html = r#"
+            <a href="/rec/dologin_pub.asp?lang=e&amp;id=T-REC-T.81-199209-I!!PDF-E&amp;type=items">1992</a>
+            <a href="/rec/T-REC-T.81-200401-I!Cor1" title="Download file">here</a>
+        "#;
+        let editions = parse_editions(html, "T.81").unwrap();
+        assert_eq!(
+            editions.len(),
+            1,
+            "the corrigendum-only link must not be picked up as an edition"
+        );
+        assert_eq!(editions[0].date, "199209");
     }
 
     #[test]
