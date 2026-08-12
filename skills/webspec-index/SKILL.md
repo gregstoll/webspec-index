@@ -164,7 +164,6 @@ webspec-index update --force
 
 Fetches latest spec versions. Uses 24h cache unless `--force` is given. Specs are auto-fetched on first query, so you rarely need this.
 Specs are checked on a 24h cadence; re-indexing happens only when fetched HTML content changed.
-Upgrading `webspec-index` drops all indexed data on the next run, since it was produced by the previous parser; specs are then re-fetched lazily as you query them.
 
 ### Graph traversal
 
