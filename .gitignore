@@ -10,7 +10,7 @@ __pycache__
 .venv/
 *.egg-info/
 dist/
-
+docs/superpowers/*
 
 # VSCode extension
 editors/vscode/node_modules
