@@ -113,9 +113,18 @@ add the scenario, the verdict and the rejected-path table.
 
 - Hop links point at the **call site**, not the callee's definition, when the spec generator
   emitted a per-reference id. Keep them — landing the reader on the calling line is the whole
-  point. Roughly a third of hops have no such id, and steps that call nothing never do, so the
-  deciding step of a NOT REACHED verdict usually needs the fallback: canonical anchor plus a
-  `:~:text=` fragment built from text you already quoted, percent-encoded.
+  point. Roughly a third of hops have no such id, and a step that calls nothing never does, so the
+  deciding step of a NOT REACHED verdict usually has none. Link the section and name the step in
+  the visible text instead: ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``.
+  A reader finds a numbered step; they cannot find a link that goes nowhere.
+
+  **Do not build `:~:text=` fragments from quoted step text.** Each parameter of a text directive
+  must match within a single block, and quoted step text is assembled across blocks: substeps and
+  notes are dropped from the middle, condition bullets are separate `<li>`s, and a space is
+  inserted at every block boundary. Such a fragment silently fails to match and drops the reader at
+  the top of the document. A fragment is only safe when the whole quoted string comes from one
+  block — a plain single-sentence step — and even then `-`, `,` and `&` must be percent-encoded or
+  the directive is misparsed.
 - Say explicitly where the chain returns to an earlier algorithm; that unwind is usually where the
   answer lives.
 
