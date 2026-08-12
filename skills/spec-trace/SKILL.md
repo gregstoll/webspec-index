@@ -51,10 +51,10 @@ spec on the first run and nothing afterwards, so a cross-spec trace may pause br
 after two rounds; if the line keeps appearing, the chain reaches further than the search will
 follow and the verdict is INCONCLUSIVE.
 
-Start at `--max-depth 9`. Real chains run longer than they look: `location.assign()` to
-`navigateerror` is seven hops. A depth that is too low reports zero traces, which reads
-exactly like a genuine NOT REACHED and is the easiest way to get this wrong. If you get zero
-traces, raise the depth once before believing it.
+Start at `--max-depth 9`. Real chains run longer than they look — eight or nine hops is ordinary.
+A depth that is too low reports zero traces, which reads exactly like a genuine NOT REACHED and is
+the easiest way to get this wrong. If you get zero traces, raise the depth once before believing
+it.
 
 If the target is reachable only through a different entry point than you assumed, `refs
 '<SPEC#target>' --direction incoming --kind step -l 50` shows who really calls it.
@@ -113,8 +113,9 @@ add the scenario, the verdict and the rejected-path table.
 
 - Hop links point at the **call site**, not the callee's definition, when the spec generator
   emitted a per-reference id. Keep them — landing the reader on the calling line is the whole
-  point. Where a hop has no such link, cite the canonical anchor plus a `:~:text=` fragment built
-  from text you already quoted, percent-encoded.
+  point. Roughly a third of hops have no such id, and steps that call nothing never do, so the
+  deciding step of a NOT REACHED verdict usually needs the fallback: canonical anchor plus a
+  `:~:text=` fragment built from text you already quoted, percent-encoded.
 - Say explicitly where the chain returns to an earlier algorithm; that unwind is usually where the
   answer lives.
 
@@ -151,9 +152,11 @@ promise commit-pinned links.
 
 ## Hard rules
 
-**Every quote comes from tool output.** `trace` and `query` emit verbatim step text; use it as
-given. Never paraphrase, never reconstruct from memory, and never present a truncated fragment as
-a quotation. A trace with an invented quote loses the argument it was written to win.
+**Every quote comes from tool output.** `trace` and `refs` emit plain step text; use it as given.
+`query` renders markdown, so its step text carries `*emphasis*` around variable names and inline
+`[links](...)`. Stripping that syntax to recover the spec's own prose is not paraphrasing; changing
+a word is. Never reconstruct from memory, and never present a truncated fragment as a quotation. A
+trace with an invented quote loses the argument it was written to win.
 
 **Validate every anchor** with `webspec-index exists '<SPEC#anchor>'` before it ships, including
 the ones in the rejected-paths table. Those are the links a reader clicks to push back. Exit code
