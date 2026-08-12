@@ -53,6 +53,17 @@ where
     runtime().block_on(fut).map_err(to_py_err)
 }
 
+fn ref_kind(kind: Option<&str>) -> PyResult<Option<model::RefKind>> {
+    kind.map(|k| {
+        k.parse::<model::RefKind>().map_err(|()| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown reference kind '{k}' (step, note, idl, prose)"
+            ))
+        })
+    })
+    .transpose()
+}
+
 fn pr_opts(pr: Option<i64>, force_update: bool) -> Option<model::PrOpts> {
     pr.map(|pr_number| model::PrOpts {
         pr_number,
@@ -128,14 +139,18 @@ fn list_headings(spec: &str, pr: Option<i64>, force_update: bool) -> PyResult<Ve
 }
 
 /// Get cross-references for ``SPEC#anchor``, a URL, or an ``Interface.member`` shorthand.
+///
+/// ``kind`` restricts results to one reference kind (``step``, ``note``, ``idl``,
+/// ``prose``); ``None`` keeps all kinds.
 #[pyfunction]
-#[pyo3(signature = (target, direction="both", limit=10, pr=None, force_update=false))]
+#[pyo3(signature = (target, direction="both", limit=10, pr=None, force_update=false, kind=None))]
 fn refs(
     target: &str,
     direction: &str,
     limit: u32,
     pr: Option<i64>,
     force_update: bool,
+    kind: Option<&str>,
 ) -> PyResult<RefsResult> {
     let opts = pr_opts(pr, force_update);
     let r = run(webspec_index::find_references(
@@ -143,6 +158,7 @@ fn refs(
         direction,
         limit,
         opts.as_ref(),
+        ref_kind(kind)?,
     ))?;
     Ok((&r).into())
 }
