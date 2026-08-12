@@ -108,14 +108,16 @@ Roughly 60% of references are not calls, so `--kind step` is the difference betw
 ```bash
 webspec-index trace 'HTML#dom-location-assign' 'HTML#event-navigateerror' --max-depth 9 --format markdown
 webspec-index trace 'HTML#navigate' 'DOM#concept-tree' --kind any -l 5
-webspec-index trace 'HTML#dom-location-assign' 'HTML#event-navigateerror' --max-depth 9 --quiet
+webspec-index trace 'HTML#dom-location-assign' 'HTML#event-navigateerror' --detail compact
 ```
 
 Enumerates routes through the reference graph from one section to another. Both endpoints must be exact (`SPEC#anchor` or full URL). Defaults to `--kind step`, so only call edges are traversed.
 
 Each hop reports the calling section, its step number, the verbatim step text, enclosing guard steps, and a link to the call site itself rather than the callee's definition. Markdown output is therefore a ready-made trace.
 
-`--quiet` reduces each hop to `SPEC#anchor` plus its step number, dropping quoted text, guards and call-site URLs — roughly a third the size, and every token is an identifier you can feed back into `query` or `refs`. It is for comparing route shapes, not for judging them: the guards it drops are what decide whether a route is taken.
+`--detail` picks how much of each hop to show. `verbose` (default) carries step text, guards and the call-site link. `edges` reduces each hop to `SPEC#anchor` plus its step number — roughly a third the size, and every token is an identifier you can feed back into `query` or `refs`. `compact` gives one linked line per hop, collapsing an edge's repeated call sites onto it, so an algorithm calling another twelve times reads as one line with twelve links rather than twelve near-identical routes.
+
+Reduced levels are for comparing route shapes, not for judging them: the guards they drop are what decide whether a route is taken.
 
 Use this instead of walking `refs` by hand. It is exhaustive within `--max-depth`, and the result distinguishes a search that finished from one cut short by the trace or node budget — so zero traces with `truncated: false` is evidence that no route exists, not merely that none was found.
 

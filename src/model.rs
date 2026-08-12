@@ -365,11 +365,50 @@ pub struct TraceHop {
     /// when the spec generator emitted a per-reference id for it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_site_url: Option<String>,
+    /// Canonical URL of the calling section itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Trace {
     pub hops: Vec<TraceHop>,
+}
+
+/// How much of each hop a trace should carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceDetail {
+    /// Every hop with its step text, guards and call-site link.
+    Verbose,
+    /// `SPEC#anchor` plus step number, no prose and no URLs. Smallest form, and
+    /// every token is an identifier the other commands accept.
+    Edges,
+    /// One line per hop with links, collapsing an edge's call sites onto that
+    /// line rather than repeating the route once per call site.
+    Compact,
+}
+
+impl TraceDetail {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TraceDetail::Verbose => "verbose",
+            TraceDetail::Edges => "edges",
+            TraceDetail::Compact => "compact",
+        }
+    }
+}
+
+impl std::str::FromStr for TraceDetail {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "verbose" => Ok(TraceDetail::Verbose),
+            "edges" => Ok(TraceDetail::Edges),
+            "compact" => Ok(TraceDetail::Compact),
+            _ => Err(()),
+        }
+    }
 }
 
 /// JSON output for trace command
@@ -387,23 +426,28 @@ pub struct TraceResult {
 }
 
 impl TraceResult {
-    /// Reduce every hop to `SPEC#anchor` plus its step number, dropping step
-    /// text, guards and the call-site URL.
+    /// Drop whatever the requested detail level does not carry.
     ///
-    /// What remains is the tool's own identifier format, so a hop can be fed
-    /// straight back into `query` or `refs`; a call-site URL cannot, since it
-    /// names a link rather than a section. `call_site_id` is kept in JSON for
-    /// callers that want to rebuild the URL.
+    /// `Edges` leaves `SPEC#anchor` plus a step number — the tool's own
+    /// identifier format, so a hop can be fed straight back into `query` or
+    /// `refs`, which a call-site URL cannot since it names a link rather than a
+    /// section. `call_site_id` survives in JSON for callers rebuilding the URL.
     ///
-    /// Useful for comparing route shapes. Not useful for deciding which route a
-    /// scenario takes: the guards are exactly what settles that, and recovering
-    /// them afterwards costs far more than they took to carry.
-    pub fn strip_step_detail(&mut self) {
+    /// Neither reduced level is a cheaper way to judge a route: the guards they
+    /// drop are exactly what settles whether a route is taken, and reading
+    /// sections to recover them costs far more than carrying them did.
+    pub fn apply_detail(&mut self, detail: TraceDetail) {
+        if detail == TraceDetail::Verbose {
+            return;
+        }
         for trace in &mut self.traces {
             for hop in &mut trace.hops {
                 hop.step_text = None;
                 hop.guard_path.clear();
-                hop.call_site_url = None;
+                if detail == TraceDetail::Edges {
+                    hop.call_site_url = None;
+                    hop.url = None;
+                }
             }
         }
     }

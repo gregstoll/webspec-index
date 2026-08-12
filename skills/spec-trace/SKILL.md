@@ -59,11 +59,17 @@ traces, raise the depth once before believing it.
 If the target is reachable only through a different entry point than you assumed, `refs
 '<SPEC#target>' --direction incoming --kind step -l 50` shows who really calls it.
 
-`--quiet` reduces every hop to `SPEC#anchor` plus its step number, dropping quoted text, guards
-and call-site URLs — about a third the size. Use it to compare route shapes when there are many,
-then re-run without it for the routes you intend to judge. Do not judge from `--quiet` output: the
-guards it drops are exactly what decides whether a route is taken, and recovering them by reading
-sections costs far more than it saved.
+`--detail` picks how much of each hop to show:
+
+- `verbose` (default) — step text, guards and call-site link. What you judge from.
+- `edges` — `SPEC#anchor` plus step number, no prose and no URLs. About a third the size, and
+  every token is an identifier `query` and `refs` accept. Use it to compare route shapes when
+  there are many, then re-run verbose on the ones you mean to judge.
+- `compact` — one linked line per hop, with an edge's repeated call sites collapsed onto it. Best
+  for pasting a route into a comment where the reader wants links rather than quotations.
+
+Do not judge from a reduced level: the guards it drops are exactly what decides whether a route is
+taken, and reading sections to recover them costs far more than carrying them did.
 
 ## Phase 2: Judge each route
 

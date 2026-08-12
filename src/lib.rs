@@ -1382,6 +1382,7 @@ impl TraceSearch<'_> {
                 guard_path: edge.guard_path,
                 call_site_id: edge.call_site_id,
                 call_site_url: None,
+                url: None,
             };
 
             if next == self.target {
@@ -1420,20 +1421,22 @@ impl TraceSearch<'_> {
     }
 }
 
-/// Fill in each hop's deep link, looking up each spec's base URL once.
+/// Fill in each hop's canonical and call-site URLs, looking up each spec's base
+/// URL once.
 fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Result<()> {
     let mut meta: HashMap<String, Option<(String, String)>> = HashMap::new();
 
     for path in paths.iter_mut() {
         for hop in path.hops.iter_mut() {
-            let Some(id) = hop.call_site_id.as_deref() else {
-                continue;
-            };
-            if !is_call_site_id(id) {
-                // An alias anchor, not this mention. Drop it rather than link to
-                // something that looks like a call site but is not one.
+            // An alias anchor names its target from anywhere, so it does not
+            // identify this call site. Drop it rather than link to something
+            // that looks like one.
+            if hop
+                .call_site_id
+                .as_deref()
+                .is_some_and(|id| !is_call_site_id(id))
+            {
                 hop.call_site_id = None;
-                continue;
             }
 
             let entry = match meta.entry(hop.spec.clone()) {
@@ -1445,7 +1448,11 @@ fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Resu
                 }
             };
 
-            if let Some((base_url, provider)) = entry {
+            let Some((base_url, provider)) = entry else {
+                continue;
+            };
+            hop.url = Some(anchor_url(base_url, provider, &hop.anchor));
+            if let Some(id) = hop.call_site_id.as_deref() {
                 hop.call_site_url = Some(anchor_url(base_url, provider, id));
             }
         }

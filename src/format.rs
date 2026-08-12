@@ -2,11 +2,13 @@
 
 use crate::model::{
     AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PrDiffResult, QueryResult,
-    RefEntry, RefsResult, SearchResult, TraceResult,
+    RefEntry, RefsResult, SearchResult, TraceDetail, TraceHop, TraceResult,
 };
 
 #[cfg(test)]
 use crate::model::{AnchorEntry, SearchEntry};
+
+use std::collections::HashMap;
 
 /// Format a QueryResult as markdown
 pub fn query(result: &QueryResult) -> String {
@@ -256,7 +258,117 @@ pub fn refs(result: &RefsResult) -> String {
 
 /// Format a TraceResult as markdown: one numbered chain per route, each hop
 /// quoting the step that makes the call.
-pub fn trace(result: &TraceResult) -> String {
+pub fn trace(result: &TraceResult, detail: TraceDetail) -> String {
+    if detail == TraceDetail::Compact {
+        return trace_compact(result);
+    }
+    trace_verbose(result)
+}
+
+/// Step numbers sort by segment, so 27.2 precedes 27.10 and both precede 28.
+fn step_order(step: Option<&str>) -> Vec<u32> {
+    step.unwrap_or_default()
+        .split('.')
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
+/// Position of a call site within its section, from the spec generator's own
+/// per-reference numbering: `section:target` is the first, `-2` the second and
+/// so on. This is document order by construction, which step numbers only
+/// approximate — a link in a late substep can carry its parent's step number.
+fn call_site_order(id: Option<&str>) -> Option<u32> {
+    let id = id?;
+    match id.rsplit_once('-') {
+        Some((_, suffix)) => suffix.parse().ok().or(Some(1)),
+        None => Some(1),
+    }
+}
+
+fn link(text: &str, url: Option<&str>) -> String {
+    match url {
+        Some(url) => format!("[{text}]({url})"),
+        None => format!("`{text}`"),
+    }
+}
+
+/// One line per hop, with every call site of an edge collapsed onto that line.
+///
+/// The search enumerates a separate route per call site, so an algorithm calling
+/// another twelve times yields twelve routes identical but for one link. Grouping
+/// by the anchor sequence puts them back together. That is lossless: which edge
+/// reached a section does not constrain how the route continues from it, so the
+/// call sites listed per hop recombine to exactly the routes found.
+fn trace_compact(result: &TraceResult) -> String {
+    let mut md = String::new();
+    md.push_str(&format!("Spec trace: {} → {}\n\n", result.from, result.to));
+
+    if result.traces.is_empty() {
+        md.push_str(if result.truncated {
+            "No route found before the search budget ran out.\n"
+        } else {
+            "No route exists within these bounds.\n"
+        });
+        return md;
+    }
+
+    // Group routes by the sections they pass through, keeping first-seen order.
+    let mut order: Vec<Vec<(String, String)>> = Vec::new();
+    let mut grouped: HashMap<Vec<(String, String)>, Vec<&Vec<TraceHop>>> = HashMap::new();
+    for route in &result.traces {
+        let key: Vec<(String, String)> = route
+            .hops
+            .iter()
+            .map(|h| (h.anchor.clone(), h.to_anchor.clone()))
+            .collect();
+        if !grouped.contains_key(&key) {
+            order.push(key.clone());
+        }
+        grouped.entry(key).or_default().push(&route.hops);
+    }
+
+    for (index, key) in order.iter().enumerate() {
+        let routes = &grouped[key];
+        if order.len() > 1 {
+            md.push_str(&format!("## Route {}\n\n", index + 1));
+        }
+
+        for position in 0..key.len() {
+            // Every call site seen at this position, in document order.
+            let mut sites: Vec<&TraceHop> = routes.iter().map(|hops| &hops[position]).collect();
+            sites.sort_by_key(|hop| {
+                (
+                    call_site_order(hop.call_site_id.as_deref()),
+                    step_order(hop.step_path.as_deref()),
+                )
+            });
+            sites.dedup_by(|a, b| a.call_site_id == b.call_site_id && a.step_path == b.step_path);
+
+            let first = sites[0];
+            let mut line = format!(
+                "{}. {} calls {}",
+                position + 1,
+                link(&format!("#{}", first.anchor), first.url.as_deref()),
+                link(
+                    &format!("#{}", first.to_anchor),
+                    first.call_site_url.as_deref()
+                )
+            );
+            for (n, hop) in sites.iter().enumerate().skip(1) {
+                line.push_str(&format!(
+                    ", {}",
+                    link(&format!("[{}]", n + 1), hop.call_site_url.as_deref())
+                ));
+            }
+            md.push_str(&line);
+            md.push_str("\n\n");
+        }
+    }
+
+    md
+}
+
+fn trace_verbose(result: &TraceResult) -> String {
     let mut md = String::new();
     md.push_str(&format!(
         "# trace: `{}` -> `{}`\n\n",
@@ -804,17 +916,115 @@ mod tests {
                     guard_path: vec!["In parallel, run these steps:".to_string()],
                     call_site_id: None,
                     call_site_url: None,
+                    url: None,
                 }],
             }],
             truncated: false,
         };
 
-        let md = trace(&result);
+        let md = trace(&result, TraceDetail::Verbose);
         assert!(md.contains("# trace: `HTML#assign` -> `HTML#checking`"));
         assert!(md.contains("1) `HTML#navigate` step 24.1 calls `HTML#checking`"));
         assert!(md.contains("   - under: In parallel, run these steps:"));
         assert!(md.contains("   > Let unloadPromptCanceled be the result."));
         assert!(!md.contains("truncated"));
+    }
+
+    #[test]
+    fn test_compact_collapses_repeated_call_sites_onto_one_line() {
+        use crate::model::{Trace, TraceHop};
+
+        // An algorithm calling another three times is three routes differing only
+        // in which link was followed. Compact puts them back together.
+        let hop = |step: &str, site: u32| TraceHop {
+            spec: "HTML".to_string(),
+            anchor: "update-the-image-data".to_string(),
+            to_spec: "HTML".to_string(),
+            to_anchor: "abort-the-image-request".to_string(),
+            step_path: Some(step.to_string()),
+            step_text: None,
+            guard_path: vec![],
+            call_site_id: Some(format!("updating:abort-{site}")),
+            call_site_url: Some(format!(
+                "https://html.spec.whatwg.org/#updating:abort-{site}"
+            )),
+            url: Some("https://html.spec.whatwg.org/#update-the-image-data".to_string()),
+        };
+
+        let result = TraceResult {
+            from: "HTML#update-the-image-data".to_string(),
+            to: "HTML#abort-the-image-request".to_string(),
+            max_depth: 2,
+            kind: Some("step".to_string()),
+            // Deliberately out of order: 27.10 must not sort before 7.4.2.
+            traces: vec![
+                Trace {
+                    hops: vec![hop("27.10", 3)],
+                },
+                Trace {
+                    hops: vec![hop("2", 1)],
+                },
+                Trace {
+                    hops: vec![hop("7.4.2", 2)],
+                },
+            ],
+            truncated: false,
+        };
+
+        let md = trace(&result, TraceDetail::Compact);
+
+        assert!(
+            md.starts_with("Spec trace: HTML#update-the-image-data → HTML#abort-the-image-request")
+        );
+        assert_eq!(
+            md.matches("1. ").count(),
+            1,
+            "three routes collapse to one hop line: {md}"
+        );
+        assert!(
+            md.contains(
+                "1. [#update-the-image-data](https://html.spec.whatwg.org/#update-the-image-data) calls [#abort-the-image-request](https://html.spec.whatwg.org/#updating:abort-1), [[2]](https://html.spec.whatwg.org/#updating:abort-2), [[3]](https://html.spec.whatwg.org/#updating:abort-3)"
+            ),
+            "call sites list in document order, the first on the callee name: {md}"
+        );
+    }
+
+    #[test]
+    fn test_compact_keeps_distinct_routes_apart() {
+        use crate::model::{Trace, TraceHop};
+
+        let hop = |anchor: &str, to: &str| TraceHop {
+            spec: "HTML".to_string(),
+            anchor: anchor.to_string(),
+            to_spec: "HTML".to_string(),
+            to_anchor: to.to_string(),
+            step_path: Some("1".to_string()),
+            step_text: None,
+            guard_path: vec![],
+            call_site_id: None,
+            call_site_url: None,
+            url: None,
+        };
+
+        let result = TraceResult {
+            from: "HTML#a".to_string(),
+            to: "HTML#z".to_string(),
+            max_depth: 3,
+            kind: Some("step".to_string()),
+            traces: vec![
+                Trace {
+                    hops: vec![hop("a", "b"), hop("b", "z")],
+                },
+                Trace {
+                    hops: vec![hop("a", "c"), hop("c", "z")],
+                },
+            ],
+            truncated: false,
+        };
+
+        let md = trace(&result, TraceDetail::Compact);
+        assert!(md.contains("## Route 1") && md.contains("## Route 2"));
+        assert!(md.contains("#b") && md.contains("#c"));
     }
 
     #[test]
@@ -839,13 +1049,14 @@ mod tests {
                     call_site_url: Some(
                         "https://html.spec.whatwg.org/#beginning-navigation:checking-2".to_string(),
                     ),
+                    url: None,
                 }],
             }],
             truncated: false,
         };
 
-        result.strip_step_detail();
-        let md = trace(&result);
+        result.apply_detail(TraceDetail::Edges);
+        let md = trace(&result, TraceDetail::Edges);
 
         assert!(
             md.contains("1) `HTML#navigate` step 24.1 calls `HTML#checking`"),
@@ -884,12 +1095,13 @@ mod tests {
                     call_site_url: Some(
                         "https://html.spec.whatwg.org/#beginning-navigation:checking-2".to_string(),
                     ),
+                    url: None,
                 }],
             }],
             truncated: false,
         };
 
-        let md = trace(&result);
+        let md = trace(&result, TraceDetail::Verbose);
         assert!(
             md.contains(
                 "1) [`HTML#navigate` step 24.1](https://html.spec.whatwg.org/#beginning-navigation:checking-2) calls `HTML#checking`"
@@ -908,13 +1120,15 @@ mod tests {
             traces: vec![],
             truncated: false,
         };
-        assert!(trace(&empty).contains("No route exists within these bounds."));
+        assert!(
+            trace(&empty, TraceDetail::Verbose).contains("No route exists within these bounds.")
+        );
 
         let cut_short = TraceResult {
             truncated: true,
             ..empty
         };
-        assert!(trace(&cut_short).contains("budget ran out"));
+        assert!(trace(&cut_short, TraceDetail::Verbose).contains("budget ran out"));
     }
 
     #[test]

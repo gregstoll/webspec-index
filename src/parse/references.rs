@@ -66,14 +66,18 @@ pub fn extract_references(
 
                         let ctx = link_context(&elem);
 
-                        // Deduplicate by call site: the same target linked twice in
-                        // one step is one call, but the same target reached from two
-                        // different steps is two distinct call sites.
+                        // Deduplicate by call site. Step number alone is too coarse:
+                        // a switch renders as a <dl> inside one step, so branches
+                        // that each call the same algorithm share a step number
+                        // while being distinct calls. The generator's per-reference
+                        // id separates them where it exists.
+                        let call_site_id = elem.value().attr("id").map(str::to_string);
                         let key = (
                             section.clone(),
                             to_spec.clone(),
                             to_anchor.clone(),
                             ctx.step_path.clone(),
+                            call_site_id.clone(),
                         );
                         if seen.insert(key) {
                             references.push(ParsedReference {
@@ -83,7 +87,7 @@ pub fn extract_references(
                                 step_path: ctx.step_path,
                                 step_text: ctx.step_text,
                                 guard_path: ctx.guard_path,
-                                call_site_id: elem.value().attr("id").map(str::to_string),
+                                call_site_id,
                                 kind: ctx.kind,
                             });
                         }
@@ -1061,6 +1065,41 @@ mod tests {
             vec!["1".to_string(), "2".to_string()],
             "distinct call sites must survive deduplication"
         );
+    }
+
+    #[test]
+    fn test_switch_branches_calling_the_same_target_are_distinct_call_sites() {
+        // A switch lives inside one step, so its branches share a step number.
+        // They are still separate calls, and the generator's per-reference ids
+        // say so — collapsing them loses a call site from the trace.
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Switch on state:</p>
+                    <dl class="switch">
+                        <dt>"broken"</dt>
+                        <dd><p><a id="navigate:abort-3" href="#abort">Abort</a> the request.</p></dd>
+                        <dt>Otherwise</dt>
+                        <dd><p><a id="navigate:abort-4" href="#abort">Abort</a> it too.</p></dd>
+                    </dl>
+                </li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        let mut ids: Vec<&str> = refs
+            .iter()
+            .filter(|r| r.to_anchor == "abort")
+            .filter_map(|r| r.call_site_id.as_deref())
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec!["navigate:abort-3", "navigate:abort-4"]);
     }
 
     #[test]

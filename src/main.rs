@@ -227,9 +227,13 @@ enum Command {
         the markdown output is a ready-made trace.\n\n\
         Defaults to --kind step, i.e. algorithm calls only. Pass --kind any to include\n\
         prose mentions, IDL blocks and notes.\n\n\
-        Use --quiet for route shapes only: one linked line per hop, no step text or\n\
-        guards. Good for picking which route to look at, not for judging one — the\n\
-        guards are what decide whether a route is taken.\n\n\
+        --detail picks how much of each hop to show:\n  \
+        verbose (default) — step text, guards and call-site link, ready to paste\n  \
+        edges             — SPEC#anchor plus step number, no prose and no URLs\n  \
+        compact           — one linked line per hop, an edge's repeated call sites\n                      \
+        collapsed onto it\n\n\
+        Reduced levels are for comparing route shapes, not for judging one: the\n\
+        guards they drop are what decide whether a route is taken.\n\n\
         Examples:\n  \
         webspec-index trace HTML#dom-location-assign HTML#event-navigateerror\n  \
         webspec-index trace HTML#navigate DOM#concept-tree --max-depth 4 --format markdown\n  \
@@ -258,9 +262,10 @@ enum Command {
         #[arg(
             long,
             short,
-            help = "Omit step text and guards, leaving just the linked call chain"
+            default_value = "verbose",
+            help = "How much of each hop to show: verbose, edges, or compact"
         )]
-        quiet: bool,
+        detail: String,
     },
 
     /// Build a cross-reference graph rooted at a section
@@ -499,7 +504,7 @@ exists <SPEC#anchor|URL> [--pr N] exit:0=found,1=not
 anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
 list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
-trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-q quiet] [--format json|markdown]
+trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-d verbose(default)|edges|compact] [--format json|markdown]
 update [-s SPEC] [-f force]
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
@@ -512,7 +517,7 @@ Full URL also works: https://html.spec.whatwg.org/#navigate
 --pr N: query against a PR preview (WHATWG specs or TC39 proposals); --diff: show diff vs merge base (requires --pr; #anchor optional with --diff)
 Ex: query HTML#navigate|search "tree order" -s DOM|anchors "*-tree" -s DOM
 Ex: refs HTML#navigate -d incoming|refs Window.navigation|graph HTML#navigate --graph-format mermaid
-Ex: trace HTML#dom-location-assign HTML#event-navigateerror --format markdown|trace A B -q
+Ex: trace HTML#dom-location-assign HTML#event-navigateerror --format markdown|trace A B -d compact
 Ex: idl Window.navigation|idl Window.open()|idl HTML#dom-window-navigation
 Ex: query HTML#navigate --pr 1234|query HTML --pr 1234 --diff|query proposal-defer-import-eval --pr 85 --diff
 "#
@@ -690,18 +695,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             max_depth,
             kind,
             limit,
-            quiet,
+            detail,
         } => {
             let kind = if kind.eq_ignore_ascii_case("any") {
                 None
             } else {
                 parse_ref_kind(Some(&kind))?
             };
+            let detail = detail.parse::<model::TraceDetail>().map_err(|_| {
+                anyhow::anyhow!("unknown detail '{detail}' (verbose, edges, compact)")
+            })?;
             let mut result = webspec_index::find_traces(&from, &to, max_depth, kind, limit).await?;
-            if quiet {
-                result.strip_step_detail();
-            }
-            print_output(&cli.format, &result, format::trace);
+            result.apply_detail(detail);
+            print_output(&cli.format, &result, |r| format::trace(r, detail));
             Ok(ExitCode::SUCCESS)
         }
 
