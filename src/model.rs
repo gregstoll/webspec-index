@@ -384,6 +384,11 @@ pub struct PathsResult {
     /// True when the search hit its path or node budget, so absence of a path is
     /// not proof that none exists.
     pub truncated: bool,
+    /// Specs still holding references indexed before reference kinds existed.
+    /// A `kind`-filtered search cannot see through them, so a path crossing one
+    /// may be missing. Empty once every spec involved has been re-indexed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stale_specs: Vec<String>,
 }
 
 /// JSON output for idl command

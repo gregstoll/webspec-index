@@ -278,6 +278,28 @@ pub fn paths(result: &PathsResult) -> String {
         }
     ));
 
+    if !result.stale_specs.is_empty() {
+        let shown: Vec<&str> = result
+            .stale_specs
+            .iter()
+            .take(8)
+            .map(String::as_str)
+            .collect();
+        md.push_str(&format!(
+            "Warning: {} spec(s) still hold references indexed before reference kinds \
+             existed and are invisible to this filter, so a path crossing one would be \
+             missed: {}{}. Run `webspec-index update --force` to re-index, or pass \
+             `--kind any`.\n\n",
+            result.stale_specs.len(),
+            shown.join(", "),
+            if result.stale_specs.len() > shown.len() {
+                ", …"
+            } else {
+                ""
+            }
+        ));
+    }
+
     if result.paths.is_empty() {
         md.push_str(if result.truncated {
             "No path found before the search budget ran out.\n"
@@ -807,6 +829,7 @@ mod tests {
                 }],
             }],
             truncated: false,
+            stale_specs: vec![],
         };
 
         let md = paths(&result);
@@ -842,6 +865,7 @@ mod tests {
                 }],
             }],
             truncated: false,
+            stale_specs: vec![],
         };
 
         let md = paths(&result);
@@ -862,6 +886,7 @@ mod tests {
             kind: None,
             paths: vec![],
             truncated: false,
+            stale_specs: vec![],
         };
         assert!(paths(&empty).contains("No path exists within these bounds."));
 
