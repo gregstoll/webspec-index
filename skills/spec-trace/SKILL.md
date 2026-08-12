@@ -118,13 +118,12 @@ add the scenario, the verdict and the rejected-path table.
   the visible text instead: ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``.
   A reader finds a numbered step; they cannot find a link that goes nowhere.
 
-  **Do not build `:~:text=` fragments from quoted step text.** Each parameter of a text directive
-  must match within a single block, and quoted step text is assembled across blocks: substeps and
-  notes are dropped from the middle, condition bullets are separate `<li>`s, and a space is
-  inserted at every block boundary. Such a fragment silently fails to match and drops the reader at
-  the top of the document. A fragment is only safe when the whole quoted string comes from one
-  block — a plain single-sentence step — and even then `-`, `,` and `&` must be percent-encoded or
-  the directive is misparsed.
+  **Never use `:~:text=` fragments.** A text directive matches rendered prose, which no tool here
+  can verify and which the spec editors change without notice; when it stops matching it fails
+  silently, dropping the reader at the top of the document with nothing to indicate the link was
+  meant to point somewhere. A section anchor plus a step number in the visible text degrades
+  instead: if the step moves, the reader is still on the right algorithm and can see which step was
+  meant.
 - Say explicitly where the chain returns to an earlier algorithm; that unwind is usually where the
   answer lives.
 
