@@ -75,12 +75,15 @@ fn sync_from_html(
     previous_snapshot_id: Option<i64>,
     state: Option<queries::UpdateCheckState>,
     now: &DateTime<Utc>,
+    force: bool,
 ) -> Result<(i64, bool)> {
     let content_hash = hash_html(&html);
 
     if let (Some(snapshot_id), Some(state)) = (previous_snapshot_id, state.as_ref()) {
         let content_unchanged = state.content_hash.as_deref() == Some(content_hash.as_str());
-        if content_unchanged && index_is_current(state) {
+        // A forced refresh exists to rebuild a suspect index, so it must reach
+        // the parser even when the bytes and the index version both match.
+        if !force && content_unchanged && index_is_current(state) {
             store_update_check(
                 conn,
                 spec_id,
@@ -272,6 +275,7 @@ fn apply_fetch(
             previous_snapshot_id,
             state,
             now,
+            force,
         ),
     }
 }
@@ -484,6 +488,7 @@ mod tests {
             None,
             None,
             &now,
+            false,
         )
         .unwrap();
         assert!(updated1, "first index should parse");
@@ -505,6 +510,7 @@ mod tests {
             Some(snap1),
             state,
             &now,
+            false,
         )
         .unwrap();
         assert!(!updated2, "unchanged content + current parser should skip");
@@ -524,11 +530,72 @@ mod tests {
             Some(snap2),
             Some(stale),
             &now,
+            false,
         )
         .unwrap();
         assert!(
             updated3,
             "index version change should force re-parse despite unchanged content"
+        );
+    }
+
+    // --force is the escape hatch for a suspected bad index, so it has to reach
+    // the parse. Re-fetching and then skipping the parse because the bytes match
+    // leaves exactly the state the user was trying to rebuild.
+    #[test]
+    fn test_force_reparses_unchanged_content() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "TEST", "https://example.test", "test").unwrap();
+        let html = "<h2 id=\"intro\">Intro</h2>".to_string();
+        let now = fixed_now();
+
+        let (snap1, _) = sync_from_html(
+            &conn,
+            spec_id,
+            "TEST",
+            "https://example.test",
+            "test",
+            html.clone(),
+            None,
+            None,
+            &now,
+            false,
+        )
+        .unwrap();
+
+        let state = queries::get_update_check(&conn, spec_id).unwrap();
+        let (_, updated_unforced) = sync_from_html(
+            &conn,
+            spec_id,
+            "TEST",
+            "https://example.test",
+            "test",
+            html.clone(),
+            Some(snap1),
+            state.clone(),
+            &now,
+            false,
+        )
+        .unwrap();
+        assert!(!updated_unforced, "unforced sync still skips");
+
+        let (_, updated_forced) = sync_from_html(
+            &conn,
+            spec_id,
+            "TEST",
+            "https://example.test",
+            "test",
+            html,
+            Some(snap1),
+            state,
+            &now,
+            true,
+        )
+        .unwrap();
+        assert!(
+            updated_forced,
+            "--force must re-parse even when content and index version are unchanged"
         );
     }
 }

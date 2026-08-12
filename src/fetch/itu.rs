@@ -37,12 +37,17 @@ fn sync_from_pdf(
     previous_snapshot_id: Option<i64>,
     state: Option<queries::UpdateCheckState>,
     now: &DateTime<Utc>,
+    force: bool,
 ) -> Result<(i64, bool)> {
     let content_hash = super::hash_bytes(&bytes);
 
     if let (Some(snapshot_id), Some(state)) = (previous_snapshot_id, state.as_ref()) {
         let content_unchanged = state.content_hash.as_deref() == Some(content_hash.as_str());
-        if content_unchanged && state.index_version.as_deref() == Some(parse::INDEX_VERSION) {
+        // As in the HTML path, a forced refresh must reach the parser.
+        if !force
+            && content_unchanged
+            && state.index_version.as_deref() == Some(parse::INDEX_VERSION)
+        {
             let checked = now.to_rfc3339();
             let indexed = state.last_indexed.as_ref().map(|t| t.to_rfc3339());
             write::record_update_check(
@@ -113,6 +118,7 @@ pub async fn sync_known_spec_pdf(
             previous_snapshot_id,
             state,
             &now,
+            force,
         ),
         Err(e) => match previous_snapshot_id {
             Some(snapshot_id) if allow_fallback && !force => Ok((snapshot_id, false)),
@@ -207,6 +213,7 @@ mod tests {
             None,
             None,
             &now,
+            false,
         )
         .unwrap();
         assert!(updated);
@@ -235,6 +242,7 @@ mod tests {
             None,
             None,
             &now,
+            false,
         )
         .unwrap();
 
@@ -248,6 +256,7 @@ mod tests {
             Some(snap1),
             state,
             &now,
+            false,
         )
         .unwrap();
         assert!(
