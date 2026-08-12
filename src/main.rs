@@ -219,19 +219,23 @@ enum Command {
         kind: Option<String>,
     },
 
-    /// Trace reference paths from one section to another
+    /// Trace the algorithm call chain from one section to another
     #[command(
-        long_about = "Enumerate paths through the reference graph from one section to another.\n\n\
+        long_about = "Trace routes through the reference graph from one section to another.\n\n\
         Both endpoints must be exact (SPEC#anchor or full URL). Each hop reports the\n\
         step that makes the call, the step's text, and any enclosing guard steps, so\n\
         the markdown output is a ready-made trace.\n\n\
         Defaults to --kind step, i.e. algorithm calls only. Pass --kind any to include\n\
         prose mentions, IDL blocks and notes.\n\n\
+        Use --quiet for route shapes only: one linked line per hop, no step text or\n\
+        guards. Good for picking which route to look at, not for judging one — the\n\
+        guards are what decide whether a route is taken.\n\n\
         Examples:\n  \
-        webspec-index paths HTML#dom-location-assign HTML#event-navigateerror\n  \
-        webspec-index paths HTML#navigate DOM#concept-tree --max-depth 4 --format markdown"
+        webspec-index trace HTML#dom-location-assign HTML#event-navigateerror\n  \
+        webspec-index trace HTML#navigate DOM#concept-tree --max-depth 4 --format markdown\n  \
+        webspec-index trace HTML#dom-location-assign HTML#event-navigateerror --quiet"
     )]
-    Paths {
+    Trace {
         /// Starting section: SPEC#anchor or full URL
         from: String,
 
@@ -248,8 +252,15 @@ enum Command {
         )]
         kind: String,
 
-        #[arg(long, short, default_value = "20", help = "Maximum number of paths")]
+        #[arg(long, short, default_value = "20", help = "Maximum number of traces")]
         limit: usize,
+
+        #[arg(
+            long,
+            short,
+            help = "Omit step text and guards, leaving just the linked call chain"
+        )]
+        quiet: bool,
     },
 
     /// Build a cross-reference graph rooted at a section
@@ -488,7 +499,7 @@ exists <SPEC#anchor|URL> [--pr N] exit:0=found,1=not
 anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
 list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
-paths <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [--format json|markdown]
+trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-q quiet] [--format json|markdown]
 update [-s SPEC] [-f force]
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
@@ -501,7 +512,7 @@ Full URL also works: https://html.spec.whatwg.org/#navigate
 --pr N: query against a PR preview (WHATWG specs or TC39 proposals); --diff: show diff vs merge base (requires --pr; #anchor optional with --diff)
 Ex: query HTML#navigate|search "tree order" -s DOM|anchors "*-tree" -s DOM
 Ex: refs HTML#navigate -d incoming|refs Window.navigation|graph HTML#navigate --graph-format mermaid
-Ex: paths HTML#dom-location-assign HTML#event-navigateerror --format markdown
+Ex: trace HTML#dom-location-assign HTML#event-navigateerror --format markdown|trace A B -q
 Ex: idl Window.navigation|idl Window.open()|idl HTML#dom-window-navigation
 Ex: query HTML#navigate --pr 1234|query HTML --pr 1234 --diff|query proposal-defer-import-eval --pr 85 --diff
 "#
@@ -673,20 +684,24 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
-        Command::Paths {
+        Command::Trace {
             from,
             to,
             max_depth,
             kind,
             limit,
+            quiet,
         } => {
             let kind = if kind.eq_ignore_ascii_case("any") {
                 None
             } else {
                 parse_ref_kind(Some(&kind))?
             };
-            let result = webspec_index::find_paths(&from, &to, max_depth, kind, limit).await?;
-            print_output(&cli.format, &result, format::paths);
+            let mut result = webspec_index::find_traces(&from, &to, max_depth, kind, limit).await?;
+            if quiet {
+                result.strip_step_detail();
+            }
+            print_output(&cli.format, &result, format::trace);
             Ok(ExitCode::SUCCESS)
         }
 

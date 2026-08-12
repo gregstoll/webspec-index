@@ -110,9 +110,12 @@ When refreshed, the CLI fetches live HTML and re-indexes only if content changed
 
 ## AI Agent Integration
 
-### Skill file
+### Skill files
 
-Drop [SKILL.md](SKILL.md) into your repo to teach the agent how to use the CLI.
+Drop [skills/webspec-index/](skills/webspec-index/SKILL.md) into your repo to teach the agent how to use the CLI.
+
+[skills/spec-trace/](skills/spec-trace/SKILL.md) builds on it: given a question about what a spec
+specifies, it traces the algorithm call chain with `paths` and produces a reviewable verdict.
 
 ## Editor Integration
 

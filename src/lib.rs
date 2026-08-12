@@ -1283,7 +1283,7 @@ fn is_call_site_id(id: &str) -> bool {
 /// Ceiling on how many nodes the forward search may expand before giving up.
 /// Reaching it makes the result `truncated`, so callers never read "no path" as
 /// proof when the search was cut short.
-const PATH_NODE_BUDGET: usize = 20_000;
+const TRACE_NODE_BUDGET: usize = 20_000;
 
 /// Distance from each node to `target` following references backwards, for nodes
 /// within `max_depth`. This is the pruning set that keeps the forward search from
@@ -1319,16 +1319,16 @@ fn distances_to_target(
 }
 
 /// State for one path search. Bundled so the recursive walk stays readable.
-struct PathSearch<'a> {
+struct TraceSearch<'a> {
     conn: &'a Connection,
     target: (String, String),
     dist: HashMap<(String, String), usize>,
     max_depth: usize,
-    max_paths: usize,
+    max_traces: usize,
     kind: Option<model::RefKind>,
-    stack: Vec<model::PathHop>,
+    stack: Vec<model::TraceHop>,
     on_path: HashSet<(String, String)>,
-    paths: Vec<model::SpecPath>,
+    traces: Vec<model::Trace>,
     expansions: usize,
     truncated: bool,
     /// Specs the forward walk expanded, for reporting which of them the index
@@ -1336,7 +1336,7 @@ struct PathSearch<'a> {
     visited_specs: HashSet<String>,
 }
 
-impl PathSearch<'_> {
+impl TraceSearch<'_> {
     /// Depth-first over call edges, pruned to nodes that can still reach the
     /// target within the remaining budget.
     fn walk(&mut self, node: (String, String), depth: usize) -> Result<()> {
@@ -1347,7 +1347,7 @@ impl PathSearch<'_> {
         self.visited_specs.insert(node.0.clone());
 
         self.expansions += 1;
-        if self.expansions > PATH_NODE_BUDGET {
+        if self.expansions > TRACE_NODE_BUDGET {
             self.truncated = true;
             return Ok(());
         }
@@ -1358,7 +1358,7 @@ impl PathSearch<'_> {
             // hidden is never expanded, so an edge pointing into it is the only
             // evidence the search ever came near it.
             self.visited_specs.insert(next.0.clone());
-            let hop = model::PathHop {
+            let hop = model::TraceHop {
                 spec: node.0.clone(),
                 anchor: node.1.clone(),
                 to_spec: edge.spec,
@@ -1372,11 +1372,11 @@ impl PathSearch<'_> {
 
             if next == self.target {
                 self.stack.push(hop);
-                self.paths.push(model::SpecPath {
+                self.traces.push(model::Trace {
                     hops: self.stack.clone(),
                 });
                 self.stack.pop();
-                if self.paths.len() >= self.max_paths {
+                if self.traces.len() >= self.max_traces {
                     self.truncated = true;
                     return Ok(());
                 }
@@ -1407,7 +1407,7 @@ impl PathSearch<'_> {
 }
 
 /// Fill in each hop's deep link, looking up each spec's base URL once.
-fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::SpecPath]) -> Result<()> {
+fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Result<()> {
     let mut meta: HashMap<String, Option<(String, String)>> = HashMap::new();
 
     for path in paths.iter_mut() {
@@ -1440,24 +1440,24 @@ fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::SpecPath]) -> R
     Ok(())
 }
 
-fn find_paths_from_conn(
+fn find_traces_from_conn(
     conn: &Connection,
     from: (String, String),
     to: (String, String),
     max_depth: usize,
     kind: Option<model::RefKind>,
-    max_paths: usize,
-) -> Result<model::PathsResult> {
-    let mut search = PathSearch {
+    max_traces: usize,
+) -> Result<model::TraceResult> {
+    let mut search = TraceSearch {
         conn,
         dist: distances_to_target(conn, &to, max_depth, kind)?,
         target: to.clone(),
         max_depth,
-        max_paths,
+        max_traces,
         kind,
         stack: Vec::new(),
         on_path: HashSet::from([from.clone()]),
-        paths: Vec::new(),
+        traces: Vec::new(),
         expansions: 0,
         truncated: false,
         visited_specs: HashSet::new(),
@@ -1473,7 +1473,7 @@ fn find_paths_from_conn(
     touched.insert(from.0.clone());
     touched.insert(to.0.clone());
 
-    let mut paths = search.paths;
+    let mut paths = search.traces;
     paths.sort_by_key(|p| p.hops.len());
     resolve_call_site_urls(conn, &mut paths)?;
 
@@ -1492,12 +1492,12 @@ fn find_paths_from_conn(
         Vec::new()
     };
 
-    Ok(model::PathsResult {
+    Ok(model::TraceResult {
         from: format!("{}#{}", from.0, from.1),
         to: format!("{}#{}", to.0, to.1),
         max_depth,
         kind: kind.map(|k| k.as_str().to_string()),
-        paths,
+        traces: paths,
         truncated: search.truncated,
         stale_specs,
     })
@@ -1739,13 +1739,13 @@ pub async fn query_idl(
 ///
 /// Both endpoints must be exact (`SPEC#anchor` or a full URL); this traces a
 /// known route rather than guessing what the caller meant.
-pub async fn find_paths(
+pub async fn find_traces(
     from: &str,
     to: &str,
     max_depth: usize,
     kind: Option<model::RefKind>,
-    max_paths: usize,
-) -> Result<model::PathsResult> {
+    max_traces: usize,
+) -> Result<model::TraceResult> {
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
 
@@ -1763,13 +1763,13 @@ pub async fn find_paths(
     let to_endpoint = endpoints.pop().expect("two endpoints");
     let from_endpoint = endpoints.pop().expect("two endpoints");
 
-    find_paths_from_conn(
+    find_traces_from_conn(
         &conn,
         from_endpoint,
         to_endpoint,
         max_depth,
         kind,
-        max_paths,
+        max_traces,
     )
 }
 
@@ -2063,7 +2063,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_resolve_call_site_urls_and_drop_alias_anchors() {
+    fn trace_resolve_call_site_urls_and_drop_alias_anchors() {
         use model::{ParsedReference, RefKind};
 
         let conn = setup_call_chain_db();
@@ -2088,7 +2088,7 @@ mod tests {
         )
         .unwrap();
 
-        let linked = find_paths_from_conn(
+        let linked = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "linked".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2098,11 +2098,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            linked.paths[0].hops[0].call_site_url.as_deref(),
+            linked.traces[0].hops[0].call_site_url.as_deref(),
             Some("https://html.spec.whatwg.org/#some-section:target-3")
         );
 
-        let aliased = find_paths_from_conn(
+        let aliased = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "aliased".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2111,7 +2111,7 @@ mod tests {
             5,
         )
         .unwrap();
-        let hop = &aliased.paths[0].hops[0];
+        let hop = &aliased.traces[0].hops[0];
         assert_eq!(hop.call_site_url, None);
         assert_eq!(
             hop.call_site_id, None,
@@ -2120,7 +2120,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_flags_specs_that_predate_reference_kinds() {
+    fn trace_flags_specs_that_predate_reference_kinds() {
         // Kinds are filled in per spec, lazily. A spec not yet re-indexed has
         // NULL-kind references that a kind-filtered search cannot see, so a chain
         // crossing it would go missing. That has to be visible in the result,
@@ -2134,7 +2134,7 @@ mod tests {
         )
         .unwrap();
 
-        let filtered = find_paths_from_conn(
+        let filtered = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2145,7 +2145,7 @@ mod tests {
         .unwrap();
         assert_eq!(filtered.stale_specs, vec!["DOM".to_string()]);
 
-        let unfiltered = find_paths_from_conn(
+        let unfiltered = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2161,7 +2161,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_does_not_warn_about_specs_the_search_never_saw() {
+    fn trace_does_not_warn_about_specs_the_search_never_saw() {
         // A stale spec the chain cannot reach could not have changed the result.
         // Reporting it is noise, and noise in this warning is worse than silence:
         // it trains the reader to ignore the case that matters.
@@ -2177,7 +2177,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2195,9 +2195,9 @@ mod tests {
     }
 
     #[test]
-    fn paths_finds_the_call_chain() {
+    fn trace_finds_the_call_chain() {
         let conn = setup_call_chain_db();
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2207,8 +2207,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.paths.len(), 1, "{:#?}", result.paths);
-        let hops = &result.paths[0].hops;
+        assert_eq!(result.traces.len(), 1, "{:#?}", result.traces);
+        let hops = &result.traces[0].hops;
         assert_eq!(hops.len(), 3);
         assert_eq!(hops[0].anchor, "assign");
         assert_eq!(hops[0].to_anchor, "location-navigate");
@@ -2220,9 +2220,9 @@ mod tests {
     }
 
     #[test]
-    fn paths_without_kind_filter_includes_the_prose_shortcut() {
+    fn trace_without_kind_filter_includes_the_prose_shortcut() {
         let conn = setup_call_chain_db();
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2233,16 +2233,16 @@ mod tests {
         .unwrap();
 
         assert!(
-            result.paths.iter().any(|p| p.hops.len() == 1),
+            result.traces.iter().any(|p| p.hops.len() == 1),
             "unfiltered search should surface the direct prose mention"
         );
-        assert!(result.paths.iter().any(|p| p.hops.len() == 3));
+        assert!(result.traces.iter().any(|p| p.hops.len() == 3));
     }
 
     #[test]
-    fn paths_respects_max_depth() {
+    fn trace_respects_max_depth() {
         let conn = setup_call_chain_db();
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "assign".to_string()),
             ("HTML".to_string(), "checking".to_string()),
@@ -2253,15 +2253,15 @@ mod tests {
         .unwrap();
 
         assert!(
-            result.paths.is_empty(),
+            result.traces.is_empty(),
             "the only call chain is 3 hops long"
         );
     }
 
     #[test]
-    fn paths_reports_no_route_when_unreachable() {
+    fn trace_reports_no_route_when_unreachable() {
         let conn = setup_call_chain_db();
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("DOM".to_string(), "leaf".to_string()),
             ("HTML".to_string(), "assign".to_string()),
@@ -2271,7 +2271,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(result.paths.is_empty());
+        assert!(result.traces.is_empty());
         assert!(
             !result.truncated,
             "an exhausted search is not a truncated one"
@@ -2279,9 +2279,9 @@ mod tests {
     }
 
     #[test]
-    fn paths_crosses_spec_boundaries() {
+    fn trace_crosses_spec_boundaries() {
         let conn = setup_call_chain_db();
-        let result = find_paths_from_conn(
+        let result = find_traces_from_conn(
             &conn,
             ("HTML".to_string(), "navigate".to_string()),
             ("DOM".to_string(), "leaf".to_string()),
@@ -2291,8 +2291,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.paths.len(), 1);
-        let hops = &result.paths[0].hops;
+        assert_eq!(result.traces.len(), 1);
+        let hops = &result.traces[0].hops;
         assert_eq!(hops[0].to_spec, "DOM");
         assert_eq!(hops[1].spec, "DOM");
         assert_eq!(hops[1].to_anchor, "leaf");

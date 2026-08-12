@@ -348,7 +348,7 @@ pub struct RefsMatch {
 /// One call in a traced path: the step of `spec#anchor` that invokes
 /// `to_spec#to_anchor`.
 #[derive(Debug, Clone, Serialize)]
-pub struct PathHop {
+pub struct TraceHop {
     pub spec: String,
     pub anchor: String,
     pub to_spec: String,
@@ -368,27 +368,50 @@ pub struct PathHop {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SpecPath {
-    pub hops: Vec<PathHop>,
+pub struct Trace {
+    pub hops: Vec<TraceHop>,
 }
 
-/// JSON output for paths command
+/// JSON output for trace command
 #[derive(Debug, Serialize)]
-pub struct PathsResult {
+pub struct TraceResult {
     pub from: String,
     pub to: String,
     pub max_depth: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    pub paths: Vec<SpecPath>,
-    /// True when the search hit its path or node budget, so absence of a path is
-    /// not proof that none exists.
+    pub traces: Vec<Trace>,
+    /// True when the search hit its trace or node budget, so absence of a route
+    /// is not proof that none exists.
     pub truncated: bool,
     /// Specs still holding references indexed before reference kinds existed.
-    /// A `kind`-filtered search cannot see through them, so a path crossing one
+    /// A `kind`-filtered search cannot see through them, so a route crossing one
     /// may be missing. Empty once every spec involved has been re-indexed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub stale_specs: Vec<String>,
+}
+
+impl TraceResult {
+    /// Reduce every hop to `SPEC#anchor` plus its step number, dropping step
+    /// text, guards and the call-site URL.
+    ///
+    /// What remains is the tool's own identifier format, so a hop can be fed
+    /// straight back into `query` or `refs`; a call-site URL cannot, since it
+    /// names a link rather than a section. `call_site_id` is kept in JSON for
+    /// callers that want to rebuild the URL.
+    ///
+    /// Useful for comparing route shapes. Not useful for deciding which route a
+    /// scenario takes: the guards are exactly what settles that, and recovering
+    /// them afterwards costs far more than they took to carry.
+    pub fn strip_step_detail(&mut self) {
+        for trace in &mut self.traces {
+            for hop in &mut trace.hops {
+                hop.step_text = None;
+                hop.guard_path.clear();
+                hop.call_site_url = None;
+            }
+        }
+    }
 }
 
 /// JSON output for idl command

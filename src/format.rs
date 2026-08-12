@@ -1,8 +1,8 @@
 //! Markdown output formatters for CLI commands
 
 use crate::model::{
-    AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PathsResult, PrDiffResult,
-    QueryResult, RefEntry, RefsResult, SearchResult,
+    AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PrDiffResult, QueryResult,
+    RefEntry, RefsResult, SearchResult, TraceResult,
 };
 
 #[cfg(test)]
@@ -254,23 +254,23 @@ pub fn refs(result: &RefsResult) -> String {
     md
 }
 
-/// Format a PathsResult as markdown: one numbered chain per path, each hop
+/// Format a TraceResult as markdown: one numbered chain per route, each hop
 /// quoting the step that makes the call.
-pub fn paths(result: &PathsResult) -> String {
+pub fn trace(result: &TraceResult) -> String {
     let mut md = String::new();
     md.push_str(&format!(
-        "# paths: `{}` -> `{}`\n\n",
+        "# trace: `{}` -> `{}`\n\n",
         result.from, result.to
     ));
     md.push_str(&format!(
-        "Max depth {}{}. Found {} path(s).{}\n\n",
+        "Max depth {}{}. Found {} trace(s).{}\n\n",
         result.max_depth,
         result
             .kind
             .as_ref()
             .map(|k| format!(", kind `{k}`"))
             .unwrap_or_default(),
-        result.paths.len(),
+        result.traces.len(),
         if result.truncated {
             " Search was truncated, so this list may be incomplete."
         } else {
@@ -287,7 +287,7 @@ pub fn paths(result: &PathsResult) -> String {
             .collect();
         md.push_str(&format!(
             "Warning: {} spec(s) still hold references indexed before reference kinds \
-             existed and are invisible to this filter, so a path crossing one would be \
+             existed and are invisible to this filter, so a route crossing one would be \
              missed: {}{}. Run `webspec-index update --force` to re-index, or pass \
              `--kind any`.\n\n",
             result.stale_specs.len(),
@@ -300,18 +300,18 @@ pub fn paths(result: &PathsResult) -> String {
         ));
     }
 
-    if result.paths.is_empty() {
+    if result.traces.is_empty() {
         md.push_str(if result.truncated {
-            "No path found before the search budget ran out.\n"
+            "No route found before the search budget ran out.\n"
         } else {
-            "No path exists within these bounds.\n"
+            "No route exists within these bounds.\n"
         });
         return md;
     }
 
-    for (index, path) in result.paths.iter().enumerate() {
+    for (index, path) in result.traces.iter().enumerate() {
         md.push_str(&format!(
-            "## Path {} ({} hop(s))\n\n",
+            "## Trace {} ({} hop(s))\n\n",
             index + 1,
             path.hops.len()
         ));
@@ -807,16 +807,16 @@ mod tests {
     }
 
     #[test]
-    fn test_paths_markdown_renders_a_trace() {
-        use crate::model::{PathHop, SpecPath};
+    fn test_trace_markdown_renders_a_trace() {
+        use crate::model::{Trace, TraceHop};
 
-        let result = PathsResult {
+        let result = TraceResult {
             from: "HTML#assign".to_string(),
             to: "HTML#checking".to_string(),
             max_depth: 6,
             kind: Some("step".to_string()),
-            paths: vec![SpecPath {
-                hops: vec![PathHop {
+            traces: vec![Trace {
+                hops: vec![TraceHop {
                     spec: "HTML".to_string(),
                     anchor: "navigate".to_string(),
                     to_spec: "HTML".to_string(),
@@ -832,8 +832,8 @@ mod tests {
             stale_specs: vec![],
         };
 
-        let md = paths(&result);
-        assert!(md.contains("# paths: `HTML#assign` -> `HTML#checking`"));
+        let md = trace(&result);
+        assert!(md.contains("# trace: `HTML#assign` -> `HTML#checking`"));
         assert!(md.contains("1) `HTML#navigate` step 24.1 calls `HTML#checking`"));
         assert!(md.contains("   - under: In parallel, run these steps:"));
         assert!(md.contains("   > Let unloadPromptCanceled be the result."));
@@ -841,16 +841,62 @@ mod tests {
     }
 
     #[test]
-    fn test_paths_markdown_links_the_call_site() {
-        use crate::model::{PathHop, SpecPath};
+    fn test_quiet_keeps_the_step_and_link_but_drops_the_prose() {
+        use crate::model::{Trace, TraceHop};
 
-        let result = PathsResult {
+        let mut result = TraceResult {
             from: "HTML#a".to_string(),
             to: "HTML#checking".to_string(),
             max_depth: 6,
             kind: Some("step".to_string()),
-            paths: vec![SpecPath {
-                hops: vec![PathHop {
+            traces: vec![Trace {
+                hops: vec![TraceHop {
+                    spec: "HTML".to_string(),
+                    anchor: "navigate".to_string(),
+                    to_spec: "HTML".to_string(),
+                    to_anchor: "checking".to_string(),
+                    step_path: Some("24.1".to_string()),
+                    step_text: Some("Let unloadPromptCanceled be the result.".to_string()),
+                    guard_path: vec!["In parallel, run these steps:".to_string()],
+                    call_site_id: Some("beginning-navigation:checking-2".to_string()),
+                    call_site_url: Some(
+                        "https://html.spec.whatwg.org/#beginning-navigation:checking-2".to_string(),
+                    ),
+                }],
+            }],
+            truncated: false,
+            stale_specs: vec![],
+        };
+
+        result.strip_step_detail();
+        let md = trace(&result);
+
+        assert!(
+            md.contains("1) `HTML#navigate` step 24.1 calls `HTML#checking`"),
+            "quiet keeps the slug and step number, which feed back into query/refs: {md}"
+        );
+        assert!(
+            !md.contains("unloadPromptCanceled"),
+            "step text must be gone"
+        );
+        assert!(!md.contains("under:"), "guards must be gone");
+        assert!(
+            !md.contains("https://"),
+            "quiet drops URLs; SPEC#anchor is the identifier"
+        );
+    }
+
+    #[test]
+    fn test_trace_markdown_links_the_call_site() {
+        use crate::model::{Trace, TraceHop};
+
+        let result = TraceResult {
+            from: "HTML#a".to_string(),
+            to: "HTML#checking".to_string(),
+            max_depth: 6,
+            kind: Some("step".to_string()),
+            traces: vec![Trace {
+                hops: vec![TraceHop {
                     spec: "HTML".to_string(),
                     anchor: "navigate".to_string(),
                     to_spec: "HTML".to_string(),
@@ -868,7 +914,7 @@ mod tests {
             stale_specs: vec![],
         };
 
-        let md = paths(&result);
+        let md = trace(&result);
         assert!(
             md.contains(
                 "1) [`HTML#navigate` step 24.1](https://html.spec.whatwg.org/#beginning-navigation:checking-2) calls `HTML#checking`"
@@ -878,23 +924,23 @@ mod tests {
     }
 
     #[test]
-    fn test_paths_markdown_distinguishes_empty_from_truncated() {
-        let empty = PathsResult {
+    fn test_trace_markdown_distinguishes_empty_from_truncated() {
+        let empty = TraceResult {
             from: "HTML#a".to_string(),
             to: "HTML#b".to_string(),
             max_depth: 6,
             kind: None,
-            paths: vec![],
+            traces: vec![],
             truncated: false,
             stale_specs: vec![],
         };
-        assert!(paths(&empty).contains("No path exists within these bounds."));
+        assert!(trace(&empty).contains("No route exists within these bounds."));
 
-        let cut_short = PathsResult {
+        let cut_short = TraceResult {
             truncated: true,
             ..empty
         };
-        assert!(paths(&cut_short).contains("budget ran out"));
+        assert!(trace(&cut_short).contains("budget ran out"));
     }
 
     #[test]
