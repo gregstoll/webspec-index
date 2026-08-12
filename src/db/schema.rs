@@ -91,6 +91,11 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             index_version TEXT
         );
 
+        CREATE TABLE meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE VIRTUAL TABLE sections_fts USING fts5(
             anchor,
             title,
@@ -144,6 +149,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             last_indexed   TEXT,
             content_hash   TEXT,
             index_version TEXT
+        );
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );",
     )?;
 
@@ -166,6 +175,65 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "refs", "guard_path", "TEXT")?;
     ensure_column(conn, "refs", "call_site_id", "TEXT")?;
     ensure_column(conn, "refs", "kind", "TEXT")?;
+    Ok(())
+}
+
+/// Indexed data is derived from the parser, so a build that parses differently
+/// invalidates all of it. Rather than let specs drift to different parser
+/// versions as each is lazily re-checked, drop everything derived on the first
+/// run of a new build and let the normal lazy fetch repopulate what is used.
+///
+/// The spec registry itself is kept: it is a list of names and URLs, not parsed
+/// output, and re-seeding it costs a network round trip for no benefit.
+///
+/// Returns whether a purge happened.
+pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool> {
+    if indexed_version(conn)?.as_deref() == Some(current) {
+        return Ok(false);
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    // Order matters: children before the snapshots they reference.
+    for table in ["refs", "idl_defs", "sections", "snapshots", "update_checks"] {
+        if has_table(&tx, table)? {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+    }
+    tx.commit()?;
+
+    // DELETE frees pages without returning them to the filesystem, so without
+    // this the purge is only logical and the file keeps its old size. VACUUM
+    // cannot run inside a transaction, hence after the commit. Measured at ~1s
+    // on a 430 MB index.
+    conn.execute_batch("VACUUM")?;
+
+    set_indexed_version(conn, current)?;
+    Ok(true)
+}
+
+/// The build that produced the currently indexed data, if recorded.
+pub fn indexed_version(conn: &Connection) -> Result<Option<String>> {
+    if !has_table(conn, "meta")? {
+        return Ok(None);
+    }
+    let result = conn.query_row(
+        "SELECT value FROM meta WHERE key = 'index_version'",
+        [],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn set_indexed_version(conn: &Connection, version: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('index_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [version],
+    )?;
     Ok(())
 }
 
@@ -492,6 +560,118 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pages.as_deref(), Some("page1.html,page2.html"));
+    }
+
+    fn indexed_row_counts(conn: &Connection) -> (i64, i64, i64, i64, i64) {
+        let count = |table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        (
+            count("specs"),
+            count("snapshots"),
+            count("sections"),
+            count("refs"),
+            count("update_checks"),
+        )
+    }
+
+    fn seed_indexed_data(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO specs (name, base_url, provider) VALUES ('HTML', 'https://html', 'whatwg')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshots (spec_id, sha, commit_date, indexed_at)
+             VALUES (1, 'hash:abc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sections (snapshot_id, anchor, section_type) VALUES (1, 'navigate', 'algorithm')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
+             VALUES (1, 'navigate', 'HTML', 'checking')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO update_checks (spec_id, last_checked) VALUES (1, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_purge_on_version_change_clears_indexed_data_but_keeps_spec_list() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        seed_indexed_data(&conn);
+        set_indexed_version(&conn, "0.12.0").unwrap();
+
+        let purged = purge_if_version_changed(&conn, "0.13.0").unwrap();
+
+        assert!(purged, "a version change must purge");
+        // The purge VACUUMs, which fails if a transaction is still open; if that
+        // regressed this call would have errored above rather than returned.
+        let (specs, snapshots, sections, refs, checks) = indexed_row_counts(&conn);
+        assert_eq!(
+            specs, 1,
+            "the spec list is a registry, not parsed output, and must survive"
+        );
+        assert_eq!((snapshots, sections, refs, checks), (0, 0, 0, 0));
+        assert_eq!(indexed_version(&conn).unwrap().as_deref(), Some("0.13.0"));
+    }
+
+    #[test]
+    fn test_no_purge_when_version_matches() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        seed_indexed_data(&conn);
+        set_indexed_version(&conn, "0.13.0").unwrap();
+
+        let purged = purge_if_version_changed(&conn, "0.13.0").unwrap();
+
+        assert!(!purged);
+        let (_, snapshots, sections, refs, checks) = indexed_row_counts(&conn);
+        assert_eq!((snapshots, sections, refs, checks), (1, 1, 1, 1));
+    }
+
+    #[test]
+    fn test_database_predating_the_version_marker_is_purged() {
+        // Every database written before this landed has indexed data and no
+        // marker, and that data was produced by an older parser.
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        seed_indexed_data(&conn);
+
+        assert!(indexed_version(&conn).unwrap().is_none());
+        assert!(purge_if_version_changed(&conn, "0.13.0").unwrap());
+
+        let (specs, snapshots, _, _, _) = indexed_row_counts(&conn);
+        assert_eq!((specs, snapshots), (1, 0));
+    }
+
+    #[test]
+    fn test_purge_is_idempotent_and_cheap_on_a_fresh_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+
+        // A fresh database has nothing to purge, but still records the version so
+        // the next upgrade is detectable.
+        assert!(purge_if_version_changed(&conn, "0.13.0").unwrap());
+        assert!(!purge_if_version_changed(&conn, "0.13.0").unwrap());
+        assert_eq!(indexed_version(&conn).unwrap().as_deref(), Some("0.13.0"));
     }
 
     #[test]

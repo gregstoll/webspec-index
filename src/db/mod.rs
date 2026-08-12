@@ -51,6 +51,11 @@ pub fn open_or_create_db() -> Result<Connection> {
     schema::initialize_schema(&conn)?;
     schema::run_migrations(&conn)?;
 
+    // A build that parses differently invalidates everything derived from the
+    // parser. Drop it in one go rather than let specs drift to different parser
+    // versions; lazy fetching repopulates whatever gets used.
+    schema::purge_if_version_changed(&conn, crate::parse::INDEX_VERSION)?;
+
     // Seed known specs (W3C, WHATWG, TC39, WebGPU). This is an upsert,
     // so it's safe to call on every open — new specs get added, existing
     // ones are left untouched.

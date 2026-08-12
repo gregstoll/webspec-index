@@ -384,11 +384,6 @@ pub struct TraceResult {
     /// True when the search hit its trace or node budget, so absence of a route
     /// is not proof that none exists.
     pub truncated: bool,
-    /// Specs still holding references indexed before reference kinds existed.
-    /// A `kind`-filtered search cannot see through them, so a route crossing one
-    /// may be missing. Empty once every spec involved has been re-indexed.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub stale_specs: Vec<String>,
 }
 
 impl TraceResult {

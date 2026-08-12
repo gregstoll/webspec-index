@@ -119,10 +119,9 @@ Each hop reports the calling section, its step number, the verbatim step text, e
 
 Use this instead of walking `refs` by hand. It is exhaustive within `--max-depth`, and the result distinguishes a search that finished from one cut short by the trace or node budget — so zero traces with `truncated: false` is evidence that no route exists, not merely that none was found.
 
-Two things to read in the output before trusting it:
+Read `Search was truncated` before trusting the result — raise `-l` or narrow the endpoints if it appears.
 
-- `Search was truncated` — raise `-l` or narrow the endpoints.
-- `Warning: N spec(s) still hold references indexed before reference kinds existed` — those specs are invisible to a `--kind`-filtered search, because kinds are filled in per spec when that spec is next indexed. Run `webspec-index update --force --spec <NAME>` for any spec the chain might cross, or pass `--kind any`.
+The search only sees indexed specs, and indexing is lazy: the two endpoints are fetched, the specs a route passes through are not. Index those first if a route might cross them.
 
 Real chains are longer than they look; `location.assign()` to `navigateerror` is seven hops, so a low `--max-depth` reports zero traces that look like a genuine answer.
 
@@ -163,6 +162,7 @@ webspec-index update --force
 
 Fetches latest spec versions. Uses 24h cache unless `--force` is given. Specs are auto-fetched on first query, so you rarely need this.
 Specs are checked on a 24h cadence; re-indexing happens only when fetched HTML content changed.
+Upgrading `webspec-index` drops all indexed data on the next run, since it was produced by the previous parser; specs are then re-fetched lazily as you query them.
 
 ### Graph traversal
 

@@ -278,28 +278,6 @@ pub fn trace(result: &TraceResult) -> String {
         }
     ));
 
-    if !result.stale_specs.is_empty() {
-        let shown: Vec<&str> = result
-            .stale_specs
-            .iter()
-            .take(8)
-            .map(String::as_str)
-            .collect();
-        md.push_str(&format!(
-            "Warning: {} spec(s) still hold references indexed before reference kinds \
-             existed and are invisible to this filter, so a route crossing one would be \
-             missed: {}{}. Run `webspec-index update --force` to re-index, or pass \
-             `--kind any`.\n\n",
-            result.stale_specs.len(),
-            shown.join(", "),
-            if result.stale_specs.len() > shown.len() {
-                ", …"
-            } else {
-                ""
-            }
-        ));
-    }
-
     if result.traces.is_empty() {
         md.push_str(if result.truncated {
             "No route found before the search budget ran out.\n"
@@ -829,7 +807,6 @@ mod tests {
                 }],
             }],
             truncated: false,
-            stale_specs: vec![],
         };
 
         let md = trace(&result);
@@ -865,7 +842,6 @@ mod tests {
                 }],
             }],
             truncated: false,
-            stale_specs: vec![],
         };
 
         result.strip_step_detail();
@@ -911,7 +887,6 @@ mod tests {
                 }],
             }],
             truncated: false,
-            stale_specs: vec![],
         };
 
         let md = trace(&result);
@@ -932,7 +907,6 @@ mod tests {
             kind: None,
             traces: vec![],
             truncated: false,
-            stale_specs: vec![],
         };
         assert!(trace(&empty).contains("No route exists within these bounds."));
 

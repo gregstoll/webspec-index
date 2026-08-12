@@ -345,24 +345,6 @@ pub fn get_incoming_edges(
     Ok(edges)
 }
 
-/// Specs whose live snapshot still holds references indexed before reference
-/// kinds existed. Their references are invisible to a `kind`-filtered query, so
-/// a path search that crosses one can miss hops.
-pub fn specs_with_unkinded_refs(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT sp.name
-         FROM refs r
-         JOIN snapshots sn ON r.snapshot_id = sn.id
-         JOIN specs sp ON sn.spec_id = sp.id
-         WHERE r.kind IS NULL AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-         ORDER BY sp.name",
-    )?;
-    let names = stmt
-        .query_map([], |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(names)
-}
-
 /// Distinct outgoing targets from a section, ignoring how many call sites
 /// reach each one.
 pub fn get_outgoing_refs(

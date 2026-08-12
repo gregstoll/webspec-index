@@ -45,10 +45,10 @@ is exhaustive within that depth, which is what lets a NOT REACHED verdict claim 
 not find one". If it says the search was truncated, raise `-l`, or narrow the endpoints, and say
 so in the output if it still truncates.
 
-A `Warning: N spec(s) still hold references indexed before reference kinds existed` line names
-specs adjacent to this search that the filter cannot see through. Re-index them
-(`webspec-index update --force --spec <NAME>`) and search again; if you cannot, the verdict is
-INCONCLUSIVE rather than NOT REACHED.
+The search only sees specs that are already indexed, and indexing is lazy: `trace` fetches its two
+endpoint specs but not the ones a route passes through. If a plausible route crosses a third spec,
+index it first (`webspec-index query '<SPEC#anything>'`) and search again. A route through a spec
+you have never queried is invisible, not absent.
 
 Start at `--max-depth 9`. Real chains run longer than they look: `location.assign()` to
 `navigateerror` is seven hops. A depth that is too low reports zero traces, which reads
@@ -156,6 +156,5 @@ the ones in the rejected-paths table. Those are the links a reader clicks to pus
 `query`, `refs` and `exists` calls, and say in the output which PR the trace assumes. `trace` does
 not take `--pr`; against a PR, fall back to `refs --kind step` in both directions.
 
-**Distinguish exhausted from truncated.** `truncated: false` and zero traces is evidence. A
-truncated search, or one warning about specs indexed before reference kinds existed, is not, and
-must be reported as INCONCLUSIVE.
+**Distinguish exhausted from truncated.** `truncated: false` and zero traces is evidence that no
+route exists among indexed specs. A truncated search is not, and must be reported as INCONCLUSIVE.

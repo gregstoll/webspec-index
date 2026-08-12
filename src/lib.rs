@@ -1331,9 +1331,6 @@ struct TraceSearch<'a> {
     traces: Vec<model::Trace>,
     expansions: usize,
     truncated: bool,
-    /// Specs the forward walk expanded, for reporting which of them the index
-    /// could not see through.
-    visited_specs: HashSet<String>,
 }
 
 impl TraceSearch<'_> {
@@ -1344,8 +1341,6 @@ impl TraceSearch<'_> {
             return Ok(());
         }
 
-        self.visited_specs.insert(node.0.clone());
-
         self.expansions += 1;
         if self.expansions > TRACE_NODE_BUDGET {
             self.truncated = true;
@@ -1354,10 +1349,6 @@ impl TraceSearch<'_> {
 
         for edge in outgoing_edges_for_node(self.conn, &node.0, &node.1, self.kind)? {
             let next = (edge.spec.clone(), edge.anchor.clone());
-            // Record neighbours before pruning. A spec whose own references are
-            // hidden is never expanded, so an edge pointing into it is the only
-            // evidence the search ever came near it.
-            self.visited_specs.insert(next.0.clone());
             let hop = model::TraceHop {
                 spec: node.0.clone(),
                 anchor: node.1.clone(),
@@ -1460,37 +1451,15 @@ fn find_traces_from_conn(
         traces: Vec::new(),
         expansions: 0,
         truncated: false,
-        visited_specs: HashSet::new(),
     };
 
     if from != to {
         search.walk(from.clone(), 0)?;
     }
 
-    // Every spec the search looked at, in either direction.
-    let mut touched: HashSet<String> = search.visited_specs;
-    touched.extend(search.dist.keys().map(|(spec, _)| spec.clone()));
-    touched.insert(from.0.clone());
-    touched.insert(to.0.clone());
-
     let mut paths = search.traces;
     paths.sort_by_key(|p| p.hops.len());
     resolve_call_site_urls(conn, &mut paths)?;
-
-    // Filtering by kind hides references indexed before kinds existed, so a
-    // chain through a not-yet-reparsed spec would go missing without a word.
-    // Only specs this search actually looked at are worth reporting — the rest
-    // could not have affected the result.
-    let stale_specs = if kind.is_some() {
-        let mut stale: Vec<String> = db::queries::specs_with_unkinded_refs(conn)?
-            .into_iter()
-            .filter(|spec| touched.contains(spec))
-            .collect();
-        stale.sort();
-        stale
-    } else {
-        Vec::new()
-    };
 
     Ok(model::TraceResult {
         from: format!("{}#{}", from.0, from.1),
@@ -1499,7 +1468,6 @@ fn find_traces_from_conn(
         kind: kind.map(|k| k.as_str().to_string()),
         traces: paths,
         truncated: search.truncated,
-        stale_specs,
     })
 }
 
@@ -2116,81 +2084,6 @@ mod tests {
         assert_eq!(
             hop.call_site_id, None,
             "an alias anchor must not be reported as a call site id"
-        );
-    }
-
-    #[test]
-    fn trace_flags_specs_that_predate_reference_kinds() {
-        // Kinds are filled in per spec, lazily. A spec not yet re-indexed has
-        // NULL-kind references that a kind-filtered search cannot see, so a chain
-        // crossing it would go missing. That has to be visible in the result,
-        // otherwise it reads as a genuine "no path exists".
-        let conn = setup_call_chain_db();
-        let snapshot_id = db::queries::get_snapshot(&conn, "DOM").unwrap().unwrap();
-        conn.execute(
-            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
-             VALUES (?1, 'legacy', 'DOM', 'leaf')",
-            [snapshot_id],
-        )
-        .unwrap();
-
-        let filtered = find_traces_from_conn(
-            &conn,
-            ("HTML".to_string(), "assign".to_string()),
-            ("HTML".to_string(), "checking".to_string()),
-            6,
-            Some(model::RefKind::Step),
-            20,
-        )
-        .unwrap();
-        assert_eq!(filtered.stale_specs, vec!["DOM".to_string()]);
-
-        let unfiltered = find_traces_from_conn(
-            &conn,
-            ("HTML".to_string(), "assign".to_string()),
-            ("HTML".to_string(), "checking".to_string()),
-            6,
-            None,
-            20,
-        )
-        .unwrap();
-        assert!(
-            unfiltered.stale_specs.is_empty(),
-            "without a kind filter nothing is hidden, so there is nothing to warn about"
-        );
-    }
-
-    #[test]
-    fn trace_does_not_warn_about_specs_the_search_never_saw() {
-        // A stale spec the chain cannot reach could not have changed the result.
-        // Reporting it is noise, and noise in this warning is worse than silence:
-        // it trains the reader to ignore the case that matters.
-        let conn = setup_call_chain_db();
-        let spec_id =
-            write::insert_or_get_spec(&conn, "SVG", "https://svgwg.org/svg2-draft", "w3c").unwrap();
-        let snapshot_id =
-            write::insert_snapshot(&conn, spec_id, "hash:s", "2026-01-01T00:00:00Z").unwrap();
-        conn.execute(
-            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
-             VALUES (?1, 'unreachable', 'SVG', 'other')",
-            [snapshot_id],
-        )
-        .unwrap();
-
-        let result = find_traces_from_conn(
-            &conn,
-            ("HTML".to_string(), "assign".to_string()),
-            ("HTML".to_string(), "checking".to_string()),
-            6,
-            Some(model::RefKind::Step),
-            20,
-        )
-        .unwrap();
-
-        assert!(
-            !result.stale_specs.contains(&"SVG".to_string()),
-            "unreachable stale spec must not be reported: {:?}",
-            result.stale_specs
         );
     }
 
