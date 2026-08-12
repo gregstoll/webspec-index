@@ -111,19 +111,13 @@ Record why each rejected path is rejected. Those reasons are the output, not scr
 The markdown from `trace` is already this shape; keep its hop links and quoted steps verbatim and
 add the scenario, the verdict and the rejected-path table.
 
-- Hop links point at the **call site**, not the callee's definition, when the spec generator
-  emitted a per-reference id. Keep them — landing the reader on the calling line is the whole
-  point. Roughly a third of hops have no such id, and a step that calls nothing never does, so the
-  deciding step of a NOT REACHED verdict usually has none. Link the section and name the step in
-  the visible text instead: ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``.
-  A reader finds a numbered step; they cannot find a link that goes nowhere.
-
-  **Never use `:~:text=` fragments.** A text directive matches rendered prose, which no tool here
-  can verify and which the spec editors change without notice; when it stops matching it fails
-  silently, dropping the reader at the top of the document with nothing to indicate the link was
-  meant to point somewhere. A section anchor plus a step number in the visible text degrades
-  instead: if the step moves, the reader is still on the right algorithm and can see which step was
-  meant.
+- Every link resolves to an element id, so that `exists` can check it and a reader can tell when it
+  breaks. Two forms, in order of preference: the call-site id the spec generator emitted for that
+  mention, which `trace` supplies and which lands the reader on the calling line; failing that, the
+  section anchor with the step number in the link text —
+  ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``. Roughly a third of hops
+  have no call-site id, and a step that calls nothing never does, so the deciding step of a
+  NOT REACHED verdict usually takes the second form.
 - Say explicitly where the chain returns to an earlier algorithm; that unwind is usually where the
   answer lives.
 
