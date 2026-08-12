@@ -57,7 +57,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
             from_anchor  TEXT NOT NULL,
             to_spec      TEXT NOT NULL,
-            to_anchor    TEXT NOT NULL
+            to_anchor    TEXT NOT NULL,
+            step_path    TEXT,
+            step_text    TEXT,
+            guard_path   TEXT,
+            call_site_id TEXT,
+            kind         TEXT
         );
 
         CREATE INDEX idx_refs_outgoing ON refs(snapshot_id, from_anchor);
@@ -154,7 +159,23 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "snapshots", "merge_base_sha", "TEXT")?;
     ensure_column(conn, "snapshots", "pr_pages", "TEXT")?;
     ensure_column(conn, "snapshots", "index_version", "TEXT")?;
+    // Step-level reference context. Rows written before this landed keep NULLs;
+    // the index version bump forces a re-parse that fills them in.
+    ensure_column(conn, "refs", "step_path", "TEXT")?;
+    ensure_column(conn, "refs", "step_text", "TEXT")?;
+    ensure_column(conn, "refs", "guard_path", "TEXT")?;
+    ensure_column(conn, "refs", "call_site_id", "TEXT")?;
+    ensure_column(conn, "refs", "kind", "TEXT")?;
     Ok(())
+}
+
+fn has_table(conn: &Connection, table: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -170,6 +191,9 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, kind: &str) -> Result<()> {
+    if !has_table(conn, table)? {
+        return Ok(());
+    }
     if !has_column(conn, table, column)? {
         conn.execute(
             &format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"),
@@ -468,5 +492,107 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pages.as_deref(), Some("page1.html,page2.html"));
+    }
+
+    #[test]
+    fn test_refs_step_columns_migration() {
+        // A database written before step-level references existed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE specs (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                base_url TEXT NOT NULL,
+                provider TEXT NOT NULL
+            );
+            CREATE TABLE snapshots (
+                id          INTEGER PRIMARY KEY,
+                spec_id     INTEGER NOT NULL REFERENCES specs(id),
+                sha         TEXT NOT NULL,
+                commit_date TEXT NOT NULL,
+                indexed_at  TEXT NOT NULL,
+                is_latest   INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(spec_id, sha)
+            );
+            CREATE TABLE refs (
+                id           INTEGER PRIMARY KEY,
+                snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+                from_anchor  TEXT NOT NULL,
+                to_spec      TEXT NOT NULL,
+                to_anchor    TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO specs (name, base_url, provider) VALUES ('TEST', 'https://test', 'test')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshots (spec_id, sha, commit_date, indexed_at)
+             VALUES (1, 'oldsha', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
+             VALUES (1, 'navigate', 'TEST', 'target')",
+            [],
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        // The pre-existing row survives, with NULL step context.
+        let (step_path, kind): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT step_path, kind FROM refs WHERE from_anchor = 'navigate'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(step_path, None);
+        assert_eq!(kind, None);
+
+        // And the new columns are writable.
+        conn.execute(
+            "UPDATE refs SET step_path = '24.1', step_text = 'Let x be y.',
+                             guard_path = 'If cond:', call_site_id = 'navigate:target-3',
+                             kind = 'step'
+             WHERE from_anchor = 'navigate'",
+            [],
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_fresh_schema_has_refs_step_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(refs)").unwrap();
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        };
+
+        for expected in [
+            "step_path",
+            "step_text",
+            "guard_path",
+            "call_site_id",
+            "kind",
+        ] {
+            assert!(
+                columns.contains(&expected.to_string()),
+                "fresh schema is missing refs.{expected}"
+            );
+        }
     }
 }

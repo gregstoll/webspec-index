@@ -243,34 +243,21 @@ pub async fn query_section(
     let out_refs = db::queries::get_outgoing_refs(&conn, snapshot_id, &anchor)?;
     let outgoing = out_refs
         .iter()
-        .map(|(to_spec, to_anchor)| model::RefEntry {
-            spec: to_spec.clone(),
-            anchor: to_anchor.clone(),
-        })
+        .map(|(to_spec, to_anchor)| model::RefEntry::plain(to_spec.clone(), to_anchor.clone()))
         .collect();
 
     let in_refs = db::queries::get_incoming_refs(&conn, &spec_name, &anchor)?;
     let incoming = in_refs
         .iter()
-        .map(|(from_spec, from_anchor)| model::RefEntry {
-            spec: from_spec.clone(),
-            anchor: from_anchor.clone(),
+        .map(|(from_spec, from_anchor)| {
+            model::RefEntry::plain(from_spec.clone(), from_anchor.clone())
         })
         .collect();
 
     let (base_url, provider) = db::queries::get_spec_meta(&conn, &spec_name)?
         .map(|(_, base_url, provider)| (base_url, provider))
         .unwrap_or_default();
-    let url = if provider == "itu" {
-        // ITU-T Recommendations are single PDFs, not per-anchor HTML pages —
-        // a "#clause" fragment is meaningless on a PDF URL, so the clause
-        // number isn't appended (unlike every other provider's base_url).
-        base_url
-    } else if base_url.ends_with(".html") {
-        format!("{base_url}#{}", section.anchor)
-    } else {
-        format!("{base_url}/#{}", section.anchor)
-    };
+    let url = anchor_url(&base_url, &provider, &section.anchor);
 
     Ok(model::QueryResult {
         spec: spec_name.clone(),
@@ -800,6 +787,18 @@ fn outgoing_refs_for_node(
     db::queries::get_outgoing_refs(conn, snapshot_id, anchor)
 }
 
+fn outgoing_edges_for_node(
+    conn: &Connection,
+    spec: &str,
+    anchor: &str,
+    kind: Option<model::RefKind>,
+) -> Result<Vec<db::queries::RefEdge>> {
+    let Some(snapshot_id) = db::queries::get_snapshot(conn, spec)? else {
+        return Ok(vec![]);
+    };
+    db::queries::get_outgoing_edges(conn, snapshot_id, anchor, kind)
+}
+
 fn build_graph_from_conn(
     conn: &Connection,
     root_spec: &str,
@@ -1174,12 +1173,25 @@ fn resolve_find_references_candidates(
     Ok(candidates)
 }
 
+fn edge_to_entry(edge: db::queries::RefEdge) -> model::RefEntry {
+    model::RefEntry {
+        spec: edge.spec,
+        anchor: edge.anchor,
+        step_path: edge.step_path,
+        step_text: edge.step_text,
+        guard_path: edge.guard_path,
+        call_site_id: edge.call_site_id,
+        kind: edge.kind.map(|k| k.as_str().to_string()),
+    }
+}
+
 fn find_references_from_conn(
     conn: &Connection,
     exact_target: Option<(String, String)>,
     query: &str,
     direction: &str,
     limit: u32,
+    kind: Option<model::RefKind>,
 ) -> Result<model::RefsResult> {
     let dir = parse_ref_direction(direction)?;
     let mut matches = Vec::new();
@@ -1202,12 +1214,9 @@ fn find_references_from_conn(
     for candidate in candidates {
         let outgoing = if dir == RefDirection::Outgoing || dir == RefDirection::Both {
             Some(
-                outgoing_refs_for_node(conn, &candidate.spec, &candidate.anchor)?
+                outgoing_edges_for_node(conn, &candidate.spec, &candidate.anchor, kind)?
                     .into_iter()
-                    .map(|(to_spec, to_anchor)| model::RefEntry {
-                        spec: to_spec,
-                        anchor: to_anchor,
-                    })
+                    .map(edge_to_entry)
                     .collect(),
             )
         } else {
@@ -1216,12 +1225,9 @@ fn find_references_from_conn(
 
         let incoming = if dir == RefDirection::Incoming || dir == RefDirection::Both {
             Some(
-                db::queries::get_incoming_refs(conn, &candidate.spec, &candidate.anchor)?
+                db::queries::get_incoming_edges(conn, &candidate.spec, &candidate.anchor, kind)?
                     .into_iter()
-                    .map(|(from_spec, from_anchor)| model::RefEntry {
-                        spec: from_spec,
-                        anchor: from_anchor,
-                    })
+                    .map(edge_to_entry)
                     .collect(),
             )
         } else {
@@ -1247,6 +1253,221 @@ fn find_references_from_conn(
         query: query.to_string(),
         direction: direction.to_ascii_lowercase(),
         matches,
+    })
+}
+
+/// Build the public URL for an anchor within a spec.
+fn anchor_url(base_url: &str, provider: &str, anchor: &str) -> String {
+    if provider == "itu" {
+        // ITU-T Recommendations are single PDFs, not per-anchor HTML pages —
+        // a "#clause" fragment is meaningless on a PDF URL, so the clause
+        // number isn't appended (unlike every other provider's base_url).
+        base_url.to_string()
+    } else if base_url.ends_with(".html") {
+        format!("{base_url}#{anchor}")
+    } else {
+        format!("{base_url}/#{anchor}")
+    }
+}
+
+/// Whether a link's `id` is a per-reference id the spec generator emitted for
+/// this particular mention, rather than an alias anchor for the target itself.
+///
+/// Wattsi names reference ids `<section>:<target>[-N]`. It also puts ids like
+/// `dom-document-referrer-dev` on developer-edition alias links, which point at
+/// the same target from anywhere and so do not identify a call site.
+fn is_call_site_id(id: &str) -> bool {
+    id.contains(':')
+}
+
+/// Ceiling on how many nodes the forward search may expand before giving up.
+/// Reaching it makes the result `truncated`, so callers never read "no path" as
+/// proof when the search was cut short.
+const PATH_NODE_BUDGET: usize = 20_000;
+
+/// Distance from each node to `target` following references backwards, for nodes
+/// within `max_depth`. This is the pruning set that keeps the forward search from
+/// exploring the whole graph.
+fn distances_to_target(
+    conn: &Connection,
+    target: &(String, String),
+    max_depth: usize,
+    kind: Option<model::RefKind>,
+) -> Result<HashMap<(String, String), usize>> {
+    let mut dist: HashMap<(String, String), usize> = HashMap::new();
+    dist.insert(target.clone(), 0);
+    let mut frontier = vec![target.clone()];
+
+    for depth in 1..=max_depth {
+        let mut next = Vec::new();
+        for (spec, anchor) in &frontier {
+            for edge in db::queries::get_incoming_edges(conn, spec, anchor, kind)? {
+                let node = (edge.spec, edge.anchor);
+                if !dist.contains_key(&node) {
+                    dist.insert(node.clone(), depth);
+                    next.push(node);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+
+    Ok(dist)
+}
+
+/// State for one path search. Bundled so the recursive walk stays readable.
+struct PathSearch<'a> {
+    conn: &'a Connection,
+    target: (String, String),
+    dist: HashMap<(String, String), usize>,
+    max_depth: usize,
+    max_paths: usize,
+    kind: Option<model::RefKind>,
+    stack: Vec<model::PathHop>,
+    on_path: HashSet<(String, String)>,
+    paths: Vec<model::SpecPath>,
+    expansions: usize,
+    truncated: bool,
+}
+
+impl PathSearch<'_> {
+    /// Depth-first over call edges, pruned to nodes that can still reach the
+    /// target within the remaining budget.
+    fn walk(&mut self, node: (String, String), depth: usize) -> Result<()> {
+        if depth >= self.max_depth || self.truncated {
+            return Ok(());
+        }
+
+        self.expansions += 1;
+        if self.expansions > PATH_NODE_BUDGET {
+            self.truncated = true;
+            return Ok(());
+        }
+
+        for edge in outgoing_edges_for_node(self.conn, &node.0, &node.1, self.kind)? {
+            let next = (edge.spec.clone(), edge.anchor.clone());
+            let hop = model::PathHop {
+                spec: node.0.clone(),
+                anchor: node.1.clone(),
+                to_spec: edge.spec,
+                to_anchor: edge.anchor,
+                step_path: edge.step_path,
+                step_text: edge.step_text,
+                guard_path: edge.guard_path,
+                call_site_id: edge.call_site_id,
+                call_site_url: None,
+            };
+
+            if next == self.target {
+                self.stack.push(hop);
+                self.paths.push(model::SpecPath {
+                    hops: self.stack.clone(),
+                });
+                self.stack.pop();
+                if self.paths.len() >= self.max_paths {
+                    self.truncated = true;
+                    return Ok(());
+                }
+                continue;
+            }
+
+            // Prune: skip nodes that cannot reach the target in what is left.
+            match self.dist.get(&next) {
+                Some(remaining) if depth + 1 + remaining <= self.max_depth => {}
+                _ => continue,
+            }
+            if !self.on_path.insert(next.clone()) {
+                continue;
+            }
+
+            self.stack.push(hop);
+            self.walk(next.clone(), depth + 1)?;
+            self.stack.pop();
+            self.on_path.remove(&next);
+
+            if self.truncated {
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Fill in each hop's deep link, looking up each spec's base URL once.
+fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::SpecPath]) -> Result<()> {
+    let mut meta: HashMap<String, Option<(String, String)>> = HashMap::new();
+
+    for path in paths.iter_mut() {
+        for hop in path.hops.iter_mut() {
+            let Some(id) = hop.call_site_id.as_deref() else {
+                continue;
+            };
+            if !is_call_site_id(id) {
+                // An alias anchor, not this mention. Drop it rather than link to
+                // something that looks like a call site but is not one.
+                hop.call_site_id = None;
+                continue;
+            }
+
+            let entry = match meta.entry(hop.spec.clone()) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let looked_up = db::queries::get_spec_meta(conn, &hop.spec)?
+                        .map(|(_, base_url, provider)| (base_url, provider));
+                    e.insert(looked_up)
+                }
+            };
+
+            if let Some((base_url, provider)) = entry {
+                hop.call_site_url = Some(anchor_url(base_url, provider, id));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn find_paths_from_conn(
+    conn: &Connection,
+    from: (String, String),
+    to: (String, String),
+    max_depth: usize,
+    kind: Option<model::RefKind>,
+    max_paths: usize,
+) -> Result<model::PathsResult> {
+    let mut search = PathSearch {
+        conn,
+        dist: distances_to_target(conn, &to, max_depth, kind)?,
+        target: to.clone(),
+        max_depth,
+        max_paths,
+        kind,
+        stack: Vec::new(),
+        on_path: HashSet::from([from.clone()]),
+        paths: Vec::new(),
+        expansions: 0,
+        truncated: false,
+    };
+
+    if from != to {
+        search.walk(from.clone(), 0)?;
+    }
+
+    let mut paths = search.paths;
+    paths.sort_by_key(|p| p.hops.len());
+    resolve_call_site_urls(conn, &mut paths)?;
+
+    Ok(model::PathsResult {
+        from: format!("{}#{}", from.0, from.1),
+        to: format!("{}#{}", to.0, to.1),
+        max_depth,
+        kind: kind.map(|k| k.as_str().to_string()),
+        paths,
+        truncated: search.truncated,
     })
 }
 
@@ -1482,12 +1703,51 @@ pub async fn query_idl(
     query_idl_from_conn(&conn, query, spec_filter, limit)
 }
 
+/// Enumerate reference paths from one section to another.
+///
+/// Both endpoints must be exact (`SPEC#anchor` or a full URL); this traces a
+/// known route rather than guessing what the caller meant.
+pub async fn find_paths(
+    from: &str,
+    to: &str,
+    max_depth: usize,
+    kind: Option<model::RefKind>,
+    max_paths: usize,
+) -> Result<model::PathsResult> {
+    let conn = db::open_or_create_db()?;
+    let registry = spec_registry::SpecRegistry::new();
+
+    let mut endpoints = Vec::new();
+    for target in [from, to] {
+        let (spec_name, anchor, base_url_hint) = parse_spec_anchor(target).map_err(|_| {
+            anyhow::anyhow!("'{target}' is not a SPEC#anchor or URL; paths needs exact endpoints")
+        })?;
+        let (_snapshot_id, canonical_spec_name) =
+            ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
+                .await?;
+        endpoints.push((canonical_spec_name, anchor));
+    }
+
+    let to_endpoint = endpoints.pop().expect("two endpoints");
+    let from_endpoint = endpoints.pop().expect("two endpoints");
+
+    find_paths_from_conn(
+        &conn,
+        from_endpoint,
+        to_endpoint,
+        max_depth,
+        kind,
+        max_paths,
+    )
+}
+
 /// Find incoming/outgoing references for SPEC#anchor or a shorthand query (e.g. Window.navigation).
 pub async fn find_references(
     target: &str,
     direction: &str,
     limit: u32,
     pr: Option<&model::PrOpts>,
+    kind: Option<model::RefKind>,
 ) -> Result<model::RefsResult> {
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
@@ -1519,7 +1779,7 @@ pub async fn find_references(
         Err(_) => None,
     };
 
-    find_references_from_conn(&conn, exact_target, target, direction, limit)
+    find_references_from_conn(&conn, exact_target, target, direction, limit, kind)
 }
 
 /// Compute diff between a PR preview and its merge base for a spec.
@@ -1696,6 +1956,241 @@ mod tests {
         }
     }
 
+    /// A call chain assign -> location-navigate -> navigate -> checking, with a
+    /// prose mention and a dead-end branch to exercise filtering and pruning.
+    fn setup_call_chain_db() -> Connection {
+        use model::{ParsedReference, RefKind};
+
+        let conn = db::open_test_db().unwrap();
+        let html =
+            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg")
+                .unwrap();
+        let dom = write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org", "whatwg")
+            .unwrap();
+        let html_snap =
+            write::insert_snapshot(&conn, html, "hash:h", "2026-01-01T00:00:00Z").unwrap();
+        let dom_snap =
+            write::insert_snapshot(&conn, dom, "hash:d", "2026-01-01T00:00:00Z").unwrap();
+
+        let step = |from: &str, to_spec: &str, to: &str, path: &str, text: &str| ParsedReference {
+            step_path: Some(path.to_string()),
+            step_text: Some(text.to_string()),
+            kind: RefKind::Step,
+            ..ParsedReference::prose(from, to_spec, to)
+        };
+
+        write::insert_refs_bulk(
+            &conn,
+            html_snap,
+            &[
+                step(
+                    "assign",
+                    "HTML",
+                    "location-navigate",
+                    "5",
+                    "Location-object navigate.",
+                ),
+                step(
+                    "location-navigate",
+                    "HTML",
+                    "navigate",
+                    "4",
+                    "Navigate navigable.",
+                ),
+                step("navigate", "HTML", "checking", "24.1", "Let x be checking."),
+                step("navigate", "DOM", "unrelated", "9", "Do something else."),
+                // A prose mention that would short-circuit the chain if treated as a call.
+                ParsedReference {
+                    kind: RefKind::Prose,
+                    ..ParsedReference::prose("assign", "HTML", "checking")
+                },
+            ],
+        )
+        .unwrap();
+        write::insert_refs_bulk(
+            &conn,
+            dom_snap,
+            &[step("unrelated", "DOM", "leaf", "1", "Dead end.")],
+        )
+        .unwrap();
+
+        conn
+    }
+
+    #[test]
+    fn call_site_ids_are_only_per_reference_ids() {
+        // Wattsi emits two id shapes on links. Only the first identifies a call
+        // site; the second is an alias anchor that means the same thing wherever
+        // it appears, so linking a hop to it would be misleading.
+        assert!(is_call_site_id("beginning-navigation:checking-2"));
+        assert!(is_call_site_id(
+            "the-location-interface:location-object-navigate-9"
+        ));
+        assert!(!is_call_site_id("dom-document-referrer-dev"));
+        assert!(!is_call_site_id("_ref_2258"));
+    }
+
+    #[test]
+    fn paths_resolve_call_site_urls_and_drop_alias_anchors() {
+        use model::{ParsedReference, RefKind};
+
+        let conn = setup_call_chain_db();
+        let snapshot_id = db::queries::get_snapshot(&conn, "HTML").unwrap().unwrap();
+        write::insert_refs_bulk(
+            &conn,
+            snapshot_id,
+            &[
+                ParsedReference {
+                    step_path: Some("1".to_string()),
+                    call_site_id: Some("some-section:target-3".to_string()),
+                    kind: RefKind::Step,
+                    ..ParsedReference::prose("linked", "HTML", "checking")
+                },
+                ParsedReference {
+                    step_path: Some("1".to_string()),
+                    call_site_id: Some("dom-document-referrer-dev".to_string()),
+                    kind: RefKind::Step,
+                    ..ParsedReference::prose("aliased", "HTML", "checking")
+                },
+            ],
+        )
+        .unwrap();
+
+        let linked = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "linked".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            2,
+            Some(model::RefKind::Step),
+            5,
+        )
+        .unwrap();
+        assert_eq!(
+            linked.paths[0].hops[0].call_site_url.as_deref(),
+            Some("https://html.spec.whatwg.org/#some-section:target-3")
+        );
+
+        let aliased = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "aliased".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            2,
+            Some(model::RefKind::Step),
+            5,
+        )
+        .unwrap();
+        let hop = &aliased.paths[0].hops[0];
+        assert_eq!(hop.call_site_url, None);
+        assert_eq!(
+            hop.call_site_id, None,
+            "an alias anchor must not be reported as a call site id"
+        );
+    }
+
+    #[test]
+    fn paths_finds_the_call_chain() {
+        let conn = setup_call_chain_db();
+        let result = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "assign".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            6,
+            Some(model::RefKind::Step),
+            20,
+        )
+        .unwrap();
+
+        assert_eq!(result.paths.len(), 1, "{:#?}", result.paths);
+        let hops = &result.paths[0].hops;
+        assert_eq!(hops.len(), 3);
+        assert_eq!(hops[0].anchor, "assign");
+        assert_eq!(hops[0].to_anchor, "location-navigate");
+        assert_eq!(hops[0].step_path.as_deref(), Some("5"));
+        assert_eq!(hops[2].anchor, "navigate");
+        assert_eq!(hops[2].to_anchor, "checking");
+        assert_eq!(hops[2].step_text.as_deref(), Some("Let x be checking."));
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn paths_without_kind_filter_includes_the_prose_shortcut() {
+        let conn = setup_call_chain_db();
+        let result = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "assign".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            6,
+            None,
+            20,
+        )
+        .unwrap();
+
+        assert!(
+            result.paths.iter().any(|p| p.hops.len() == 1),
+            "unfiltered search should surface the direct prose mention"
+        );
+        assert!(result.paths.iter().any(|p| p.hops.len() == 3));
+    }
+
+    #[test]
+    fn paths_respects_max_depth() {
+        let conn = setup_call_chain_db();
+        let result = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "assign".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            2,
+            Some(model::RefKind::Step),
+            20,
+        )
+        .unwrap();
+
+        assert!(
+            result.paths.is_empty(),
+            "the only call chain is 3 hops long"
+        );
+    }
+
+    #[test]
+    fn paths_reports_no_route_when_unreachable() {
+        let conn = setup_call_chain_db();
+        let result = find_paths_from_conn(
+            &conn,
+            ("DOM".to_string(), "leaf".to_string()),
+            ("HTML".to_string(), "assign".to_string()),
+            6,
+            Some(model::RefKind::Step),
+            20,
+        )
+        .unwrap();
+
+        assert!(result.paths.is_empty());
+        assert!(
+            !result.truncated,
+            "an exhausted search is not a truncated one"
+        );
+    }
+
+    #[test]
+    fn paths_crosses_spec_boundaries() {
+        let conn = setup_call_chain_db();
+        let result = find_paths_from_conn(
+            &conn,
+            ("HTML".to_string(), "navigate".to_string()),
+            ("DOM".to_string(), "leaf".to_string()),
+            6,
+            Some(model::RefKind::Step),
+            20,
+        )
+        .unwrap();
+
+        assert_eq!(result.paths.len(), 1);
+        let hops = &result.paths[0].hops;
+        assert_eq!(hops[0].to_spec, "DOM");
+        assert_eq!(hops[1].spec, "DOM");
+        assert_eq!(hops[1].to_anchor, "leaf");
+    }
+
     fn setup_reference_graph_db() -> Connection {
         let conn = db::open_test_db().unwrap();
 
@@ -1810,51 +2305,23 @@ mod tests {
         write::insert_sections_bulk(&conn, url_snapshot, &url_sections).unwrap();
 
         let html_refs = vec![
-            ParsedReference {
-                from_anchor: "navigate".to_string(),
-                to_spec: "DOM".to_string(),
-                to_anchor: "concept-tree".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "navigate".to_string(),
-                to_spec: "URL".to_string(),
-                to_anchor: "concept-url".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "some-consumer".to_string(),
-                to_spec: "HTML".to_string(),
-                to_anchor: "dom-window-navigation".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "dom-window-navigation".to_string(),
-                to_spec: "URL".to_string(),
-                to_anchor: "concept-url".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "dom-worker-navigation".to_string(),
-                to_spec: "DOM".to_string(),
-                to_anchor: "concept-tree".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "dom-window-navigation-helper".to_string(),
-                to_spec: "HTML".to_string(),
-                to_anchor: "navigate".to_string(),
-            },
+            ParsedReference::prose("navigate", "DOM", "concept-tree"),
+            ParsedReference::prose("navigate", "URL", "concept-url"),
+            ParsedReference::prose("some-consumer", "HTML", "dom-window-navigation"),
+            ParsedReference::prose("dom-window-navigation", "URL", "concept-url"),
+            ParsedReference::prose("dom-worker-navigation", "DOM", "concept-tree"),
+            ParsedReference::prose("dom-window-navigation-helper", "HTML", "navigate"),
         ];
         write::insert_refs_bulk(&conn, html_snapshot, &html_refs).unwrap();
 
-        let dom_refs = vec![ParsedReference {
-            from_anchor: "concept-tree".to_string(),
-            to_spec: "URL".to_string(),
-            to_anchor: "concept-url".to_string(),
-        }];
+        let dom_refs = vec![ParsedReference::prose("concept-tree", "URL", "concept-url")];
         write::insert_refs_bulk(&conn, dom_snapshot, &dom_refs).unwrap();
 
-        let url_refs = vec![ParsedReference {
-            from_anchor: "concept-relevant-global".to_string(),
-            to_spec: "HTML".to_string(),
-            to_anchor: "dom-window-navigation-helper".to_string(),
-        }];
+        let url_refs = vec![ParsedReference::prose(
+            "concept-relevant-global",
+            "HTML",
+            "dom-window-navigation-helper",
+        )];
         write::insert_refs_bulk(&conn, url_snapshot, &url_refs).unwrap();
 
         let idl_defs = vec![
@@ -2085,6 +2552,7 @@ mod tests {
             "HTML#dom-window-navigation",
             "incoming",
             10,
+            None,
         )
         .unwrap();
 
@@ -2100,10 +2568,77 @@ mod tests {
     }
 
     #[test]
+    fn find_references_reports_call_sites_and_filters_by_kind() {
+        use model::{ParsedReference, RefKind};
+
+        let conn = setup_reference_graph_db();
+        let snapshot_id = db::queries::get_snapshot(&conn, "HTML").unwrap().unwrap();
+        write::insert_refs_bulk(
+            &conn,
+            snapshot_id,
+            &[
+                ParsedReference {
+                    step_path: Some("24.1".to_string()),
+                    step_text: Some("Let x be the result of navigating.".to_string()),
+                    guard_path: vec!["In parallel, run these steps:".to_string()],
+                    kind: RefKind::Step,
+                    ..ParsedReference::prose("caller", "HTML", "navigate")
+                },
+                ParsedReference {
+                    kind: RefKind::Note,
+                    ..ParsedReference::prose("caller", "HTML", "navigate")
+                },
+            ],
+        )
+        .unwrap();
+
+        let all = find_references_from_conn(
+            &conn,
+            Some(("HTML".to_string(), "navigate".to_string())),
+            "HTML#navigate",
+            "incoming",
+            10,
+            None,
+        )
+        .unwrap();
+        let incoming = all.matches[0].incoming.as_ref().unwrap();
+        let call_site = incoming
+            .iter()
+            .find(|r| r.step_path.as_deref() == Some("24.1"))
+            .expect("step 24.1 call site");
+        assert_eq!(
+            call_site.step_text.as_deref(),
+            Some("Let x be the result of navigating.")
+        );
+        assert_eq!(
+            call_site.guard_path,
+            vec!["In parallel, run these steps:".to_string()]
+        );
+        assert_eq!(call_site.kind.as_deref(), Some("step"));
+
+        let steps_only = find_references_from_conn(
+            &conn,
+            Some(("HTML".to_string(), "navigate".to_string())),
+            "HTML#navigate",
+            "incoming",
+            10,
+            Some(RefKind::Step),
+        )
+        .unwrap();
+        let filtered = steps_only.matches[0].incoming.as_ref().unwrap();
+        assert!(
+            filtered.iter().all(|r| r.kind.as_deref() == Some("step")),
+            "kind filter must drop the note mention: {filtered:?}"
+        );
+        assert!(filtered.len() < incoming.len());
+    }
+
+    #[test]
     fn find_references_property_shorthand_prefers_window_navigation() {
         let conn = setup_reference_graph_db();
         let result =
-            find_references_from_conn(&conn, None, "Window.navigation", "incoming", 10).unwrap();
+            find_references_from_conn(&conn, None, "Window.navigation", "incoming", 10, None)
+                .unwrap();
 
         assert!(!result.matches.is_empty());
         let first = &result.matches[0];
@@ -2241,11 +2776,11 @@ mod tests {
         write::insert_refs_bulk(
             &conn,
             dom_snapshot,
-            &[ParsedReference {
-                from_anchor: "concept-tree".to_string(),
-                to_spec: "DOM".to_string(),
-                to_anchor: "concept-tree".to_string(),
-            }],
+            &[ParsedReference::prose(
+                "concept-tree",
+                "DOM",
+                "concept-tree",
+            )],
         )
         .unwrap();
 
@@ -2364,6 +2899,7 @@ mod tests {
             "HTML#navigate",
             "outgoing",
             10,
+            None,
         )
         .unwrap();
         assert_eq!(result.matches.len(), 1);

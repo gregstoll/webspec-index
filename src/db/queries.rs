@@ -1,5 +1,5 @@
 // Query operations on the database
-use crate::model::{ParsedSection, PrDiffEntry, SectionType};
+use crate::model::{ParsedSection, PrDiffEntry, RefKind, SectionType};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -265,46 +265,121 @@ pub fn get_children(
     Ok(children)
 }
 
-/// Get outgoing references from a section
+/// One reference edge together with the call site that produced it. `spec` and
+/// `anchor` name the *other* endpoint; the step fields always describe where in
+/// the referencing section the link occurs.
+#[derive(Debug, Clone)]
+pub struct RefEdge {
+    pub spec: String,
+    pub anchor: String,
+    pub step_path: Option<String>,
+    pub step_text: Option<String>,
+    pub guard_path: Vec<String>,
+    pub call_site_id: Option<String>,
+    pub kind: Option<RefKind>,
+}
+
+fn read_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<RefEdge> {
+    let guard_raw: Option<String> = row.get(4)?;
+    let kind_raw: Option<String> = row.get(6)?;
+    Ok(RefEdge {
+        spec: row.get(0)?,
+        anchor: row.get(1)?,
+        step_path: row.get(2)?,
+        step_text: row.get(3)?,
+        guard_path: crate::db::decode_guard_path(guard_raw.as_deref()),
+        call_site_id: row.get(5)?,
+        kind: kind_raw.as_deref().and_then(|k| k.parse().ok()),
+    })
+}
+
+/// Get outgoing references from a section, with call-site detail.
+/// `kind` restricts to one reference kind; None returns every reference,
+/// including legacy rows indexed before kinds existed.
+pub fn get_outgoing_edges(
+    conn: &Connection,
+    snapshot_id: i64,
+    from_anchor: &str,
+    kind: Option<RefKind>,
+) -> Result<Vec<RefEdge>> {
+    let mut stmt = conn.prepare(
+        "SELECT to_spec, to_anchor, step_path, step_text, guard_path, call_site_id, kind
+         FROM refs
+         WHERE snapshot_id = ?1 AND from_anchor = ?2
+           AND (?3 IS NULL OR kind = ?3)",
+    )?;
+
+    let edges = stmt
+        .query_map(
+            (snapshot_id, from_anchor, kind.map(|k| k.as_str())),
+            read_edge,
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(edges)
+}
+
+/// Get incoming references to a section, with call-site detail.
+/// Searches across all indexed specs to find cross-spec refs.
+pub fn get_incoming_edges(
+    conn: &Connection,
+    to_spec: &str,
+    to_anchor: &str,
+    kind: Option<RefKind>,
+) -> Result<Vec<RefEdge>> {
+    let mut stmt = conn.prepare(
+        "SELECT sp.name, r.from_anchor, r.step_path, r.step_text, r.guard_path,
+                r.call_site_id, r.kind
+         FROM refs r
+         JOIN snapshots sn ON r.snapshot_id = sn.id
+         JOIN specs sp ON sn.spec_id = sp.id
+         WHERE r.to_spec = ?1 AND r.to_anchor = ?2 AND sn.pr_number IS NULL
+           AND sn.sha LIKE 'hash:%'
+           AND (?3 IS NULL OR r.kind = ?3)",
+    )?;
+
+    let edges = stmt
+        .query_map((to_spec, to_anchor, kind.map(|k| k.as_str())), read_edge)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(edges)
+}
+
+/// Distinct outgoing targets from a section, ignoring how many call sites
+/// reach each one.
 pub fn get_outgoing_refs(
     conn: &Connection,
     snapshot_id: i64,
     from_anchor: &str,
 ) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare(
-        "SELECT to_spec, to_anchor FROM refs
-         WHERE snapshot_id = ?1 AND from_anchor = ?2",
-    )?;
-
-    let refs = stmt
-        .query_map((snapshot_id, from_anchor), |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(refs)
+    Ok(dedupe_endpoints(get_outgoing_edges(
+        conn,
+        snapshot_id,
+        from_anchor,
+        None,
+    )?))
 }
 
-/// Get incoming references to a section
-/// Returns (from_spec, from_anchor) tuples
-/// Searches across all indexed specs to find cross-spec refs
+/// Distinct sections referencing a target, as (from_spec, from_anchor).
 pub fn get_incoming_refs(
     conn: &Connection,
     to_spec: &str,
     to_anchor: &str,
 ) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare(
-        "SELECT sp.name, r.from_anchor FROM refs r
-         JOIN snapshots sn ON r.snapshot_id = sn.id
-         JOIN specs sp ON sn.spec_id = sp.id
-         WHERE r.to_spec = ?1 AND r.to_anchor = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'",
-    )?;
+    Ok(dedupe_endpoints(get_incoming_edges(
+        conn, to_spec, to_anchor, None,
+    )?))
+}
 
-    let refs = stmt
-        .query_map((to_spec, to_anchor), |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(refs)
+fn dedupe_endpoints(edges: Vec<RefEdge>) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    edges
+        .into_iter()
+        .filter_map(|e| {
+            let key = (e.spec, e.anchor);
+            seen.insert(key.clone()).then_some(key)
+        })
+        .collect()
 }
 
 /// Search sections using FTS5
@@ -552,6 +627,114 @@ mod tests {
         write::insert_sections_bulk(conn, snapshot_id, &sections)?;
 
         Ok(snapshot_id)
+    }
+
+    /// Two call sites from `navigate` plus a prose mention, so kind filtering and
+    /// per-step attribution can both be exercised.
+    fn setup_step_refs(conn: &Connection) -> Result<i64> {
+        use crate::model::{ParsedReference, RefKind};
+
+        let snapshot_id = setup_test_data(conn)?;
+        let refs = vec![
+            ParsedReference {
+                step_path: Some("24.1".to_string()),
+                step_text: Some("Let x be the result of checking.".to_string()),
+                guard_path: vec!["In parallel, run these steps:".to_string()],
+                call_site_id: Some("navigate:checking-3".to_string()),
+                kind: RefKind::Step,
+                ..ParsedReference::prose("intro", "HTML", "checking")
+            },
+            ParsedReference {
+                step_path: Some("31".to_string()),
+                step_text: Some("Otherwise, check again.".to_string()),
+                kind: RefKind::Step,
+                ..ParsedReference::prose("intro", "HTML", "checking")
+            },
+            ParsedReference {
+                kind: RefKind::Prose,
+                ..ParsedReference::prose("intro", "HTML", "checking")
+            },
+        ];
+        write::insert_refs_bulk(conn, snapshot_id, &refs)?;
+        Ok(snapshot_id)
+    }
+
+    #[test]
+    fn test_outgoing_edges_carry_step_context() {
+        let conn = db::open_test_db().unwrap();
+        let snapshot_id = setup_step_refs(&conn).unwrap();
+
+        let edges = get_outgoing_edges(&conn, snapshot_id, "intro", None).unwrap();
+        assert_eq!(edges.len(), 3);
+
+        let first = edges
+            .iter()
+            .find(|e| e.step_path.as_deref() == Some("24.1"))
+            .expect("step 24.1 edge");
+        assert_eq!(first.anchor, "checking");
+        assert_eq!(
+            first.step_text.as_deref(),
+            Some("Let x be the result of checking.")
+        );
+        assert_eq!(
+            first.guard_path,
+            vec!["In parallel, run these steps:".to_string()]
+        );
+        assert_eq!(first.call_site_id.as_deref(), Some("navigate:checking-3"));
+        assert_eq!(first.kind, Some(crate::model::RefKind::Step));
+    }
+
+    #[test]
+    fn test_outgoing_edges_kind_filter() {
+        let conn = db::open_test_db().unwrap();
+        let snapshot_id = setup_step_refs(&conn).unwrap();
+
+        let steps = get_outgoing_edges(
+            &conn,
+            snapshot_id,
+            "intro",
+            Some(crate::model::RefKind::Step),
+        )
+        .unwrap();
+        assert_eq!(steps.len(), 2, "prose mention must be filtered out");
+        assert!(steps.iter().all(|e| e.step_path.is_some()));
+    }
+
+    #[test]
+    fn test_incoming_edges_carry_step_context() {
+        let conn = db::open_test_db().unwrap();
+        setup_step_refs(&conn).unwrap();
+
+        let edges =
+            get_incoming_edges(&conn, "HTML", "checking", Some(crate::model::RefKind::Step))
+                .unwrap();
+
+        assert_eq!(edges.len(), 2);
+        assert!(edges
+            .iter()
+            .all(|e| e.spec == "HTML" && e.anchor == "intro"));
+        let mut paths: Vec<_> = edges.iter().filter_map(|e| e.step_path.clone()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["24.1".to_string(), "31".to_string()]);
+    }
+
+    #[test]
+    fn test_legacy_refs_without_kind_are_returned_unfiltered() {
+        // Rows written before step-level indexing have NULL kind. They must still
+        // show up in an unfiltered query rather than silently vanishing.
+        let conn = db::open_test_db().unwrap();
+        let snapshot_id = setup_test_data(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
+             VALUES (?1, 'intro', 'HTML', 'legacy')",
+            [snapshot_id],
+        )
+        .unwrap();
+
+        let edges = get_outgoing_edges(&conn, snapshot_id, "intro", None).unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].anchor, "legacy");
+        assert_eq!(edges[0].kind, None);
     }
 
     #[test]

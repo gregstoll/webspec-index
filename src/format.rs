@@ -1,8 +1,8 @@
 //! Markdown output formatters for CLI commands
 
 use crate::model::{
-    AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PrDiffResult, QueryResult,
-    RefsResult, SearchResult,
+    AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PathsResult, PrDiffResult,
+    QueryResult, RefEntry, RefsResult, SearchResult,
 };
 
 #[cfg(test)]
@@ -191,6 +191,27 @@ pub fn list(entries: &[ListEntry]) -> String {
     md
 }
 
+/// One reference as a markdown bullet, with its call site when the index has one.
+fn ref_entry_line(entry: &RefEntry) -> String {
+    let mut line = format!("- {}#{}", entry.spec, entry.anchor);
+    if let Some(step) = &entry.step_path {
+        line.push_str(&format!(" — step {step}"));
+    }
+    if let Some(kind) = &entry.kind {
+        if kind != "step" {
+            line.push_str(&format!(" ({kind})"));
+        }
+    }
+    line.push('\n');
+    if let Some(text) = &entry.step_text {
+        line.push_str(&format!("  > {text}\n"));
+    }
+    for guard in &entry.guard_path {
+        line.push_str(&format!("  - under: {guard}\n"));
+    }
+    line
+}
+
 /// Format a RefsResult as markdown
 pub fn refs(result: &RefsResult) -> String {
     let mut md = String::new();
@@ -216,7 +237,7 @@ pub fn refs(result: &RefsResult) -> String {
         if let Some(incoming) = &m.incoming {
             md.push_str(&format!("Incoming: {}\n", incoming.len()));
             for r in incoming {
-                md.push_str(&format!("- {}#{}\n", r.spec, r.anchor));
+                md.push_str(&ref_entry_line(r));
             }
             md.push('\n');
         }
@@ -224,7 +245,76 @@ pub fn refs(result: &RefsResult) -> String {
         if let Some(outgoing) = &m.outgoing {
             md.push_str(&format!("Outgoing: {}\n", outgoing.len()));
             for r in outgoing {
-                md.push_str(&format!("- {}#{}\n", r.spec, r.anchor));
+                md.push_str(&ref_entry_line(r));
+            }
+            md.push('\n');
+        }
+    }
+
+    md
+}
+
+/// Format a PathsResult as markdown: one numbered chain per path, each hop
+/// quoting the step that makes the call.
+pub fn paths(result: &PathsResult) -> String {
+    let mut md = String::new();
+    md.push_str(&format!(
+        "# paths: `{}` -> `{}`\n\n",
+        result.from, result.to
+    ));
+    md.push_str(&format!(
+        "Max depth {}{}. Found {} path(s).{}\n\n",
+        result.max_depth,
+        result
+            .kind
+            .as_ref()
+            .map(|k| format!(", kind `{k}`"))
+            .unwrap_or_default(),
+        result.paths.len(),
+        if result.truncated {
+            " Search was truncated, so this list may be incomplete."
+        } else {
+            ""
+        }
+    ));
+
+    if result.paths.is_empty() {
+        md.push_str(if result.truncated {
+            "No path found before the search budget ran out.\n"
+        } else {
+            "No path exists within these bounds.\n"
+        });
+        return md;
+    }
+
+    for (index, path) in result.paths.iter().enumerate() {
+        md.push_str(&format!(
+            "## Path {} ({} hop(s))\n\n",
+            index + 1,
+            path.hops.len()
+        ));
+        for (position, hop) in path.hops.iter().enumerate() {
+            // Link the calling step, not the callee's definition: the reader
+            // needs to land where the call is made.
+            let site = match (&hop.step_path, &hop.call_site_url) {
+                (Some(step), Some(url)) => {
+                    format!("[`{}#{}` step {step}]({url})", hop.spec, hop.anchor)
+                }
+                (Some(step), None) => format!("`{}#{}` step {step}", hop.spec, hop.anchor),
+                (None, Some(url)) => format!("[`{}#{}`]({url})", hop.spec, hop.anchor),
+                (None, None) => format!("`{}#{}`", hop.spec, hop.anchor),
+            };
+            md.push_str(&format!(
+                "{}) {site} calls `{}#{}`\n",
+                position + 1,
+                hop.to_spec,
+                hop.to_anchor
+            ));
+            for guard in &hop.guard_path {
+                md.push_str(&format!("   - under: {guard}\n"));
+            }
+            if let Some(text) = &hop.step_text {
+                md.push_str(&format!("   > {text}\n"));
             }
             md.push('\n');
         }
@@ -537,14 +627,8 @@ mod tests {
                     },
                 ],
             },
-            outgoing_refs: vec![RefEntry {
-                spec: "OTHER".to_string(),
-                anchor: "bar".to_string(),
-            }],
-            incoming_refs: vec![RefEntry {
-                spec: "ANOTHER".to_string(),
-                anchor: "baz".to_string(),
-            }],
+            outgoing_refs: vec![RefEntry::plain("OTHER".to_string(), "bar".to_string())],
+            incoming_refs: vec![RefEntry::plain("ANOTHER".to_string(), "baz".to_string())],
         };
 
         let md = query(&result);
@@ -667,19 +751,13 @@ mod tests {
                 section_type: "algorithm".to_string(),
                 resolution: "exact".to_string(),
                 outgoing: Some(vec![
-                    RefEntry {
-                        spec: "URL".to_string(),
-                        anchor: "concept-url".to_string(),
-                    },
-                    RefEntry {
-                        spec: "INFRA".to_string(),
-                        anchor: "assert".to_string(),
-                    },
+                    RefEntry::plain("URL".to_string(), "concept-url".to_string()),
+                    RefEntry::plain("INFRA".to_string(), "assert".to_string()),
                 ]),
-                incoming: Some(vec![RefEntry {
-                    spec: "HTML".to_string(),
-                    anchor: "navigate-fragid".to_string(),
-                }]),
+                incoming: Some(vec![RefEntry::plain(
+                    "HTML".to_string(),
+                    "navigate-fragid".to_string(),
+                )]),
             }],
         };
 
@@ -704,6 +782,94 @@ mod tests {
         let md = refs(&result);
         assert!(md.contains("# refs: `HTML#orphan`"));
         assert!(md.contains("No matches found"));
+    }
+
+    #[test]
+    fn test_paths_markdown_renders_a_trace() {
+        use crate::model::{PathHop, SpecPath};
+
+        let result = PathsResult {
+            from: "HTML#assign".to_string(),
+            to: "HTML#checking".to_string(),
+            max_depth: 6,
+            kind: Some("step".to_string()),
+            paths: vec![SpecPath {
+                hops: vec![PathHop {
+                    spec: "HTML".to_string(),
+                    anchor: "navigate".to_string(),
+                    to_spec: "HTML".to_string(),
+                    to_anchor: "checking".to_string(),
+                    step_path: Some("24.1".to_string()),
+                    step_text: Some("Let unloadPromptCanceled be the result.".to_string()),
+                    guard_path: vec!["In parallel, run these steps:".to_string()],
+                    call_site_id: None,
+                    call_site_url: None,
+                }],
+            }],
+            truncated: false,
+        };
+
+        let md = paths(&result);
+        assert!(md.contains("# paths: `HTML#assign` -> `HTML#checking`"));
+        assert!(md.contains("1) `HTML#navigate` step 24.1 calls `HTML#checking`"));
+        assert!(md.contains("   - under: In parallel, run these steps:"));
+        assert!(md.contains("   > Let unloadPromptCanceled be the result."));
+        assert!(!md.contains("truncated"));
+    }
+
+    #[test]
+    fn test_paths_markdown_links_the_call_site() {
+        use crate::model::{PathHop, SpecPath};
+
+        let result = PathsResult {
+            from: "HTML#a".to_string(),
+            to: "HTML#checking".to_string(),
+            max_depth: 6,
+            kind: Some("step".to_string()),
+            paths: vec![SpecPath {
+                hops: vec![PathHop {
+                    spec: "HTML".to_string(),
+                    anchor: "navigate".to_string(),
+                    to_spec: "HTML".to_string(),
+                    to_anchor: "checking".to_string(),
+                    step_path: Some("24.1".to_string()),
+                    step_text: None,
+                    guard_path: vec![],
+                    call_site_id: Some("beginning-navigation:checking-2".to_string()),
+                    call_site_url: Some(
+                        "https://html.spec.whatwg.org/#beginning-navigation:checking-2".to_string(),
+                    ),
+                }],
+            }],
+            truncated: false,
+        };
+
+        let md = paths(&result);
+        assert!(
+            md.contains(
+                "1) [`HTML#navigate` step 24.1](https://html.spec.whatwg.org/#beginning-navigation:checking-2) calls `HTML#checking`"
+            ),
+            "the hop must link to the call site, not the callee: {md}"
+        );
+    }
+
+    #[test]
+    fn test_paths_markdown_distinguishes_empty_from_truncated() {
+        let empty = PathsResult {
+            from: "HTML#a".to_string(),
+            to: "HTML#b".to_string(),
+            max_depth: 6,
+            kind: None,
+            paths: vec![],
+            truncated: false,
+        };
+        assert!(paths(&empty).contains("No path exists within these bounds."));
+
+        let cut_short = PathsResult {
+            truncated: true,
+            ..empty
+        };
+        assert!(paths(&cut_short).contains("budget ran out"));
     }
 
     #[test]

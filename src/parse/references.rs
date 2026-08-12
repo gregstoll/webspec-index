@@ -1,7 +1,8 @@
 // Cross-reference extraction from <a> elements
-use crate::model::{ParsedReference, ParsedSection, SectionType};
+use super::algorithms::step_number;
+use crate::model::{ParsedReference, ParsedSection, RefKind, SectionType};
 use crate::spec_registry::SpecRegistry;
-use scraper::Html;
+use scraper::{ElementRef, Html};
 
 /// Extract all cross-references from a parsed HTML document.
 ///
@@ -57,20 +58,34 @@ pub fn extract_references(
                 }
 
                 if let Some(ref section) = current_section {
-                    if let Some(mut parsed_ref) = parse_href(href, section, registry) {
+                    if let Some((mut to_spec, to_anchor)) = parse_href(href, registry) {
                         // Resolve intra-spec placeholder to the actual spec name
-                        if parsed_ref.to_spec == "self" {
-                            parsed_ref.to_spec = spec_name.to_string();
+                        if to_spec == "self" {
+                            to_spec = spec_name.to_string();
                         }
 
-                        // Deduplicate by (from_anchor, to_spec, to_anchor)
+                        let ctx = link_context(&elem);
+
+                        // Deduplicate by call site: the same target linked twice in
+                        // one step is one call, but the same target reached from two
+                        // different steps is two distinct call sites.
                         let key = (
-                            parsed_ref.from_anchor.clone(),
-                            parsed_ref.to_spec.clone(),
-                            parsed_ref.to_anchor.clone(),
+                            section.clone(),
+                            to_spec.clone(),
+                            to_anchor.clone(),
+                            ctx.step_path.clone(),
                         );
                         if seen.insert(key) {
-                            references.push(parsed_ref);
+                            references.push(ParsedReference {
+                                from_anchor: section.clone(),
+                                to_spec,
+                                to_anchor,
+                                step_path: ctx.step_path,
+                                step_text: ctx.step_text,
+                                guard_path: ctx.guard_path,
+                                call_site_id: elem.value().attr("id").map(str::to_string),
+                                kind: ctx.kind,
+                            });
                         }
                     }
                 }
@@ -97,31 +112,173 @@ fn is_biblio_ref(link: &scraper::ElementRef) -> bool {
 }
 
 /// Parse an href attribute to determine the target spec and anchor
-fn parse_href(href: &str, from_anchor: &str, registry: &SpecRegistry) -> Option<ParsedReference> {
+fn parse_href(href: &str, registry: &SpecRegistry) -> Option<(String, String)> {
     // Intra-spec reference (starts with #)
     if href.starts_with('#') {
-        let to_anchor = href.trim_start_matches('#').to_string();
-        return Some(ParsedReference {
-            from_anchor: from_anchor.to_string(),
-            to_spec: "self".to_string(),
-            to_anchor,
-        });
+        return Some(("self".to_string(), href.trim_start_matches('#').to_string()));
     }
 
     // Cross-spec reference (full URL)
     if href.starts_with("http://") || href.starts_with("https://") {
         // Try to resolve the URL using the registry
         if let Some((spec_name, anchor)) = registry.resolve_url(href) {
-            return Some(ParsedReference {
-                from_anchor: from_anchor.to_string(),
-                to_spec: spec_name,
-                to_anchor: anchor,
-            });
+            return Some((spec_name, anchor));
         }
     }
 
     // Unknown or external URL, skip
     None
+}
+
+/// Where a link sits within its section: which algorithm step encloses it, what
+/// that step says, which steps guard it, and whether it is a call at all.
+struct LinkContext {
+    step_path: Option<String>,
+    step_text: Option<String>,
+    guard_path: Vec<String>,
+    kind: RefKind,
+}
+
+fn link_context(link: &ElementRef) -> LinkContext {
+    let mut callout = false;
+    let mut idl = false;
+    // Enclosing <li> elements, innermost first.
+    let mut items: Vec<(usize, ElementRef)> = Vec::new();
+
+    for ancestor in link.ancestors() {
+        let Some(elem) = ElementRef::wrap(ancestor) else {
+            continue;
+        };
+        let name = elem.value().name();
+
+        if is_callout(&elem) {
+            callout = true;
+        }
+        if (name == "pre" || name == "code") && has_class(&elem, "idl") {
+            idl = true;
+        }
+        if name == "li" {
+            if let Some(number) = step_number(&elem) {
+                items.push((number, elem));
+            }
+        }
+    }
+
+    items.reverse(); // outermost first
+
+    let kind = if callout {
+        RefKind::Note
+    } else if idl {
+        RefKind::Idl
+    } else if items.is_empty() {
+        RefKind::Prose
+    } else {
+        RefKind::Step
+    };
+
+    let step_path = if items.is_empty() {
+        None
+    } else {
+        Some(
+            items
+                .iter()
+                .map(|(n, _)| n.to_string())
+                .collect::<Vec<_>>()
+                .join("."),
+        )
+    };
+
+    let guard_path = items
+        .iter()
+        .take(items.len().saturating_sub(1))
+        .map(|(_, elem)| own_text(elem))
+        .collect();
+
+    let step_text = items.last().map(|(_, elem)| own_text(elem));
+
+    LinkContext {
+        step_path,
+        step_text,
+        guard_path,
+        kind,
+    }
+}
+
+fn is_callout(elem: &ElementRef) -> bool {
+    matches!(
+        elem.value().name(),
+        "p" | "div" | "aside" | "details" | "blockquote"
+    ) && ["note", "example", "warning", "advisement"]
+        .iter()
+        .any(|c| has_class(elem, c))
+}
+
+fn is_block(name: &str) -> bool {
+    matches!(
+        name,
+        "p" | "div"
+            | "li"
+            | "ul"
+            | "ol"
+            | "dl"
+            | "dt"
+            | "dd"
+            | "table"
+            | "tr"
+            | "td"
+            | "th"
+            | "section"
+            | "aside"
+            | "blockquote"
+            | "pre"
+            | "figure"
+            | "figcaption"
+    )
+}
+
+fn has_class(elem: &ElementRef, class: &str) -> bool {
+    elem.value().classes().any(|c| c == class)
+}
+
+/// Text of an element excluding any nested lists, whitespace-normalized. Keeps a
+/// step's own wording out of its substeps and vice versa.
+fn own_text(elem: &ElementRef) -> String {
+    fn collect(node: ego_tree::NodeRef<'_, scraper::Node>, out: &mut String) {
+        for child in node.children() {
+            match child.value() {
+                scraper::Node::Text(text) => out.push_str(&text.text),
+                scraper::Node::Element(element) => {
+                    // Numbered substeps and switch bodies get their own step paths,
+                    // and notes are commentary. A <ul> is a condition list, without
+                    // which the step it guards reads as a bare "If ... then:".
+                    if matches!(element.name(), "ol" | "dl") {
+                        continue;
+                    }
+                    if let Some(child_elem) = ElementRef::wrap(child) {
+                        if is_callout(&child_elem) {
+                            continue;
+                        }
+                    }
+                    // Block boundaries are word boundaries; adjacent <li> texts
+                    // would otherwise run together. Inline elements must not get
+                    // spaces, or "inner." becomes "inner .".
+                    let block = is_block(element.name());
+                    if block {
+                        out.push(' ');
+                    }
+                    collect(child, out);
+                    if block {
+                        out.push(' ');
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut raw = String::new();
+    collect(**elem, &mut raw);
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -516,5 +673,416 @@ mod tests {
 
         assert_eq!(refs.len(), 1, "Duplicate ref should be deduplicated");
         assert_eq!(refs[0].to_anchor, "target");
+    }
+
+    fn algo_section(anchor: &str) -> ParsedSection {
+        ParsedSection {
+            anchor: anchor.to_string(),
+            title: Some(anchor.to_string()),
+            content_text: None,
+            section_type: SectionType::Algorithm,
+            parent_anchor: None,
+            prev_anchor: None,
+            next_anchor: None,
+            depth: None,
+        }
+    }
+
+    fn find<'a>(refs: &'a [ParsedReference], anchor: &str) -> &'a ParsedReference {
+        refs.iter()
+            .find(|r| r.to_anchor == anchor)
+            .unwrap_or_else(|| panic!("no ref to {anchor} in {refs:#?}"))
+    }
+
+    const NESTED_ALGORITHM: &str = r##"
+        <p>To <dfn id="navigate">navigate</dfn>:</p>
+        <ol>
+            <li><p>Let x be <a href="#first">first</a>.</p></li>
+            <li><p>If <a href="#cond">cond</a> is true, run these steps:</p>
+                <ol>
+                    <li><p>Call <a href="#inner">inner</a>.</p></li>
+                    <li><p>Return <a href="#result">result</a>.</p></li>
+                </ol>
+            </li>
+            <li><p>Finally <a href="#last">last</a>.</p></li>
+        </ol>
+    "##;
+
+    #[test]
+    fn test_step_path_top_level() {
+        let refs = extract_references(
+            NESTED_ALGORITHM,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(find(&refs, "first").step_path.as_deref(), Some("1"));
+        assert_eq!(find(&refs, "cond").step_path.as_deref(), Some("2"));
+        assert_eq!(find(&refs, "last").step_path.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn test_step_path_nested() {
+        let refs = extract_references(
+            NESTED_ALGORITHM,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(find(&refs, "inner").step_path.as_deref(), Some("2.1"));
+        assert_eq!(find(&refs, "result").step_path.as_deref(), Some("2.2"));
+    }
+
+    #[test]
+    fn test_step_text_excludes_substeps() {
+        let refs = extract_references(
+            NESTED_ALGORITHM,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        let cond = find(&refs, "cond");
+        assert_eq!(
+            cond.step_text.as_deref(),
+            Some("If cond is true, run these steps:"),
+            "step text must not absorb its substeps"
+        );
+        assert_eq!(
+            find(&refs, "inner").step_text.as_deref(),
+            Some("Call inner.")
+        );
+    }
+
+    #[test]
+    fn test_guard_path_from_enclosing_steps() {
+        let refs = extract_references(
+            NESTED_ALGORITHM,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert!(
+            find(&refs, "first").guard_path.is_empty(),
+            "top-level step has no guard"
+        );
+        assert_eq!(
+            find(&refs, "inner").guard_path,
+            vec!["If cond is true, run these steps:".to_string()],
+            "nested step carries its enclosing step as guard"
+        );
+    }
+
+    #[test]
+    fn test_prose_reference_has_no_step() {
+        let refs = extract_references(
+            NESTED_ALGORITHM,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        // The intro <p> is prose, not a step. It contains no links here, so verify
+        // via a section whose only link sits outside any list.
+        let prose = extract_references(
+            r##"<h2 id="s">S</h2><p>See <a href="#other">other</a>.</p>"##,
+            "TEST",
+            &[ParsedSection {
+                section_type: SectionType::Heading,
+                ..algo_section("s")
+            }],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(find(&prose, "other").kind, RefKind::Prose);
+        assert!(find(&prose, "other").step_path.is_none());
+        assert_eq!(find(&refs, "first").kind, RefKind::Step);
+    }
+
+    #[test]
+    fn test_step_paths_across_spec_generators() {
+        // Every generator nests algorithm steps as <ol><li>, but wraps them
+        // differently: wattsi bare, bikeshed inside div.algorithm, ecmarkup inside
+        // <emu-alg> with links buried in <emu-xref>. Step numbering must not care.
+        let wattsi = include_str!("../../tests/fixtures/algorithms/wattsi_navigate.html");
+        let refs = extract_references(
+            wattsi,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+        assert_eq!(
+            find(&refs, "snapshotting-source-snapshot-params")
+                .step_path
+                .as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            find(&refs, "starting-an-unload").step_path.as_deref(),
+            Some("4.1"),
+            "wattsi nested step"
+        );
+        assert_eq!(
+            find(&refs, "starting-an-unload").guard_path.len(),
+            1,
+            "nested step keeps its parent as guard"
+        );
+
+        let bikeshed = include_str!("../../tests/fixtures/algorithms/bikeshed_algorithm.html");
+        let refs = extract_references(
+            bikeshed,
+            "TEST",
+            &[algo_section("concept-ordered-set-parser")],
+            &SpecRegistry::new(),
+        );
+        assert!(
+            refs.iter()
+                .all(|r| r.kind == RefKind::Step || r.step_path.is_none()),
+            "bikeshed: {refs:#?}"
+        );
+
+        let ecmarkup = include_str!("../../tests/fixtures/ecmarkup/tostring.html");
+        let refs = extract_references(
+            ecmarkup,
+            "TEST",
+            &[algo_section("sec-tostring")],
+            &SpecRegistry::new(),
+        );
+        let assert_ref = find(&refs, "assert");
+        assert_eq!(
+            assert_ref.step_path.as_deref(),
+            Some("9"),
+            "ecmarkup step inside <emu-alg><ol>, link nested in <emu-xref>"
+        );
+        assert_eq!(assert_ref.kind, RefKind::Step);
+        assert_eq!(
+            find(&refs, "sec-toprimitive").step_path.as_deref(),
+            Some("10")
+        );
+    }
+
+    #[test]
+    fn test_switch_body_attributes_to_enclosing_step() {
+        // Wattsi renders switches as <dl class=switch>. Branches are not numbered
+        // steps, so a link inside one belongs to the step containing the switch,
+        // and the branch condition must not leak into that step's text.
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Switch on url's scheme:</p>
+                    <dl class="switch">
+                        <dt>"about"</dt>
+                        <dd><p>Call <a href="#about-handler">about handler</a>.</p></dd>
+                        <dt>Otherwise</dt>
+                        <dd><p>Call <a href="#fetch-handler">fetch handler</a>.</p></dd>
+                    </dl>
+                </li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        for anchor in ["about-handler", "fetch-handler"] {
+            let r = find(&refs, anchor);
+            assert_eq!(r.step_path.as_deref(), Some("1"), "{anchor}");
+            assert_eq!(r.kind, RefKind::Step, "{anchor}");
+            assert_eq!(
+                r.step_text.as_deref(),
+                Some("Switch on url's scheme:"),
+                "switch branches must not be absorbed into the step text"
+            );
+        }
+    }
+
+    #[test]
+    fn test_step_text_excludes_notes() {
+        // Wattsi puts notes inside the step they annotate. Absorbing them makes
+        // quoted step text unusable — real notes run to hundreds of words.
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>While cond is true:</p>
+                    <p class="note">This is a loop, since aborting can run JavaScript.</p>
+                    <ol>
+                        <li><p>Call <a href="#inner">inner</a>.</p></li>
+                    </ol>
+                </li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(
+            find(&refs, "inner").guard_path,
+            vec!["While cond is true:".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_step_text_keeps_condition_bullets() {
+        // A step whose condition is spelled out in a <ul> is meaningless without
+        // the bullets, and those bullets are not substeps.
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>If all of the following are true:</p>
+                    <ul>
+                        <li>documentResource is null;</li>
+                        <li>response is null,</li>
+                    </ul>
+                    <p>then:</p>
+                    <ol>
+                        <li><p>Call <a href="#frag">frag</a>.</p></li>
+                    </ol>
+                </li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        let guard = &find(&refs, "frag").guard_path[0];
+        assert_eq!(
+            guard,
+            "If all of the following are true: documentResource is null; response is null, then:",
+            "condition bullets belong in the guard, separated at element boundaries"
+        );
+    }
+
+    #[test]
+    fn test_note_inside_step_is_not_a_call() {
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Call <a href="#real">real</a>.</p>
+                    <p class="note">See <a href="#mentioned">mentioned</a> for context.</p>
+                </li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(find(&refs, "real").kind, RefKind::Step);
+        assert_eq!(
+            find(&refs, "mentioned").kind,
+            RefKind::Note,
+            "a link inside a note is a mention, not a call, even within a step"
+        );
+    }
+
+    #[test]
+    fn test_idl_block_reference() {
+        let html = r##"
+            <h2 id="iface">Interface</h2>
+            <pre class="idl">interface <a href="#thing">Thing</a> {};</pre>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[ParsedSection {
+                section_type: SectionType::Heading,
+                ..algo_section("iface")
+            }],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(find(&refs, "thing").kind, RefKind::Idl);
+    }
+
+    #[test]
+    fn test_call_site_id_captured() {
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Call <a id="navigate:target-3" href="#target">target</a>.</p></li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(
+            find(&refs, "target").call_site_id.as_deref(),
+            Some("navigate:target-3")
+        );
+    }
+
+    #[test]
+    fn test_same_target_at_different_steps_kept_separately() {
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Call <a href="#target">target</a>.</p></li>
+                <li><p>Call <a href="#target">target</a> again.</p></li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        let steps: Vec<_> = refs
+            .iter()
+            .filter(|r| r.to_anchor == "target")
+            .filter_map(|r| r.step_path.clone())
+            .collect();
+        assert_eq!(
+            steps,
+            vec!["1".to_string(), "2".to_string()],
+            "distinct call sites must survive deduplication"
+        );
+    }
+
+    #[test]
+    fn test_same_target_in_same_step_deduplicated() {
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>Call <a href="#target">target</a> then <a href="#target">target</a>.</p></li>
+            </ol>
+        "##;
+
+        let refs = extract_references(
+            html,
+            "TEST",
+            &[algo_section("navigate")],
+            &SpecRegistry::new(),
+        );
+
+        assert_eq!(
+            refs.iter().filter(|r| r.to_anchor == "target").count(),
+            1,
+            "same target twice in one step is one call site"
+        );
     }
 }

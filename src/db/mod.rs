@@ -6,6 +6,22 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
 
+/// Guard steps are stored as a JSON array so that step text containing any
+/// separator character round-trips intact.
+pub fn encode_guard_path(guards: &[String]) -> Option<String> {
+    if guards.is_empty() {
+        None
+    } else {
+        serde_json::to_string(guards).ok()
+    }
+}
+
+pub fn decode_guard_path(encoded: Option<&str>) -> Vec<String> {
+    encoded
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
+}
+
 /// Get the database file path
 /// Tests can override this by setting a different path
 pub fn get_db_path() -> PathBuf {

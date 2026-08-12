@@ -58,12 +58,79 @@ pub struct ParsedSection {
     pub depth: Option<u8>, // 2-6 for headings
 }
 
+/// Where in a section a cross-reference occurs. Only `Step` references are
+/// algorithm invocations; the rest are mentions and should not be treated as
+/// call edges when tracing control flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RefKind {
+    /// Inside a numbered algorithm step.
+    Step,
+    /// Inside a note or example callout, including one nested in a step.
+    Note,
+    /// Inside a WebIDL block.
+    Idl,
+    /// Ordinary prose.
+    Prose,
+}
+
+impl RefKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RefKind::Step => "step",
+            RefKind::Note => "note",
+            RefKind::Idl => "idl",
+            RefKind::Prose => "prose",
+        }
+    }
+}
+
+impl std::str::FromStr for RefKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "step" => Ok(RefKind::Step),
+            "note" => Ok(RefKind::Note),
+            "idl" => Ok(RefKind::Idl),
+            "prose" => Ok(RefKind::Prose),
+            _ => Err(()),
+        }
+    }
+}
+
 /// A cross-reference found in the spec
 #[derive(Debug, Clone)]
 pub struct ParsedReference {
     pub from_anchor: String,
     pub to_spec: String, // Target spec name (same as source for intra-spec refs)
     pub to_anchor: String,
+    /// Dotted step number of the enclosing algorithm step, e.g. "24.1".
+    pub step_path: Option<String>,
+    /// Text of the enclosing step, excluding its substeps.
+    pub step_text: Option<String>,
+    /// Text of the enclosing steps, outermost first. Empty for top-level steps.
+    pub guard_path: Vec<String>,
+    /// The `id` the spec generator put on the link element, if any. Lets callers
+    /// link to the call site rather than the target's definition.
+    pub call_site_id: Option<String>,
+    pub kind: RefKind,
+}
+
+impl ParsedReference {
+    /// A reference with no step context, as produced by prose links.
+    pub fn prose(from_anchor: &str, to_spec: &str, to_anchor: &str) -> Self {
+        ParsedReference {
+            from_anchor: from_anchor.to_string(),
+            to_spec: to_spec.to_string(),
+            to_anchor: to_anchor.to_string(),
+            step_path: None,
+            step_text: None,
+            guard_path: Vec::new(),
+            call_site_id: None,
+            kind: RefKind::Prose,
+        }
+    }
 }
 
 /// A parsed WebIDL definition from `dfn[data-dfn-type]`
@@ -119,6 +186,33 @@ pub struct NavEntry {
 pub struct RefEntry {
     pub spec: String,
     pub anchor: String,
+    /// Step of the referencing section where the link occurs, e.g. "24.1".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_text: Option<String>,
+    /// Enclosing steps, outermost first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guard_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_site_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+impl RefEntry {
+    /// A reference with no call-site detail, for callers that only need identity.
+    pub fn plain(spec: impl Into<String>, anchor: impl Into<String>) -> Self {
+        RefEntry {
+            spec: spec.into(),
+            anchor: anchor.into(),
+            step_path: None,
+            step_text: None,
+            guard_path: Vec::new(),
+            call_site_id: None,
+            kind: None,
+        }
+    }
 }
 
 /// JSON output for exists command
@@ -249,6 +343,47 @@ pub struct RefsMatch {
     pub outgoing: Option<Vec<RefEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incoming: Option<Vec<RefEntry>>,
+}
+
+/// One call in a traced path: the step of `spec#anchor` that invokes
+/// `to_spec#to_anchor`.
+#[derive(Debug, Clone, Serialize)]
+pub struct PathHop {
+    pub spec: String,
+    pub anchor: String,
+    pub to_spec: String,
+    pub to_anchor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_text: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guard_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_site_id: Option<String>,
+    /// Deep link to the call site itself rather than the callee's definition,
+    /// when the spec generator emitted a per-reference id for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_site_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpecPath {
+    pub hops: Vec<PathHop>,
+}
+
+/// JSON output for paths command
+#[derive(Debug, Serialize)]
+pub struct PathsResult {
+    pub from: String,
+    pub to: String,
+    pub max_depth: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub paths: Vec<SpecPath>,
+    /// True when the search hit its path or node budget, so absence of a path is
+    /// not proof that none exists.
+    pub truncated: bool,
 }
 
 /// JSON output for idl command

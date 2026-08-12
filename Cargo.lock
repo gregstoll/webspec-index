@@ -3214,7 +3214,7 @@ dependencies = [
 
 [[package]]
 name = "webspec-index"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3222,6 +3222,7 @@ dependencies = [
  "clap",
  "dashmap 6.1.0",
  "dirs",
+ "ego-tree",
  "euclid",
  "htmd",
  "libc",

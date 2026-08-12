@@ -542,11 +542,7 @@ mod tests {
                 next_anchor: None,
                 depth: Some(2),
             }],
-            references: vec![ParsedReference {
-                from_anchor: "sec-b".into(),
-                to_spec: "DOM".into(),
-                to_anchor: "concept-tree".into(),
-            }],
+            references: vec![ParsedReference::prose("sec-b", "DOM", "concept-tree")],
             idl_definitions: vec![idl_b()],
         };
 
@@ -563,11 +559,7 @@ mod tests {
                 next_anchor: None,
                 depth: Some(2),
             }],
-            references: vec![ParsedReference {
-                from_anchor: "sec-b".into(),
-                to_spec: "DOM".into(),
-                to_anchor: "concept-tree".into(),
-            }],
+            references: vec![ParsedReference::prose("sec-b", "DOM", "concept-tree")],
             idl_definitions: vec![idl_b()],
         };
 

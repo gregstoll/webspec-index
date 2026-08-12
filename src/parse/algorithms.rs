@@ -90,21 +90,48 @@ fn dedent_block(text: &str) -> String {
     dedented.join("\n").trim().to_string()
 }
 
+/// The number an `<li>` carries within its enclosing `<ol>`: its 1-based position
+/// among sibling items, offset by the list's `start` attribute.
+///
+/// This is the single definition of algorithm step numbering. Both the markdown
+/// renderer and cross-reference extraction call it, so a step's number cannot
+/// differ between what a reader sees and what the reference graph records.
+/// Returns None for `<ul>` items, which are unnumbered.
+pub fn step_number(item: &ElementRef) -> Option<usize> {
+    let parent = item.parent().and_then(ElementRef::wrap)?;
+    if parent.value().name() != "ol" {
+        return None;
+    }
+
+    let start: usize = parent
+        .value()
+        .attr("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    let position = parent
+        .children()
+        .filter_map(ElementRef::wrap)
+        .filter(|e| e.value().name() == "li")
+        .position(|e| e.id() == item.id())?;
+
+    Some(start + position)
+}
+
 /// Render an algorithm's `<ol>` element with markdown-style numbering.
 /// Nested lists use simple numbering (1., 2., etc.) with indentation - markdown handles visual hierarchy.
 /// Inline content is converted to markdown using the provided converter.
 pub fn render_algorithm_ol(ol_element: &ElementRef, converter: &HtmlToMarkdown) -> String {
     let mut result = String::new();
-    let mut step_number = 1;
 
     for child in ol_element.children() {
         if let Some(child_element) = ElementRef::wrap(child) {
             let tag_name = child_element.value().name();
 
             if tag_name == "li" {
+                let step_number = step_number(&child_element).unwrap_or(1);
                 let step_text = render_li_recursive(&child_element, &[step_number], 0, converter);
                 result.push_str(&step_text);
-                step_number += 1;
             } else {
                 // Handle other elements between list items (notes, examples, etc.)
                 let elem_md = converter
@@ -169,19 +196,17 @@ fn render_li_recursive(
 
                 // Nested numbered list
                 result.push_str("\n\n");
-                let mut sub_step = 1;
                 for sub_child in child_element.children() {
                     if let Some(sub_li) = ElementRef::wrap(sub_child) {
                         if sub_li.value().name() == "li" {
                             let mut new_numbering = numbering.to_vec();
-                            new_numbering.push(sub_step);
+                            new_numbering.push(step_number(&sub_li).unwrap_or(1));
                             result.push_str(&render_li_recursive(
                                 &sub_li,
                                 &new_numbering,
                                 indent + 1,
                                 converter,
                             ));
-                            sub_step += 1;
                         }
                     }
                 }

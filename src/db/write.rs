@@ -130,8 +130,9 @@ pub fn insert_refs_bulk(
 
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
+                               step_path, step_text, guard_path, call_site_id, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
 
         for reference in refs {
@@ -140,6 +141,11 @@ pub fn insert_refs_bulk(
                 &reference.from_anchor,
                 &reference.to_spec,
                 &reference.to_anchor,
+                &reference.step_path,
+                &reference.step_text,
+                super::encode_guard_path(&reference.guard_path),
+                &reference.call_site_id,
+                reference.kind.as_str(),
             ))?;
         }
     }
@@ -473,6 +479,86 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_refs_bulk_round_trips_step_context() {
+        use crate::model::RefKind;
+
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg").unwrap();
+        let snapshot_id =
+            insert_snapshot(&conn, spec_id, "abc123", "2026-01-01T00:00:00Z").unwrap();
+
+        let reference = ParsedReference {
+            step_path: Some("24.1".to_string()),
+            step_text: Some("Let unloadPromptCanceled be the result.".to_string()),
+            guard_path: vec!["In parallel, run these steps:".to_string()],
+            call_site_id: Some("navigate:checking-if-unloading-is-canceled".to_string()),
+            kind: RefKind::Step,
+            ..ParsedReference::prose("navigate", "HTML", "checking-if-unloading-is-canceled")
+        };
+
+        insert_refs_bulk(&conn, snapshot_id, &[reference]).unwrap();
+
+        let column = |name: &str| -> Option<String> {
+            conn.query_row(
+                &format!("SELECT {name} FROM refs WHERE snapshot_id = ?1"),
+                [snapshot_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let step_path = column("step_path");
+        let step_text = column("step_text");
+        let guard_path = column("guard_path");
+        let call_site_id = column("call_site_id");
+        let kind = column("kind");
+
+        assert_eq!(step_path.as_deref(), Some("24.1"));
+        assert_eq!(
+            step_text.as_deref(),
+            Some("Let unloadPromptCanceled be the result.")
+        );
+        assert_eq!(
+            db::decode_guard_path(guard_path.as_deref()),
+            vec!["In parallel, run these steps:".to_string()]
+        );
+        assert_eq!(
+            call_site_id.as_deref(),
+            Some("navigate:checking-if-unloading-is-canceled")
+        );
+        assert_eq!(kind.as_deref(), Some("step"));
+    }
+
+    #[test]
+    fn test_prose_reference_stores_null_step_context() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg").unwrap();
+        let snapshot_id =
+            insert_snapshot(&conn, spec_id, "abc123", "2026-01-01T00:00:00Z").unwrap();
+
+        insert_refs_bulk(
+            &conn,
+            snapshot_id,
+            &[ParsedReference::prose("intro", "DOM", "concept-tree")],
+        )
+        .unwrap();
+
+        let (step_path, guard_path): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT step_path, guard_path FROM refs WHERE snapshot_id = ?1",
+                [snapshot_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(step_path, None);
+        assert_eq!(
+            guard_path, None,
+            "empty guard path stores as NULL, not '[]'"
+        );
+    }
+
+    #[test]
     fn test_insert_refs_bulk() {
         let conn = db::open_test_db().unwrap();
 
@@ -482,16 +568,8 @@ mod tests {
             insert_snapshot(&conn, spec_id, "abc123", "2026-01-01T00:00:00Z").unwrap();
 
         let refs = vec![
-            ParsedReference {
-                from_anchor: "intro".to_string(),
-                to_spec: "DOM".to_string(),
-                to_anchor: "concept-tree".to_string(),
-            },
-            ParsedReference {
-                from_anchor: "intro".to_string(),
-                to_spec: "HTML".to_string(),
-                to_anchor: "details".to_string(),
-            },
+            ParsedReference::prose("intro", "DOM", "concept-tree"),
+            ParsedReference::prose("intro", "HTML", "details"),
         ];
 
         insert_refs_bulk(&conn, snapshot_id, &refs).unwrap();
