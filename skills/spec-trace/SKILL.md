@@ -13,12 +13,12 @@ allowed-tools:
 **Question**: $ARGUMENTS
 
 Produce an ordered chain of spec algorithm invocations from a web-visible entry point to the
-behaviour in question, quoting the deciding step at each hop, ending in a verdict. The output is
-pasted into a Bugzilla comment as an argument, so every link must resolve and every quote must be
-verbatim. Pass `--gecko` to also map the trace to Gecko source.
+behaviour in question, quoting the deciding step at each hop, and end in a verdict. The output goes
+into a Bugzilla comment as an argument, so it has to survive a reader checking it. Pass `--gecko` to
+also map the trace to Gecko source.
 
-`webspec-index trace` does the search and supplies each hop's step number, verbatim text, guard
-steps and call-site link. Your work is deciding which of the routes it returns actually apply.
+`webspec-index trace` finds the routes and supplies each hop's step number, verbatim text, guard
+steps and call-site link. Your work is judging which of those routes the scenario actually takes.
 
 ## Phase 0: Resolve
 
@@ -26,9 +26,9 @@ steps and call-site link. Your work is deciding which of the routes it returns a
   resolves IDL members directly; use `search` or `anchors` for non-IDL entry points.
 - **Target anchor** — what the question asks about. Events are indexed as definitions:
   `webspec-index anchors '*eventname*' --spec HTML`.
-- **Scenario facts** — the preconditions that decide branches. State them in the output; a trace
-  is only valid for the scenario it assumed, and most wrong traces are wrong because an unstated
-  assumption silently picked a branch. If the question leaves a branch-deciding fact open, name
+- **Scenario facts** — the preconditions that decide branches. State them in the output. A trace is
+  valid only for the scenario it assumed, and most wrong traces are wrong because an unstated
+  assumption silently picked a branch. Where the question leaves a branch-deciding fact open, name
   the assumption and trace the branch the reporter most plausibly meant.
 
 ## Phase 1: Enumerate routes
@@ -37,57 +37,50 @@ steps and call-site link. Your work is deciding which of the routes it returns a
 webspec-index trace '<SPEC#entry>' '<SPEC#target>' --max-depth 9 -l 40 --format markdown
 ```
 
-Defaults to `--kind step`, so prose mentions, notes and IDL tables are already excluded — those
-are roughly 60% of the reference graph and all of them are non-calls.
+Nine hops is not generous; real chains run that long. Too low a depth reports zero routes, which
+reads exactly like a genuine NOT REACHED, so raise it once before believing an empty result.
 
-Read the header before the traces. `Found N trace(s)` with `truncated: false` means the enumeration
-is exhaustive within that depth, which is what lets a NOT REACHED verdict claim more than "I did
-not find one". If it says the search was truncated, raise `-l`, or narrow the endpoints, and say
-so in the output if it still truncates.
+`--kind step` is the default, so prose mentions, notes and IDL tables are already excluded — around
+60% of the reference graph, none of it calls.
 
-When a route points into a spec that has never been indexed, `trace` indexes it and searches
-again, printing `indexing N spec(s) the route touches` to stderr. That costs about a second per
-spec on the first run and nothing afterwards, so a cross-spec trace may pause briefly. It gives up
-after two rounds; if the line keeps appearing, the chain reaches further than the search will
-follow and the verdict is INCONCLUSIVE.
+Read the header before the routes:
 
-Start at `--max-depth 9`. Real chains run longer than they look — eight or nine hops is ordinary.
-A depth that is too low reports zero traces, which reads exactly like a genuine NOT REACHED and is
-the easiest way to get this wrong. If you get zero traces, raise the depth once before believing
-it.
+- `Found N trace(s)` with `truncated: false` means the enumeration is exhaustive at that depth. This
+  is what lets a NOT REACHED verdict claim more than "I did not find one".
+- `Search was truncated` means it is not. Raise `-l` or narrow the endpoints; if it still truncates,
+  the verdict is INCONCLUSIVE.
+- `indexing N spec(s) the route touches` on stderr means specs a route crosses were fetched on
+  demand, costing about a second each on a first run. If it keeps appearing across runs, the chain
+  reaches further than the search will follow, and the verdict is INCONCLUSIVE.
 
-If the target is reachable only through a different entry point than you assumed, `refs
-'<SPEC#target>' --direction incoming --kind step -l 50` shows who really calls it.
-
-`--detail` picks how much of each hop to show:
-
-- `verbose` (default) — step text, guards and call-site link. What you judge from.
-- `edges` — `SPEC#anchor` plus step number, no prose and no URLs. About a third the size, and
-  every token is an identifier `query` and `refs` accept. Use it to compare route shapes when
-  there are many, then re-run verbose on the ones you mean to judge.
-- `compact` — one linked line per hop, with an edge's repeated call sites collapsed onto it. Best
-  for pasting a route into a comment where the reader wants links rather than quotations.
-
-Do not judge from a reduced level: the guards it drops are exactly what decides whether a route is
-taken, and reading sections to recover them costs far more than carrying them did.
+When the target turns out to be reachable only from somewhere other than your assumed entry point,
+`refs '<SPEC#target>' --direction incoming --kind step -l 50` shows who really calls it.
 
 ## Phase 2: Judge each route
 
-The tool proves a route exists in the reference graph. It cannot know your scenario. For each
-route, decide whether it is actually taken, using what each hop already gives you:
+The tool proves a route exists in the reference graph. It cannot know your scenario. Decide route by
+route whether it is taken, from what each hop already carries:
 
 - **Guards.** Does a `- under:` condition contradict a scenario fact? That kills the route.
-- **Arguments.** Does the step text pass, or omit, an optional argument the callee branches on?
-  An omitted argument frequently disables the branch the whole question turns on.
-- **Ordering.** Compare step numbers within a section. A call at step 20 runs before one at step
-  24, so state it may depend on has not been set up yet, or has already been torn down.
-- **Identity.** Does the hop act on the object the question is about? An algorithm that aborts
-  *the previous* ongoing navigation does not report *this* one.
+- **Arguments.** Does the step pass, or omit, an optional argument the callee branches on? An
+  omitted argument frequently disables the branch the whole question turns on.
+- **Ordering.** Compare step numbers within a section. A call at step 20 runs before one at step 24,
+  so state it depends on may not be set up yet, or may already be torn down.
+- **Identity.** Does the hop act on the object the question is about? An algorithm that aborts *the
+  previous* ongoing navigation does not report *this* one.
 
-Read the full section only when a hop's own text and guards are not enough:
+Read the whole section when a hop's own text and guards are not enough:
 `webspec-index query '<SPEC#anchor>' --format markdown`.
 
-Record why each rejected path is rejected. Those reasons are the output, not scratch work.
+**A NOT REACHED verdict needs the step where the chain stops, and that step is never in the
+output.** `trace` enumerates routes that reach the target, so the step that ends a chain instead —
+returning, aborting, or taking the other branch — has no edge to the target and cannot appear in any
+route. It is invisible to the search by construction, and it is usually the step the answer turns
+on. Read the last section a surviving route reaches, starting at the step after the one the route
+left off at, and quote what you find there.
+
+Keep the reason each route was rejected. Those reasons are half the output, not scratch work: they
+are what makes a NOT REACHED verdict an argument, and what a reporter will push back on.
 
 ## Phase 3: Render
 
@@ -104,33 +97,28 @@ Record why each rejected path is rejected. Those reasons are the output, not scr
 
 **Verdict: <REACHED | NOT REACHED | INCONCLUSIVE>** — <one sentence>
 
-| Rejected path | Rejected because |
+| Rejected route | Rejected because |
 |---|---|
 ````
 
-The markdown from `trace` is already this shape; keep its hop links and quoted steps verbatim and
-add the scenario, the verdict and the rejected-path table.
+`trace --format markdown` already emits the numbered hop list; add the scenario, the verdict and the
+rejected-route table around it. Say explicitly where a chain returns to an earlier algorithm — that
+unwind is usually where the answer lives.
 
-- Every link resolves to an element id, so that `exists` can check it and a reader can tell when it
-  breaks. Two forms, in order of preference: the call-site id the spec generator emitted for that
-  mention, which `trace` supplies and which lands the reader on the calling line; failing that, the
-  section anchor with the step number in the link text —
-  ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``. Roughly a third of hops
-  have no call-site id, and a step that calls nothing never does, so the deciding step of a
-  NOT REACHED verdict usually takes the second form.
-- Say explicitly where the chain returns to an earlier algorithm; that unwind is usually where the
-  answer lives.
+Every link resolves to an element id, so `exists` can check it and a reader can tell when it breaks.
+Two forms, preferred first: the call-site id the generator emitted for that mention, which `trace`
+supplies and which lands the reader on the calling line; failing that, the section anchor with the
+step number in the link text — ``[`HTML#navigate` step 24.2](https://html.spec.whatwg.org/#navigate)``.
+About a third of hops have no call-site id, and a step that calls nothing never does, so the
+deciding step of a NOT REACHED verdict usually takes the second form.
 
 Exactly one verdict:
 
 - **REACHED** — the spec specifies the behaviour; name the step. Firefox not doing it is a bug.
-- **NOT REACHED** — no route survived judgement. The rejected-paths table is what makes this an
-  argument rather than an assertion, and it is what a reporter will push back on. Also consider
-  whether the spec omission is itself the defect, in which case the follow-up is a spec issue and
-  Firefox is compliant.
-- **INCONCLUSIVE** — the chain hit a UA-defined step, an unindexed spec, or the search truncated.
-  Say where it stopped and what would resolve it. Never soften this into another verdict for
-  tidiness.
+- **NOT REACHED** — no route survived judgement. Consider whether the spec omission is itself the
+  defect, in which case Firefox is compliant and the follow-up is a spec issue.
+- **INCONCLUSIVE** — the chain hit a UA-defined step, an unindexed spec, or a truncated search. Say
+  where it stopped and what would resolve it. Never soften this into another verdict for tidiness.
 
 ## `--gecko` mode
 
@@ -144,29 +132,22 @@ searchfox-cli --spec-refs '<url>'
   algorithm is often the reason for the bug.
 - One row per distinct URL, not per hop. An algorithm the chain re-enters collapses into one row
   listing the hops it covers.
-- Add the rejected algorithms as `(not reached)` rows. For a NOT REACHED verdict they carry the
-  weight: the code exists and simply is not wired to this path.
-- Discard matches under `.claude/skills/` and `.agents/skills/`. In-tree skill documentation
-  quotes spec URLs in its examples and is indexed as code, in both copies.
-
-`--permalink` is accepted but currently returns the same `/source/` URLs as `--link`, so do not
-promise commit-pinned links.
+- Add rejected algorithms as `(not reached)` rows. For a NOT REACHED verdict they carry the weight:
+  the code exists and simply is not wired to this route.
+- Discard matches under `.claude/skills/` and `.agents/skills/`. In-tree skill documentation quotes
+  spec URLs in its examples and is indexed as code, in both copies.
 
 ## Hard rules
 
 **Every quote comes from tool output.** `trace` and `refs` emit plain step text; use it as given.
 `query` renders markdown, so its step text carries `*emphasis*` around variable names and inline
-`[links](...)`. Stripping that syntax to recover the spec's own prose is not paraphrasing; changing
-a word is. Never reconstruct from memory, and never present a truncated fragment as a quotation. A
-trace with an invented quote loses the argument it was written to win.
+`[links](...)`; stripping that to recover the spec's prose is not paraphrasing, changing a word is.
+A truncated fragment presented as a quotation is an invented quote, and an invented quote loses the
+argument the trace was written to win.
 
-**Validate every anchor** with `webspec-index exists '<SPEC#anchor>'` before it ships, including
-the ones in the rejected-paths table. Those are the links a reader clicks to push back. Exit code
-0 means the anchor resolves.
+**Validate every anchor** with `webspec-index exists '<SPEC#anchor>'` before it ships, the
+rejected-route table included. Exit code 0 means it resolves.
 
-**Trace the spec as of today.** If the bug references an unlanded spec PR, add `--pr N` to the
-`query`, `refs` and `exists` calls, and say in the output which PR the trace assumes. `trace` does
-not take `--pr`; against a PR, fall back to `refs --kind step` in both directions.
-
-**Distinguish exhausted from truncated.** `truncated: false` and zero traces is evidence that no
-route exists among indexed specs. A truncated search is not, and must be reported as INCONCLUSIVE.
+**Trace the spec as of today.** If the bug references an unlanded spec PR, add `--pr N` to `query`,
+`refs` and `exists`, and say in the output which PR the trace assumes. `trace` has no `--pr`;
+against a PR, walk `refs --kind step` in both directions instead.
