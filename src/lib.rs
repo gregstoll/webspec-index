@@ -1285,6 +1285,12 @@ fn is_call_site_id(id: &str) -> bool {
 /// proof when the search was cut short.
 const TRACE_NODE_BUDGET: usize = 20_000;
 
+/// How many times `trace` will index newly discovered specs and search again.
+/// Each round costs roughly a second per spec, so this caps the implicit network
+/// work at a few seconds rather than letting one query walk the whole registry.
+const TRACE_SELF_HEAL_ROUNDS: usize = 2;
+const TRACE_SELF_HEAL_SPECS_PER_ROUND: usize = 8;
+
 /// Distance from each node to `target` following references backwards, for nodes
 /// within `max_depth`. This is the pruning set that keeps the forward search from
 /// exploring the whole graph.
@@ -1331,9 +1337,23 @@ struct TraceSearch<'a> {
     traces: Vec<model::Trace>,
     expansions: usize,
     truncated: bool,
+    /// Specs an edge points into that hold no indexed data. The search cannot
+    /// see through them, but the edge itself is evidence they belong to the
+    /// question, so the caller indexes them and searches again.
+    unindexed: HashSet<String>,
+    indexed_lookup: HashMap<String, bool>,
 }
 
 impl TraceSearch<'_> {
+    fn spec_is_indexed(&mut self, spec: &str) -> Result<bool> {
+        if let Some(known) = self.indexed_lookup.get(spec) {
+            return Ok(*known);
+        }
+        let indexed = db::queries::get_snapshot(self.conn, spec)?.is_some();
+        self.indexed_lookup.insert(spec.to_string(), indexed);
+        Ok(indexed)
+    }
+
     /// Depth-first over call edges, pruned to nodes that can still reach the
     /// target within the remaining budget.
     fn walk(&mut self, node: (String, String), depth: usize) -> Result<()> {
@@ -1349,6 +1369,9 @@ impl TraceSearch<'_> {
 
         for edge in outgoing_edges_for_node(self.conn, &node.0, &node.1, self.kind)? {
             let next = (edge.spec.clone(), edge.anchor.clone());
+            if !self.spec_is_indexed(&next.0)? {
+                self.unindexed.insert(next.0.clone());
+            }
             let hop = model::TraceHop {
                 spec: node.0.clone(),
                 anchor: node.1.clone(),
@@ -1431,6 +1454,7 @@ fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Resu
     Ok(())
 }
 
+#[cfg(test)]
 fn find_traces_from_conn(
     conn: &Connection,
     from: (String, String),
@@ -1439,6 +1463,18 @@ fn find_traces_from_conn(
     kind: Option<model::RefKind>,
     max_traces: usize,
 ) -> Result<model::TraceResult> {
+    Ok(search_traces(conn, from, to, max_depth, kind, max_traces)?.0)
+}
+
+/// The search proper, also reporting specs it could not see into.
+fn search_traces(
+    conn: &Connection,
+    from: (String, String),
+    to: (String, String),
+    max_depth: usize,
+    kind: Option<model::RefKind>,
+    max_traces: usize,
+) -> Result<(model::TraceResult, HashSet<String>)> {
     let mut search = TraceSearch {
         conn,
         dist: distances_to_target(conn, &to, max_depth, kind)?,
@@ -1451,24 +1487,29 @@ fn find_traces_from_conn(
         traces: Vec::new(),
         expansions: 0,
         truncated: false,
+        unindexed: HashSet::new(),
+        indexed_lookup: HashMap::new(),
     };
 
     if from != to {
         search.walk(from.clone(), 0)?;
     }
 
-    let mut paths = search.traces;
-    paths.sort_by_key(|p| p.hops.len());
-    resolve_call_site_urls(conn, &mut paths)?;
+    let mut traces = search.traces;
+    traces.sort_by_key(|t| t.hops.len());
+    resolve_call_site_urls(conn, &mut traces)?;
 
-    Ok(model::TraceResult {
-        from: format!("{}#{}", from.0, from.1),
-        to: format!("{}#{}", to.0, to.1),
-        max_depth,
-        kind: kind.map(|k| k.as_str().to_string()),
-        traces: paths,
-        truncated: search.truncated,
-    })
+    Ok((
+        model::TraceResult {
+            from: format!("{}#{}", from.0, from.1),
+            to: format!("{}#{}", to.0, to.1),
+            max_depth,
+            kind: kind.map(|k| k.as_str().to_string()),
+            traces,
+            truncated: search.truncated,
+        },
+        search.unindexed,
+    ))
 }
 
 fn normalize_idl_query(query: &str) -> String {
@@ -1720,7 +1761,7 @@ pub async fn find_traces(
     let mut endpoints = Vec::new();
     for target in [from, to] {
         let (spec_name, anchor, base_url_hint) = parse_spec_anchor(target).map_err(|_| {
-            anyhow::anyhow!("'{target}' is not a SPEC#anchor or URL; paths needs exact endpoints")
+            anyhow::anyhow!("'{target}' is not a SPEC#anchor or URL; trace needs exact endpoints")
         })?;
         let (_snapshot_id, canonical_spec_name) =
             ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
@@ -1731,14 +1772,50 @@ pub async fn find_traces(
     let to_endpoint = endpoints.pop().expect("two endpoints");
     let from_endpoint = endpoints.pop().expect("two endpoints");
 
-    find_traces_from_conn(
-        &conn,
-        from_endpoint,
-        to_endpoint,
-        max_depth,
-        kind,
-        max_traces,
-    )
+    // Indexing is lazy, so a route can pass through a spec that has never been
+    // fetched — invisible, not absent. Each round indexes the unindexed specs the
+    // search bumped into and searches again; newly indexed specs contribute their
+    // own edges, which can reveal the next spec along. Bounded because each round
+    // must find something new to continue.
+    let mut round = 0;
+    loop {
+        let (result, unindexed) = search_traces(
+            &conn,
+            from_endpoint.clone(),
+            to_endpoint.clone(),
+            max_depth,
+            kind,
+            max_traces,
+        )?;
+
+        round += 1;
+        if unindexed.is_empty() || round > TRACE_SELF_HEAL_ROUNDS {
+            return Ok(result);
+        }
+
+        let mut to_index: Vec<String> = unindexed.into_iter().collect();
+        to_index.sort();
+        to_index.truncate(TRACE_SELF_HEAL_SPECS_PER_ROUND);
+        eprintln!(
+            "webspec-index: indexing {} spec(s) the route touches: {}",
+            to_index.len(),
+            to_index.join(", ")
+        );
+
+        let mut progressed = false;
+        for spec in &to_index {
+            if ensure_indexed_for_spec_name(&conn, &registry, spec, None)
+                .await
+                .is_ok()
+            {
+                progressed = true;
+            }
+        }
+        // Nothing could be fetched, so another round would search the same graph.
+        if !progressed {
+            return Ok(result);
+        }
+    }
 }
 
 /// Find incoming/outgoing references for SPEC#anchor or a shorthand query (e.g. Window.navigation).
@@ -2084,6 +2161,45 @@ mod tests {
         assert_eq!(
             hop.call_site_id, None,
             "an alias anchor must not be reported as a call site id"
+        );
+    }
+
+    #[test]
+    fn trace_reports_specs_it_cannot_see_into() {
+        use model::{ParsedReference, RefKind};
+
+        let conn = setup_call_chain_db();
+        let snapshot_id = db::queries::get_snapshot(&conn, "HTML").unwrap().unwrap();
+        // HTML links into FETCH, which has never been indexed. The edge is the
+        // only evidence FETCH belongs to the question at all.
+        write::insert_refs_bulk(
+            &conn,
+            snapshot_id,
+            &[ParsedReference {
+                step_path: Some("3".to_string()),
+                kind: RefKind::Step,
+                ..ParsedReference::prose("navigate", "FETCH", "concept-fetch")
+            }],
+        )
+        .unwrap();
+
+        let (_result, unindexed) = search_traces(
+            &conn,
+            ("HTML".to_string(), "assign".to_string()),
+            ("HTML".to_string(), "checking".to_string()),
+            6,
+            Some(model::RefKind::Step),
+            20,
+        )
+        .unwrap();
+
+        assert!(
+            unindexed.contains("FETCH"),
+            "an edge into an unindexed spec must be reported so it can be fetched: {unindexed:?}"
+        );
+        assert!(
+            !unindexed.contains("HTML") && !unindexed.contains("DOM"),
+            "indexed specs are not reported: {unindexed:?}"
         );
     }
 

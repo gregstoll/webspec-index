@@ -121,7 +121,7 @@ Use this instead of walking `refs` by hand. It is exhaustive within `--max-depth
 
 Read `Search was truncated` before trusting the result — raise `-l` or narrow the endpoints if it appears.
 
-The search only sees indexed specs, and indexing is lazy: the two endpoints are fetched, the specs a route passes through are not. Index those first if a route might cross them.
+Specs a route passes through are indexed on demand: when an edge points into a spec with no indexed data, `trace` fetches it and searches again, reporting `indexing N spec(s) the route touches` on stderr. First run of a cross-spec trace therefore takes a few seconds; later runs do not.
 
 Real chains are longer than they look; `location.assign()` to `navigateerror` is seven hops, so a low `--max-depth` reports zero traces that look like a genuine answer.
 

@@ -45,10 +45,11 @@ is exhaustive within that depth, which is what lets a NOT REACHED verdict claim 
 not find one". If it says the search was truncated, raise `-l`, or narrow the endpoints, and say
 so in the output if it still truncates.
 
-The search only sees specs that are already indexed, and indexing is lazy: `trace` fetches its two
-endpoint specs but not the ones a route passes through. If a plausible route crosses a third spec,
-index it first (`webspec-index query '<SPEC#anything>'`) and search again. A route through a spec
-you have never queried is invisible, not absent.
+When a route points into a spec that has never been indexed, `trace` indexes it and searches
+again, printing `indexing N spec(s) the route touches` to stderr. That costs about a second per
+spec on the first run and nothing afterwards, so a cross-spec trace may pause briefly. It gives up
+after two rounds; if the line keeps appearing, the chain reaches further than the search will
+follow and the verdict is INCONCLUSIVE.
 
 Start at `--max-depth 9`. Real chains run longer than they look: `location.assign()` to
 `navigateerror` is seven hops. A depth that is too low reports zero traces, which reads
