@@ -237,7 +237,7 @@ enum Command {
         Examples:\n  \
         webspec-index trace HTML#dom-location-assign HTML#event-navigateerror\n  \
         webspec-index trace HTML#navigate DOM#concept-tree --max-depth 4 --format markdown\n  \
-        webspec-index trace HTML#dom-location-assign HTML#event-navigateerror --quiet"
+        webspec-index trace HTML#dom-location-assign HTML#event-navigateerror --detail compact"
     )]
     Trace {
         /// Starting section: SPEC#anchor or full URL
