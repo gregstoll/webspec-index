@@ -206,6 +206,14 @@ fn extract_definition_content(
             let tag_name = parent_elem.value().name();
             // Block-level elements that can contain definitions
             if matches!(tag_name, "p" | "div" | "dd" | "dt" | "li" | "section") {
+                if let Some(item) = sole_definition_of_list_item(&parent_elem) {
+                    // Render the children, not the <li>/<dd> itself, to keep the leading
+                    // bullet out of the definition's content.
+                    return Some(markdown::element_to_markdown_from_html(
+                        &item.inner_html(),
+                        converter,
+                    ));
+                }
                 return Some(markdown::element_to_markdown(&parent_elem, converter));
             }
         }
@@ -214,6 +222,27 @@ fn extract_definition_content(
 
     // Fallback: just use the dfn's text
     Some(element.text().collect::<String>().trim().to_string())
+}
+
+/// Given the block that directly encloses a dfn, return the <li>/<dd> the definition owns
+/// outright, if there is one.
+///
+/// A Wattsi property list item spreads a definition over several paragraphs — the definition,
+/// then notes and caveats about it — so the enclosing <p> alone truncates it. The list item is
+/// only the right scope when it defines a single term; with several dfns the narrower <p> keeps
+/// them from collapsing onto identical content.
+fn sole_definition_of_list_item<'a>(
+    block: &scraper::ElementRef<'a>,
+) -> Option<scraper::ElementRef<'a>> {
+    if block.value().name() != "p" {
+        return None;
+    }
+    let item = scraper::ElementRef::wrap(block.parent()?)?;
+    if !matches!(item.value().name(), "li" | "dd") {
+        return None;
+    }
+    let dfn_selector = scraper::Selector::parse("dfn[id]").ok()?;
+    (item.select(&dfn_selector).count() == 1).then_some(item)
 }
 
 /// Extract content for an algorithm (dfn inside div.algorithm or with sibling <ol>)
@@ -1589,23 +1618,25 @@ mod tests {
         );
     }
 
+    fn collect_dfn_sections(html: &str, base_url: &str) -> Vec<ParsedSection> {
+        let converter = crate::parse::markdown::build_converter(base_url);
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("dfn[id]").unwrap();
+        document
+            .select(&selector)
+            .filter_map(|element| parse_dfn_element(&element, &converter).unwrap())
+            .collect()
+    }
+
     #[test]
     fn test_wattsi_property_list_dfns_kept() {
         // "Each navigable has: <ul>...</ul>" — Wattsi's pattern for the properties of a
         // concept. Every <li> defines a queryable term, and the terms carry data-dfn-for
         // without data-dfn-type. Sublists of a sibling-pattern <ol> stay excluded.
-        let html = include_str!("../../tests/fixtures/definitions/wattsi_property_list.html");
-        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
-
-        let document = Html::parse_document(html);
-        let selector = Selector::parse("dfn[id]").unwrap();
-
-        let mut sections = Vec::new();
-        for element in document.select(&selector) {
-            if let Some(section) = parse_dfn_element(&element, &converter).unwrap() {
-                sections.push(section);
-            }
-        }
+        let sections = collect_dfn_sections(
+            include_str!("../../tests/fixtures/definitions/wattsi_property_list.html"),
+            "https://html.spec.whatwg.org",
+        );
         let anchors: Vec<_> = sections.iter().map(|s| s.anchor.as_str()).collect();
 
         for kept in [
@@ -1659,6 +1690,51 @@ mod tests {
         assert_eq!(
             by_anchor("close-a-top-level-traversable").section_type,
             SectionType::Algorithm
+        );
+    }
+
+    #[test]
+    fn test_definition_content_spans_the_whole_list_item() {
+        // A Wattsi property list item is often several <p>s: the definition, then notes and
+        // caveats about it. All of them belong to the definition.
+        let sections = collect_dfn_sections(
+            include_str!("../../tests/fixtures/definitions/wattsi_property_list.html"),
+            "https://html.spec.whatwg.org",
+        );
+        let content = |anchor: &str| {
+            sections
+                .iter()
+                .find(|s| s.anchor == anchor)
+                .unwrap()
+                .content_text
+                .clone()
+                .unwrap()
+        };
+
+        let is_closing = content("is-closing");
+        assert!(
+            is_closing.contains("boolean, initially false"),
+            "Missing the definition itself: {is_closing}"
+        );
+        assert!(
+            is_closing.contains("top-level traversable navigables"),
+            "Missing the note paragraph: {is_closing}"
+        );
+
+        let allowed = content("allowed-to-perform-a-navigation-or-history-update");
+        assert!(
+            allowed.contains("implementation-defined"),
+            "Missing the definition itself: {allowed}"
+        );
+        assert!(
+            allowed.contains("invoked too many"),
+            "Missing the note paragraph: {allowed}"
+        );
+
+        // A <li> that is a single <p> must not gain a list bullet or trailing blank lines
+        assert_eq!(
+            content("nav-id"),
+            "An **id**, a [new unique internal value](https://html.spec.whatwg.org#new-unique-internal-value)."
         );
     }
 
