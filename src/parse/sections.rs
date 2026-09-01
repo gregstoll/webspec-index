@@ -142,28 +142,18 @@ pub fn parse_dfn_element(
         return Ok(None);
     }
 
-    // Skip parameter dfns:
-    // 1. Those with data-dfn-for but WITHOUT data-dfn-type (e.g., <dfn data-dfn-for="navigate">url</dfn>)
-    // 2. Those with <var> as direct child (e.g., <dfn><var>options</var></dfn>)
-    // BUT keep method/attribute dfns which have BOTH data-dfn-for AND data-dfn-type
-    // Example of PARAMETER (skip): <dfn data-dfn-for="navigate"><var>url</var></dfn>
-    // Example of PARAMETER (skip): <dfn><var>options</var></dfn>
-    // Example of METHOD (keep): <dfn data-dfn-for="HTMLSlotElement" data-dfn-type="method">assign(...)</dfn>
-    let has_dfn_for = element.value().attr("data-dfn-for").is_some();
-    let has_dfn_type = element.value().attr("data-dfn-type").is_some();
+    // Skip parameter dfns. Each generator marks them explicitly, so both checks are
+    // positive signals rather than guesses:
+    // - Wattsi wraps the parameter name in <var>: <dfn data-dfn-for="navigate"><var>url</var></dfn>
+    // - Bikeshed sets data-dfn-type="argument": <dfn data-dfn-for="Window/open(url)" data-dfn-type="argument">url</dfn>
+    // data-dfn-for alone means nothing here: Wattsi puts it on exported concepts such as
+    // <dfn data-dfn-for="navigable" id="nav-document" data-export>active document</dfn>.
     let has_direct_var_child = element
         .children()
         .filter_map(scraper::ElementRef::wrap)
         .any(|c| c.value().name() == "var");
 
-    // Skip if it's a parameter dfn
-    if (has_dfn_for && !has_dfn_type) || has_direct_var_child {
-        return Ok(None);
-    }
-
-    // Skip argument dfns (data-dfn-type="argument" in Bikeshed-generated specs)
-    // These are WebIDL function parameters, not standalone queryable concepts
-    if element.value().attr("data-dfn-type") == Some("argument") {
+    if has_direct_var_child || element.value().attr("data-dfn-type") == Some("argument") {
         return Ok(None);
     }
 
@@ -620,63 +610,62 @@ pub fn collect_headings(html: &str) -> Result<Vec<ParsedSection>> {
     Ok(sections)
 }
 
-/// Check if a dfn is inside an algorithm's <ol> content (i.e., part of the algorithm steps)
-/// These dfns should not be collected as separate sections - they're part of algorithm content
+/// Check if a dfn sits inside the body of an algorithm (i.e. part of its steps).
+/// Such dfns belong to the algorithm's markdown content, not to a section of their own.
 fn is_inside_algorithm_content(element: &scraper::ElementRef) -> bool {
-    // Check if this element is inside an <ol>
+    // The dfn may sit in a sublist; the pattern below is anchored on the outermost list.
+    let mut outermost_list = None;
     let mut current = element.parent();
     while let Some(node) = current {
-        if let Some(parent_elem) = scraper::ElementRef::wrap(node) {
-            if matches!(parent_elem.value().name(), "ol" | "ul") {
-                // Found a list ancestor. Now check if this list is part of an algorithm.
-                // Two patterns:
-                // 1. Bikeshed: <div class="algorithm">...<ol>...</ol></div>
-                // 2. Wattsi: <p>To <dfn>foo</dfn>:</p><ol|ul>...</ol|ul> (sibling pattern)
-
-                // Check if <ol> is inside div.algorithm or div[data-algorithm]
-                let mut ol_ancestor = parent_elem.parent();
-                while let Some(anc_node) = ol_ancestor {
-                    if let Some(anc_elem) = scraper::ElementRef::wrap(anc_node) {
-                        if anc_elem.value().name() == "div" {
-                            let classes: Vec<_> = anc_elem.value().classes().collect();
-                            if classes.contains(&"algorithm")
-                                || anc_elem.value().attr("data-algorithm").is_some()
-                            {
-                                return true; // Inside Bikeshed/Wattsi div.algorithm pattern
-                            }
-                        }
+        if let Some(elem) = scraper::ElementRef::wrap(node) {
+            match elem.value().name() {
+                "ol" | "ul" => outermost_list = Some(node),
+                // Bikeshed: <div class="algorithm">...<ol>...</ol></div>
+                // Wattsi:   <div data-algorithm=""><p>To <dfn>foo</dfn>:</p><ol>...</ol></div>
+                "div" => {
+                    let is_algo_div = elem.value().classes().any(|c| c == "algorithm")
+                        || elem.value().attr("data-algorithm").is_some();
+                    if is_algo_div {
+                        return outermost_list.is_some();
                     }
-                    ol_ancestor = anc_node.parent();
                 }
-
-                // Check Wattsi sibling pattern: preceding <p> contains algorithm-defining dfn
-                let mut prev_sibling = node.prev_sibling();
-                while let Some(prev_node) = prev_sibling {
-                    if let Some(prev_elem) = scraper::ElementRef::wrap(prev_node) {
-                        if matches!(prev_elem.value().name(), "p" | "dd" | "li") {
-                            // Check if this block contains a dfn (algorithm-defining)
-                            if let Ok(dfn_selector) = scraper::Selector::parse("dfn[id]") {
-                                if prev_elem.select(&dfn_selector).next().is_some() {
-                                    return true; // Wattsi sibling pattern detected
-                                }
-                            }
-                        }
-                        // Stop at block elements
-                        if matches!(
-                            prev_elem.value().name(),
-                            "p" | "div" | "h2" | "h3" | "h4" | "h5" | "h6"
-                        ) {
-                            break;
-                        }
-                    }
-                    prev_sibling = prev_node.prev_sibling();
-                }
-
-                // <ol> is not part of an algorithm, so this dfn is not in algorithm content
-                return false;
+                _ => {}
             }
         }
         current = node.parent();
+    }
+
+    // Wattsi sibling pattern: <p>To <dfn>foo</dfn>:</p><ol>...</ol>. Only <ol> qualifies —
+    // a <ul> after a dfn is a property list ("Each navigable has: <ul>...</ul>"), whose
+    // items define concepts of their own rather than algorithm steps.
+    let list = match outermost_list {
+        Some(node) if scraper::ElementRef::wrap(node).is_some_and(|e| e.value().name() == "ol") => {
+            node
+        }
+        _ => return false,
+    };
+
+    let dfn_selector = match scraper::Selector::parse("dfn[id]") {
+        Ok(sel) => sel,
+        Err(_) => return false,
+    };
+    let mut prev_sibling = list.prev_sibling();
+    while let Some(prev_node) = prev_sibling {
+        if let Some(prev_elem) = scraper::ElementRef::wrap(prev_node) {
+            if matches!(prev_elem.value().name(), "p" | "dd" | "li")
+                && prev_elem.select(&dfn_selector).next().is_some()
+            {
+                return true;
+            }
+            // Stop at block elements
+            if matches!(
+                prev_elem.value().name(),
+                "p" | "div" | "h2" | "h3" | "h4" | "h5" | "h6"
+            ) {
+                break;
+            }
+        }
+        prev_sibling = prev_node.prev_sibling();
     }
     false
 }
@@ -1510,8 +1499,8 @@ mod tests {
 
     #[test]
     fn test_parameter_dfns_skipped() {
-        // Parameter dfns (with data-dfn-for or containing <var>) should NOT be collected as sections
-        // They're part of the parent definition/algorithm signature, not standalone sections
+        // Wattsi wraps parameter names in <var>. Those dfns are part of the parent
+        // algorithm's signature, not standalone sections, so they must not be collected.
         let html = r#"
             <h2 id="algorithms">Algorithms</h2>
             <p>To <dfn id="navigate">navigate</dfn> with <dfn data-dfn-for="navigate" id="param1"><var>url</var></dfn>
@@ -1533,8 +1522,8 @@ mod tests {
             }
         }
 
-        // Should only collect "navigate" (algorithm) and "regular-def" (standalone definition)
-        // Parameter dfns "param1" (has data-dfn-for) and "param2" (contains <var>) should be skipped
+        // Should only collect "navigate" (algorithm) and "regular-def" (standalone definition);
+        // "param1" and "param2" are <var>-wrapped parameters
         assert_eq!(
             sections.len(),
             2,
@@ -1552,7 +1541,7 @@ mod tests {
         );
         assert!(
             !anchors.contains(&"param1"),
-            "Should NOT include parameter dfn with data-dfn-for"
+            "Should NOT include parameter dfn containing <var>"
         );
         assert!(
             !anchors.contains(&"param2"),
@@ -1597,6 +1586,79 @@ mod tests {
         assert!(
             anchors.contains(&"concept-tree-child"),
             "Should include property dfn with data-dfn-for + data-dfn-type"
+        );
+    }
+
+    #[test]
+    fn test_wattsi_property_list_dfns_kept() {
+        // "Each navigable has: <ul>...</ul>" — Wattsi's pattern for the properties of a
+        // concept. Every <li> defines a queryable term, and the terms carry data-dfn-for
+        // without data-dfn-type. Sublists of a sibling-pattern <ol> stay excluded.
+        let html = include_str!("../../tests/fixtures/definitions/wattsi_property_list.html");
+        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("dfn[id]").unwrap();
+
+        let mut sections = Vec::new();
+        for element in document.select(&selector) {
+            if let Some(section) = parse_dfn_element(&element, &converter).unwrap() {
+                sections.push(section);
+            }
+        }
+        let anchors: Vec<_> = sections.iter().map(|s| s.anchor.as_str()).collect();
+
+        for kept in [
+            "navigable",
+            "nav-id",
+            "nav-parent",
+            "is-closing",
+            "allowed-to-perform-a-navigation-or-history-update",
+            "nav-document",
+            "close-a-top-level-traversable",
+        ] {
+            assert!(anchors.contains(&kept), "Should include {kept}");
+        }
+
+        assert!(
+            !anchors.contains(&"close-traversable"),
+            "Should NOT include <var>-wrapped parameter"
+        );
+        assert!(
+            !anchors.contains(&"closing-navigable"),
+            "Should NOT include dfn inside algorithm <ol> steps"
+        );
+        assert!(
+            !anchors.contains(&"closing-timestamp"),
+            "Should NOT include dfn inside a <ul> nested in algorithm <ol> steps"
+        );
+        assert_eq!(anchors.len(), 7, "Unexpected sections: {anchors:?}");
+
+        let by_anchor = |a: &str| sections.iter().find(|s| s.anchor == a).unwrap();
+
+        let allowed = by_anchor("allowed-to-perform-a-navigation-or-history-update");
+        assert_eq!(allowed.section_type, SectionType::Definition);
+        assert!(
+            allowed
+                .content_text
+                .as_ref()
+                .unwrap()
+                .contains("implementation-defined"),
+            "Property definition should carry its own prose"
+        );
+
+        // data-dfn-for without data-dfn-type is an exported concept, not a parameter
+        assert_eq!(
+            by_anchor("nav-parent").section_type,
+            SectionType::Definition
+        );
+        assert_eq!(
+            by_anchor("nav-document").section_type,
+            SectionType::Algorithm
+        );
+        assert_eq!(
+            by_anchor("close-a-top-level-traversable").section_type,
+            SectionType::Algorithm
         );
     }
 

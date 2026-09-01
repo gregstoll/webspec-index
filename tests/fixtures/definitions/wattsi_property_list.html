@@ -1,0 +1,41 @@
+<h4 id=navigables><span class=secno>7.3.1</span> Navigables</h4>
+
+<p>A <dfn id=navigable data-export="">navigable</dfn> presents a <code><a href="#document">Document</a></code> to the user
+via its <a href="#nav-active-history-entry">active session history entry</a>. Each navigable has:</p>
+
+<ul><li><p>An <dfn id=nav-id>id</dfn>, a <a href="#new-unique-internal-value">new unique internal value</a>.
+ <li><p id=parent-browsing-context>A <dfn data-dfn-for=navigable id=nav-parent data-export="">parent</dfn>,
+ a <a href="#navigable">navigable</a> or null.
+ <li>
+  <p>An <dfn id=is-closing>is closing</dfn> boolean, initially false.</p>
+
+  <p class=note>This is only ever set to true for <a href="#top-level-traversable">top-level traversable navigables</a>.</p>
+ <li>
+  <p>An <dfn id=allowed-to-perform-a-navigation-or-history-update>allowed to perform a navigation or history update</dfn>
+  algorithm, which is <a href="https://infra.spec.whatwg.org/#implementation-defined">implementation-defined</a> and returns
+  either <a href="https://infra.spec.whatwg.org/#allowed">allowed</a> or
+  <a href="https://infra.spec.whatwg.org/#blocked">blocked</a>.</p>
+
+  <p class=note>For example, this can return <a href="https://infra.spec.whatwg.org/#blocked">blocked</a> if invoked too many
+  times within a certain timespan.</p>
+ </ul>
+
+<div data-algorithm="">
+<p>A <a href="#navigable">navigable</a>'s <dfn data-dfn-for=navigable id=nav-document data-export="">active
+document</dfn> is its <a href="#nav-active-history-entry">active session history entry</a>'s
+<a href="#she-document">document</a>.</p>
+</div>
+
+<p>To <dfn id=close-a-top-level-traversable>close a top-level traversable</dfn> given a
+<a href="#top-level-traversable">top-level traversable</a> <dfn data-dfn-for=close-a-top-level-traversable
+id=close-traversable><var>traversable</var></dfn>:</p>
+
+<ol><li><p>If <var>traversable</var>'s <a href="#is-closing">is closing</a> is true, then return.
+
+ <li>
+  <p>Otherwise, for each <dfn id=closing-navigable>closing navigable</dfn> in the set:</p>
+
+  <ul><li><p>Set its <a href="#is-closing">is closing</a> to true.
+   <li><p>Record a <dfn id=closing-timestamp>closing timestamp</dfn>.
+  </ul>
+ </ol>
