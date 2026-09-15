@@ -1,0 +1,98 @@
+name: Web
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/web.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CC_wasm32_unknown_unknown: clang
+  WASM_BINDGEN_VERSION: 0.2.128
+
+jobs:
+  build:
+    name: Index, export, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web-deploy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build native binary
+        run: cargo build --release
+      - name: Index specs
+        run: ./target/release/webspec-index update --providers whatwg,w3c,tc39
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare effects
+        run: ./target/release/webspec-index effects --all --summary-only
+      - name: Export web database
+        run: |
+          ./target/release/webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39 | tee export-manifest.json
+      - name: Report export size
+        run: |
+          du -sh web/public/db && jq '{size, chunks, specs: (.specs | length)}' export-manifest.json
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
+      - name: Build wasm package
+        run: ./crates/webspec-index-wasm/build.sh
+      - name: Install web dependencies and build
+        working-directory: web
+        run: npm ci && npm run build
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke:
+    name: Smoke test the live site
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Manifest and range request
+        run: |
+          base="${{ needs.deploy.outputs.page_url }}"
+          curl -fsS "${base}db/manifest.json" | jq -e '.size > 0 and .chunks > 0'
+          curl -fsS -o /dev/null -D headers.txt -H "Range: bytes=0-1023" "${base}db/0000.bin"
+          grep -qi "^HTTP/.* 206" headers.txt
+          if grep -qi "^content-encoding:" headers.txt; then echo "::error::chunk served with content-encoding"; exit 1; fi
+          curl -fsS "${base}" | grep -q '<div id="app"'
