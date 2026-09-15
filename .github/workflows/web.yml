@@ -54,6 +54,7 @@ jobs:
         run: ./target/release/webspec-index effects --all --summary-only
       - name: Export web database
         run: |
+          set -o pipefail
           ./target/release/webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39 | tee export-manifest.json
       - name: Report export size
         run: |
