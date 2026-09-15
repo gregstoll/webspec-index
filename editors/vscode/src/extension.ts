@@ -12,7 +12,6 @@ import * as os from "os";
 
 let client: LanguageClient | undefined;
 let log: vscode.OutputChannel;
-
 const GITHUB_REPO = "jnjaeschke/webspec-index";
 
 // ---------------------------------------------------------------------------
@@ -266,6 +265,44 @@ export async function activate(
     return;
   }
 
+  let effectsRequest = 0;
+  let effectsHover: {
+    uri: string;
+    version: number;
+    position: vscode.Position;
+    session: number;
+    details: { headline: string; markdown: string }[];
+    expanded: Set<number>;
+  } | undefined;
+
+  const effectToggleCommand = "webspecLens.toggleEffectDetails";
+  function hoverMarkdown(): vscode.MarkdownString {
+    const hover = effectsHover!;
+    const content = hover.details.map((effect, index) => {
+      const expanded = hover.expanded.has(index);
+      const args = encodeURIComponent(JSON.stringify([hover.session, index]));
+      const headline = effect.headline.replace(/\s+/g, " ").replace(/[\\`*_{}\[\]()<>#!|]/g, "\\$&");
+      const link = `[${expanded ? "▾" : "▸"} ${headline}](command:${effectToggleCommand}?${args})`;
+      return expanded ? `${link}\n\n${effect.markdown.trim()}\n` : link;
+    }).join("\n\n");
+    const markdown = new vscode.MarkdownString(content);
+    // Only this UI toggle may execute; spec content cannot invoke other commands.
+    markdown.isTrusted = { enabledCommands: [effectToggleCommand] };
+    return markdown;
+  }
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(event => {
+      if (effectsHover?.uri === event.document.uri.toString()) effectsHover = undefined;
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => { effectsHover = undefined; }),
+    vscode.window.onDidChangeTextEditorSelection(event => {
+      if (effectsHover && (event.textEditor.document.uri.toString() !== effectsHover.uri ||
+          !event.textEditor.selection.active.isEqual(effectsHover.position))) {
+        effectsHover = undefined;
+      }
+    })
+  );
+
   // Register coverage detail command
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -277,6 +314,65 @@ export async function activate(
           msg += `\nMissing steps: ${missing.join(", ")}`;
         }
         vscode.window.showInformationMessage(msg);
+      }
+    ),
+    vscode.commands.registerCommand(effectToggleCommand, async (session: number, index: number) => {
+      const hover = effectsHover;
+      const editor = vscode.window.activeTextEditor;
+      if (!hover || session !== hover.session || !Number.isInteger(index) ||
+          index < 0 || index >= hover.details.length || !editor ||
+          editor.document.uri.toString() !== hover.uri || editor.document.version !== hover.version ||
+          !editor.selection.active.isEqual(hover.position)) return;
+      if (hover.expanded.has(index)) hover.expanded.delete(index);
+      else hover.expanded.add(index);
+      await vscode.commands.executeCommand("editor.action.hideHover");
+      if (effectsHover !== hover || vscode.window.activeTextEditor !== editor) return;
+      await vscode.commands.executeCommand("editor.action.showHover", { focus: "autoFocusImmediately" });
+    }),
+    vscode.commands.registerCommand(
+      "webspecLens.showEffects",
+      async (request?: {
+        document_uri: string;
+        document_version: number;
+        source_position?: { line: number; character: number };
+      }) => {
+        if (!request) {
+          await vscode.commands.executeCommand("editor.action.showHover");
+          return;
+        }
+        if (!client) return;
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.uri.toString() !== request.document_uri ||
+            editor.document.version !== request.document_version) return;
+        const initialSelection = editor.selection;
+        const sequence = ++effectsRequest;
+        try {
+          const result = await client.sendRequest<{ effect_details: { headline: string; markdown: string }[] }>(
+            "webspec/preparedEffectDocument", request
+          );
+          // Discard stale clicks and avoid moving a user who has continued editing.
+          if (sequence !== effectsRequest || vscode.window.activeTextEditor !== editor ||
+              editor.document.version !== request.document_version ||
+              !editor.selection.isEqual(initialSelection)) return;
+          const position = request.source_position
+            ? new vscode.Position(request.source_position.line, request.source_position.character)
+            : editor.selection.active;
+          effectsHover = undefined;
+          await vscode.commands.executeCommand("editor.action.hideHover");
+          if (sequence !== effectsRequest || vscode.window.activeTextEditor !== editor ||
+              editor.document.version !== request.document_version ||
+              !editor.selection.isEqual(initialSelection)) return;
+          editor.selection = new vscode.Selection(position, position);
+          effectsHover = {
+            uri: request.document_uri, version: request.document_version, position,
+            session: sequence, details: result.effect_details, expanded: new Set(),
+          };
+          await vscode.commands.executeCommand("editor.action.showHover", { focus: "autoFocusImmediately" });
+        } catch (error: unknown) {
+          if (sequence !== effectsRequest) return;
+          const message = error instanceof Error ? error.message : String(error);
+          vscode.window.showWarningMessage(`webspec-lens: ${message}`);
+        }
       }
     )
   );
@@ -300,8 +396,21 @@ export async function activate(
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", pattern: "**/*" }],
     outputChannel: log,
+    middleware: {
+      provideHover(document, position, token, next) {
+        if (effectsHover && effectsHover.uri === document.uri.toString() &&
+            effectsHover.version === document.version && effectsHover.position.isEqual(position)) {
+          return new vscode.Hover(hoverMarkdown(), new vscode.Range(position, position));
+        }
+        return next(document, position, token);
+      },
+    },
     initializationOptions: {
       fuzzyThreshold: config.get<number>("fuzzyThreshold", 0.85),
+      effectsEnabled: config.get<boolean>("effects.enabled", true),
+      effectsMaxBadges: config.get<number>("effects.maxBadges", 3),
+      effectsRulePaths: config.get<string[]>("effects.rulePaths", []),
+      effectsEnvironment: config.get<string>("effects.environment", "web"),
     },
   };
 

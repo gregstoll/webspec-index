@@ -580,7 +580,13 @@ enum Command {
     Specs,
 
     /// Start the Language Server Protocol server (stdio)
-    Lsp,
+    Lsp {
+        #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
+        rules: Vec<String>,
+
+        #[arg(long, default_value = "web", help = "Semantic analysis environment")]
+        environment: String,
+    },
 
     /// Remove cached PR preview data
     #[command(long_about = "Remove cached PR preview data.\n\n\
@@ -658,7 +664,7 @@ update [-s SPEC] [-f force] [--effects auto|off] [--rules PATH] [--environment N
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
 specs — list indexed/discovered spec names+URLs
-lsp — start LSP server on stdio
+lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
 idl <Q|SPEC#anchor|URL> [-s SPEC] [-l N(20)] [--pr N] [--format json|markdown]
 SPEC#anchor examples: HTML#navigate, DOM#concept-tree, CSS-GRID#grid-container
@@ -1161,8 +1167,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
-        Command::Lsp => {
-            webspec_index::lsp::serve_stdio().await;
+        Command::Lsp { rules, environment } => {
+            webspec_index::lsp::serve_stdio_with_options(webspec_index::lsp::LspOptions {
+                rule_paths: rules,
+                environment,
+                ..Default::default()
+            })
+            .await;
             Ok(ExitCode::SUCCESS)
         }
 

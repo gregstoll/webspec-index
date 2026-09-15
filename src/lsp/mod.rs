@@ -6,4 +6,4 @@
 mod hover;
 mod server;
 
-pub use server::serve_stdio;
+pub use server::{serve_stdio, serve_stdio_with_options, LspOptions};

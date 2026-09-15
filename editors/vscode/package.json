@@ -38,6 +38,10 @@
       {
         "command": "webspecLens.showCoverage",
         "title": "webspec-lens: Show Algorithm Coverage"
+      },
+      {
+        "command": "webspecLens.showEffects",
+        "title": "webspec-lens: Show Spec Effects"
       }
     ],
     "configuration": {
@@ -62,14 +66,39 @@
           "minimum": 0,
           "maximum": 1,
           "markdownDescription": "Jaro-Winkler similarity threshold for step matching. Lower values accept more variation. `1.0` = exact only, `0.85` = default."
+        },
+        "webspecLens.effects.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show possible specification effects in step CodeLens rows and hovers."
+        },
+        "webspecLens.effects.maxBadges": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "Maximum categories in one effects CodeLens row; additional categories are available through All effects."
+        },
+        "webspecLens.effects.rulePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional local effect rule packages."
+        },
+        "webspecLens.effects.environment": {
+          "type": "string",
+          "default": "web",
+          "description": "Host environment used for effect implementation mappings."
         }
       }
     }
   },
   "scripts": {
+    "test": "node --test test/*.cjs",
     "compile": "node build.js",
     "watch": "node build.js --watch",
-    "package": "node build.js --production && npx @vscode/vsce package --no-git-tag-version"
+    "package": "node build.js --production && npx @vscode/vsce package --no-dependencies --no-git-tag-version"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.0"

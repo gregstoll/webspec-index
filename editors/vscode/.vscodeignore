@@ -4,3 +4,4 @@ tsconfig.json
 .vscode/**
 node_modules/**
 **/*.map
+test/**
