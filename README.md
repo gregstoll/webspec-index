@@ -164,6 +164,13 @@ cargo clippy        # lint
 cargo fmt --check   # format check
 ```
 
+The `native` feature (default) holds every OS and network dependency; `pdf` holds ITU PDF parsing. Both are off for the WebAssembly build.
+
+```text
+cargo test --no-default-features --lib                          # OS/network-free build (used by the wasm target)
+cargo check --no-default-features --lib --target wasm32-unknown-unknown
+```
+
 ## License
 
 MIT
