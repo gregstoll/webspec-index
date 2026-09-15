@@ -1481,7 +1481,7 @@ fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Resu
 }
 
 #[cfg(test)]
-fn find_traces_from_conn(
+pub fn find_traces_from_conn(
     conn: &Connection,
     from: (String, String),
     to: (String, String),
