@@ -200,7 +200,7 @@ jobs:
         run: npm ci && npx playwright install --with-deps firefox
       - name: Run e2e
         working-directory: crates/webspec-index-wasm/e2e
-        run: node run.mjs ../../target/fixture-export
+        run: node run.mjs ../../../target/fixture-export
 
   web:
     name: Web app (unit + Firefox e2e)
