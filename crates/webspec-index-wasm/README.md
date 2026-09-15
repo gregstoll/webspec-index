@@ -61,3 +61,25 @@ cargo run --example fixture_export -- target/fixture-export
 
 Writes `manifest.json` and `*.bin` chunk files to `target/fixture-export/`.
 Useful for local testing of the wasm module without a full production database.
+
+## End-to-end test
+
+`e2e/` contains a headless-Firefox end-to-end test that exercises the full
+wasm package against the fixture export.
+
+```sh
+./build.sh
+cargo run --example fixture_export -- target/fixture-export
+cd e2e
+npm ci
+npx playwright install firefox
+node run.mjs ../../target/fixture-export
+```
+
+`run.mjs` accepts an optional second argument to switch browsers:
+
+```sh
+node run.mjs ../../target/fixture-export chromium
+```
+
+On success it prints `e2e ok {"fetches":N,...}` and exits 0.

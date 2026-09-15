@@ -172,3 +172,32 @@ jobs:
       - name: Run tests
         working-directory: bindings/python
         run: uv run pytest -v
+
+  wasm-e2e:
+    name: Wasm end-to-end (Firefox)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-e2e
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
+      - name: Build wasm package
+        run: ./crates/webspec-index-wasm/build.sh
+        env:
+          CC_wasm32_unknown_unknown: clang
+      - name: Build fixture export
+        run: cargo run --example fixture_export -- target/fixture-export
+      - name: Install e2e dependencies
+        working-directory: crates/webspec-index-wasm/e2e
+        run: npm ci && npx playwright install --with-deps firefox
+      - name: Run e2e
+        working-directory: crates/webspec-index-wasm/e2e
+        run: node run.mjs ../../target/fixture-export

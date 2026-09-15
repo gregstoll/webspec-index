@@ -24,3 +24,5 @@ node_modules
 artifacts
 crates/webspec-index-wasm/pkg/
 crates/webspec-index-wasm/target/
+crates/webspec-index-wasm/e2e/node_modules/
+crates/webspec-index-wasm/e2e/site/

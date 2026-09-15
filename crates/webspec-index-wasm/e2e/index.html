@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>webspec-index wasm e2e</title>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById("out");
+const log = (s) => { out.textContent += s + "\n"; };
+
+const w = new Worker("./worker.js", { type: "module" });
+let seq = 0;
+const pending = new Map();
+w.onmessage = (e) => {
+  const p = pending.get(e.data.id);
+  pending.delete(e.data.id);
+  if (e.data.ok) p.res(e.data.result);
+  else p.rej(new Error(e.data.error));
+};
+const call = (msg) => new Promise((res, rej) => {
+  const id = ++seq;
+  pending.set(id, { res, rej });
+  w.postMessage({ ...msg, id });
+});
+
+try {
+  const manifestUrl = new URL("./db/manifest.json", location.href).href;
+  await call({ type: "open", manifestUrl });
+
+  const requests = [
+    JSON.stringify({ type: "specs" }),
+    JSON.stringify({ type: "query", target: "HTML#navigate", render: "html" }),
+    JSON.stringify({ type: "search", query: "navigate" }),
+    JSON.stringify({ type: "refs", target: "DOM#concept-tree", direction: "incoming" }),
+    JSON.stringify({ type: "query", target: "https://html.spec.whatwg.org/#navigate" }),
+  ];
+
+  for (const req of requests) {
+    const result = await call({ type: "handle", request: req });
+    log(result);
+  }
+
+  const statsJson = await call({ type: "stats" });
+  log(statsJson);
+} catch (err) {
+  log("ERROR: " + err);
+}
+
+log("DONE");
+</script>
