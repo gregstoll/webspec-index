@@ -2085,6 +2085,7 @@ pub async fn update_specs(
 
 /// Retain only specs whose provider matches one of `providers` (case-insensitive).
 /// If `providers` is empty, all specs are retained.
+#[cfg(feature = "native")]
 fn filter_specs_by_provider(
     specs: Vec<(String, String, String)>,
     providers: &[String],
@@ -2094,24 +2095,36 @@ fn filter_specs_by_provider(
     }
     specs
         .into_iter()
-        .filter(|(_, _, provider)| {
-            providers
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case(provider))
-        })
+        .filter(|(_, _, provider)| providers.iter().any(|p| p.eq_ignore_ascii_case(provider)))
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod filter_tests {
     use super::filter_specs_by_provider;
 
     fn specs() -> Vec<(String, String, String)> {
         vec![
-            ("HTML".into(), "https://html.spec.whatwg.org".into(), "whatwg".into()),
-            ("DOM".into(), "https://dom.spec.whatwg.org".into(), "whatwg".into()),
-            ("CSS-GRID".into(), "https://drafts.csswg.org/css-grid".into(), "w3c".into()),
-            ("ECMA-262".into(), "https://tc39.es/ecma262".into(), "tc39".into()),
+            (
+                "HTML".into(),
+                "https://html.spec.whatwg.org".into(),
+                "whatwg".into(),
+            ),
+            (
+                "DOM".into(),
+                "https://dom.spec.whatwg.org".into(),
+                "whatwg".into(),
+            ),
+            (
+                "CSS-GRID".into(),
+                "https://drafts.csswg.org/css-grid".into(),
+                "w3c".into(),
+            ),
+            (
+                "ECMA-262".into(),
+                "https://tc39.es/ecma262".into(),
+                "tc39".into(),
+            ),
         ]
     }
 
@@ -2130,8 +2143,7 @@ mod filter_tests {
 
     #[test]
     fn multiple_providers_filter() {
-        let result =
-            filter_specs_by_provider(specs(), &["whatwg".to_string(), "tc39".to_string()]);
+        let result = filter_specs_by_provider(specs(), &["whatwg".to_string(), "tc39".to_string()]);
         assert_eq!(result.len(), 3);
         assert!(result.iter().all(|(_, _, p)| p == "whatwg" || p == "tc39"));
     }
