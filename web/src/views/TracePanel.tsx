@@ -3,6 +3,7 @@ import { traceStore } from '../trace/store';
 import type { TraceEntry } from '../trace/store';
 import { getTitleCache } from '../trace/titles';
 import { traceToMarkdown } from '../trace/markdown';
+import { encodeTrace } from '../trace/share';
 import type { Route } from '../router';
 import '../styles/trace.css';
 
@@ -65,12 +66,30 @@ export function TracePanel({ route, selectedStepPath, onClose }: TracePanelProps
     }
   }
 
-  function fallbackCopy(text: string) {
+  function fallbackCopy(text: string, feedback = 'Copied!') {
     if (textareaRef.current) {
       textareaRef.current.value = text;
       textareaRef.current.select();
       document.execCommand('copy');
-      setCopyFeedback('Copied!');
+      setCopyFeedback(feedback);
+      setTimeout(() => setCopyFeedback(''), 2000);
+    }
+  }
+
+  async function copyShareLink() {
+    try {
+      const payload = await encodeTrace([...entries]);
+      const url = location.origin + location.pathname + '#/trace/' + payload;
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          setCopyFeedback('Link copied!');
+          setTimeout(() => setCopyFeedback(''), 2000);
+        }).catch(() => fallbackCopy(url, 'Link copied!'));
+      } else {
+        fallbackCopy(url, 'Link copied!');
+      }
+    } catch {
+      setCopyFeedback('Failed to encode.');
       setTimeout(() => setCopyFeedback(''), 2000);
     }
   }
@@ -131,6 +150,9 @@ export function TracePanel({ route, selectedStepPath, onClose }: TracePanelProps
           <>
             <button class="trace-action-btn" onClick={copyMarkdown}>
               Copy markdown
+            </button>
+            <button class="trace-action-btn" onClick={copyShareLink}>
+              Share link
             </button>
             {copyFeedback && <span class="trace-copy-feedback">{copyFeedback}</span>}
             <button class="trace-action-btn danger" onClick={() => traceStore.clear()}>

@@ -9,6 +9,7 @@ import { Headings } from './views/Headings';
 import { NotFound } from './views/NotFound';
 import { ErrorBanner } from './views/Status';
 import { TracePanel, TracePanelToggle } from './views/TracePanel';
+import { TraceView } from './views/TraceView';
 import { useRequest } from './hooks/useRequest';
 import { navigateForQuery } from './dispatch';
 import { traceStore } from './trace/store';
@@ -97,7 +98,7 @@ export function App() {
       view = <ResolveView client={client} url={route.url} />;
       break;
     case 'trace':
-      view = <div class="page placeholder">Trace view — not yet implemented.</div>;
+      view = <TraceView payload={route.payload} />;
       break;
     default:
       view = <NotFound />;
