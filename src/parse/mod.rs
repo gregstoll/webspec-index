@@ -1,6 +1,7 @@
 pub mod algorithms;
 pub mod idl;
 pub mod idl_defs;
+#[cfg(feature = "pdf")]
 pub mod itu_pdf;
 pub mod markdown;
 pub mod references;

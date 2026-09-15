@@ -3,12 +3,18 @@
 // Handles name parsing, URL resolution, and dynamic spec discovery
 // via the IETF Datatracker API.
 
+#[cfg(feature = "native")]
 use anyhow::Result;
+#[cfg(feature = "native")]
 use chrono::{DateTime, NaiveDate, Utc};
+#[cfg(feature = "native")]
 use serde::Deserialize;
+#[cfg(feature = "native")]
 use std::collections::HashSet;
 
+#[cfg(feature = "native")]
 const DATATRACKER_API_BASE: &str = "https://datatracker.ietf.org/api/v1/doc";
+#[cfg(feature = "native")]
 const USER_AGENT: &str = concat!("webspec-index/", env!("CARGO_PKG_VERSION"));
 
 // ── Name parsing ─────────────────────────────────────────────────────────────
@@ -177,191 +183,203 @@ pub fn resolve_url(url: &str) -> Option<(String, String, String)> {
     Some((spec_name, fragment, base_url))
 }
 
-// ── Datatracker API ──────────────────────────────────────────────────────────
+#[cfg(feature = "native")]
+pub use datatracker::discover_spec;
 
-#[derive(Deserialize)]
-struct DataTrackerDoc {
-    rev: String,
-    #[allow(dead_code)]
-    time: String,
-    #[serde(default)]
-    expires: Option<String>,
-}
+#[cfg(feature = "native")]
+mod datatracker {
+    use super::*;
 
-#[derive(Deserialize)]
-struct RelatedDocsResponse {
-    objects: Vec<RelatedDoc>,
-}
-
-#[derive(Deserialize)]
-struct RelatedDoc {
-    source: String,
-}
-
-fn make_http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(Into::into)
-}
-
-async fn fetch_doc_meta(client: &reqwest::Client, name: &str) -> Result<Option<DataTrackerDoc>> {
-    let url = format!("{}/document/{}/", DATATRACKER_API_BASE, name.to_lowercase());
-    let resp = client
-        .get(&url)
-        .header("Accept", "application/json")
-        .send()
-        .await?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if !resp.status().is_success() {
-        anyhow::bail!(
-            "Datatracker API error for '{}': HTTP {}",
-            name,
-            resp.status()
-        );
+    #[derive(Deserialize)]
+    struct DataTrackerDoc {
+        rev: String,
+        #[allow(dead_code)]
+        time: String,
+        #[serde(default)]
+        expires: Option<String>,
     }
 
-    Ok(Some(resp.json::<DataTrackerDoc>().await?))
-}
+    #[derive(Deserialize)]
+    struct RelatedDocsResponse {
+        objects: Vec<RelatedDoc>,
+    }
 
-fn extract_doc_name_from_uri(uri: &str) -> Option<&str> {
-    uri.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-}
+    #[derive(Deserialize)]
+    struct RelatedDoc {
+        source: String,
+    }
 
-/// Follow the obsoleted_by chain for an RFC until we reach the terminal
-/// (non-obsoleted) RFC. Returns the terminal RFC name (lowercase).
-async fn follow_obsoleted_by_chain(client: &reqwest::Client, start_name: &str) -> Result<String> {
-    let mut current = start_name.to_lowercase();
-    let mut seen: HashSet<String> = HashSet::new();
+    fn make_http_client() -> Result<reqwest::Client> {
+        reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(Into::into)
+    }
 
-    loop {
-        if !seen.insert(current.clone()) {
-            break;
-        }
-
-        let url = format!(
-            "{}/relateddocument/?target__name={}&relationship=obs&format=json",
-            DATATRACKER_API_BASE, current
-        );
+    async fn fetch_doc_meta(
+        client: &reqwest::Client,
+        name: &str,
+    ) -> Result<Option<DataTrackerDoc>> {
+        let url = format!("{}/document/{}/", DATATRACKER_API_BASE, name.to_lowercase());
         let resp = client
             .get(&url)
             .header("Accept", "application/json")
             .send()
             .await?;
 
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         if !resp.status().is_success() {
-            break;
+            anyhow::bail!(
+                "Datatracker API error for '{}': HTTP {}",
+                name,
+                resp.status()
+            );
         }
 
-        let data: RelatedDocsResponse = resp.json().await?;
-        if data.objects.is_empty() {
-            break;
-        }
+        Ok(Some(resp.json::<DataTrackerDoc>().await?))
+    }
 
-        let mut best_num: Option<u32> = None;
-        let mut best_name = String::new();
-        for obj in &data.objects {
-            if let Some(doc_name) = extract_doc_name_from_uri(&obj.source) {
-                if let Some(num_str) = doc_name.strip_prefix("rfc") {
-                    if let Ok(num) = num_str.parse::<u32>() {
-                        if best_num.is_none() || num > best_num.unwrap() {
-                            best_num = Some(num);
-                            best_name = doc_name.to_string();
+    fn extract_doc_name_from_uri(uri: &str) -> Option<&str> {
+        uri.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Follow the obsoleted_by chain for an RFC until we reach the terminal
+    /// (non-obsoleted) RFC. Returns the terminal RFC name (lowercase).
+    async fn follow_obsoleted_by_chain(
+        client: &reqwest::Client,
+        start_name: &str,
+    ) -> Result<String> {
+        let mut current = start_name.to_lowercase();
+        let mut seen: HashSet<String> = HashSet::new();
+
+        loop {
+            if !seen.insert(current.clone()) {
+                break;
+            }
+
+            let url = format!(
+                "{}/relateddocument/?target__name={}&relationship=obs&format=json",
+                DATATRACKER_API_BASE, current
+            );
+            let resp = client
+                .get(&url)
+                .header("Accept", "application/json")
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                break;
+            }
+
+            let data: RelatedDocsResponse = resp.json().await?;
+            if data.objects.is_empty() {
+                break;
+            }
+
+            let mut best_num: Option<u32> = None;
+            let mut best_name = String::new();
+            for obj in &data.objects {
+                if let Some(doc_name) = extract_doc_name_from_uri(&obj.source) {
+                    if let Some(num_str) = doc_name.strip_prefix("rfc") {
+                        if let Ok(num) = num_str.parse::<u32>() {
+                            if best_num.is_none() || num > best_num.unwrap() {
+                                best_num = Some(num);
+                                best_name = doc_name.to_string();
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if best_name.is_empty() {
-            break;
-        }
-        current = best_name;
-    }
-
-    Ok(current)
-}
-
-fn is_expired(doc: &DataTrackerDoc) -> bool {
-    let Some(ref expires_str) = doc.expires else {
-        return false;
-    };
-    parse_ietf_date(expires_str)
-        .map(|expires| expires < Utc::now())
-        .unwrap_or(false)
-}
-
-fn parse_ietf_date(s: &str) -> Result<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(dt) = DateTime::parse_from_rfc3339(&format!("{}Z", s)) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc());
-    }
-    anyhow::bail!("Cannot parse IETF date: '{}'", s)
-}
-
-// ── Public API ───────────────────────────────────────────────────────────────
-
-/// Dynamically resolve an IETF RFC or draft name via the Datatracker API.
-///
-/// - "RFC9110" or "rfc9110"   → follows obsoleted_by chain to the latest RFC
-/// - "draft-touch-sne"        → resolves to the latest revision
-/// - "draft-touch-sne-02"     → pinned to revision 02
-///
-/// Returns (canonical_name, base_url) on success, or Ok(None) if not found.
-pub async fn discover_spec(name: &str) -> Result<Option<(String, String)>> {
-    let parsed = parse_ietf_name(name);
-    let client = make_http_client()?;
-
-    match parsed.kind {
-        IetfDocKind::Rfc => {
-            let rfc_base = parsed.base.to_lowercase();
-            if fetch_doc_meta(&client, &rfc_base).await?.is_none() {
-                return Ok(None);
+            if best_name.is_empty() {
+                break;
             }
-            let terminal = follow_obsoleted_by_chain(&client, &rfc_base).await?;
-            Ok(Some(rfc_name_and_url(&terminal)))
+            current = best_name;
         }
 
-        IetfDocKind::Draft => {
-            let base = parsed.base;
-            let doc = match fetch_doc_meta(&client, base).await? {
-                Some(d) => d,
-                None => return Ok(None),
-            };
+        Ok(current)
+    }
 
-            if is_expired(&doc) {
-                eprintln!("Warning: IETF draft '{}' is expired or inactive", base);
+    fn is_expired(doc: &DataTrackerDoc) -> bool {
+        let Some(ref expires_str) = doc.expires else {
+            return false;
+        };
+        parse_ietf_date(expires_str)
+            .map(|expires| expires < Utc::now())
+            .unwrap_or(false)
+    }
+
+    fn parse_ietf_date(s: &str) -> Result<DateTime<Utc>> {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&format!("{}Z", s)) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+        if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+            return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc());
+        }
+        anyhow::bail!("Cannot parse IETF date: '{}'", s)
+    }
+
+    // ── Public API ───────────────────────────────────────────────────────────────
+
+    /// Dynamically resolve an IETF RFC or draft name via the Datatracker API.
+    ///
+    /// - "RFC9110" or "rfc9110"   → follows obsoleted_by chain to the latest RFC
+    /// - "draft-touch-sne"        → resolves to the latest revision
+    /// - "draft-touch-sne-02"     → pinned to revision 02
+    ///
+    /// Returns (canonical_name, base_url) on success, or Ok(None) if not found.
+    pub async fn discover_spec(name: &str) -> Result<Option<(String, String)>> {
+        let parsed = parse_ietf_name(name);
+        let client = make_http_client()?;
+
+        match parsed.kind {
+            IetfDocKind::Rfc => {
+                let rfc_base = parsed.base.to_lowercase();
+                if fetch_doc_meta(&client, &rfc_base).await?.is_none() {
+                    return Ok(None);
+                }
+                let terminal = follow_obsoleted_by_chain(&client, &rfc_base).await?;
+                Ok(Some(rfc_name_and_url(&terminal)))
             }
 
-            let rev = if let Some(pinned) = parsed.pinned_rev {
-                pinned.to_string()
-            } else {
-                doc.rev.clone()
-            };
+            IetfDocKind::Draft => {
+                let base = parsed.base;
+                let doc = match fetch_doc_meta(&client, base).await? {
+                    Some(d) => d,
+                    None => return Ok(None),
+                };
 
-            let canonical_name = if parsed.pinned_rev.is_some() {
-                format!("{}-{}", base, rev)
-            } else {
-                base.to_string()
-            };
+                if is_expired(&doc) {
+                    eprintln!("Warning: IETF draft '{}' is expired or inactive", base);
+                }
 
-            let html_url = format!("https://datatracker.ietf.org/doc/html/{}-{}", base, rev);
+                let rev = if let Some(pinned) = parsed.pinned_rev {
+                    pinned.to_string()
+                } else {
+                    doc.rev.clone()
+                };
 
-            Ok(Some((canonical_name, html_url)))
+                let canonical_name = if parsed.pinned_rev.is_some() {
+                    format!("{}-{}", base, rev)
+                } else {
+                    base.to_string()
+                };
+
+                let html_url = format!("https://datatracker.ietf.org/doc/html/{}-{}", base, rev);
+
+                Ok(Some((canonical_name, html_url)))
+            }
         }
     }
-}
+} // end mod datatracker
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
