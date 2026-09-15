@@ -22,5 +22,3 @@ node_modules
 *.wasm
 
 artifacts
-crates/webspec-index-wasm/pkg/
-crates/webspec-index-wasm/target/
