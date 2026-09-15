@@ -13,7 +13,10 @@ import { useRequest } from './hooks/useRequest';
 import { navigateForQuery } from './dispatch';
 import { traceStore } from './trace/store';
 
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+// The worker script is served from the assets directory, so it cannot resolve the
+// database location itself; the page passes the manifest URL as the worker's name.
+const manifestUrl = new URL('db/manifest.json', new URL(import.meta.env.BASE_URL, document.baseURI)).href;
+const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: manifestUrl });
 const client: WebspecClient = new WorkerClient(worker);
 
 type Theme = 'light' | 'dark' | 'system';

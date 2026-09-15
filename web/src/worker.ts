@@ -7,8 +7,7 @@ type InboundMessage = { id: string; request: Request };
 
 function loadBackend(): WebspecClient {
   if (import.meta.env.VITE_BACKEND === 'mock') return new MockClient();
-  const manifestUrl = new URL('db/manifest.json', new URL(import.meta.env.BASE_URL, self.location.href)).href;
-  return new WasmClient(() => import('./wasm/webspec_index_wasm.js'), manifestUrl);
+  return new WasmClient(() => import('./wasm/webspec_index_wasm.js'), self.name);
 }
 
 const client = loadBackend();
