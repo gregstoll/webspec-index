@@ -13,6 +13,23 @@ name = "webspec_index"
 [[bin]]
 name = "webspec-index"
 path = "src/main.rs"
+required-features = ["native"]
+
+[features]
+default = ["native", "pdf"]
+native = [
+    "dep:tokio",
+    "dep:reqwest",
+    "dep:tower-lsp",
+    "dep:dashmap",
+    "dep:dirs",
+    "dep:libc",
+    "dep:clap",
+    "dep:moz-cli-version-check",
+    "dep:async-trait",
+    "dep:strsim",
+]
+pdf = ["dep:lopdf", "dep:pdf-extract", "dep:euclid"]
 
 [dependencies]
 # HTML parsing
@@ -21,7 +38,7 @@ ego-tree = "0.10"
 markup5ever_rcdom = "0.38"
 
 # HTTP client
-reqwest = { version = "0.13", features = ["gzip", "json"] }
+reqwest = { version = "0.13", features = ["gzip", "json"], optional = true }
 
 # Database
 rusqlite = { version = "0.39", features = ["bundled"] }
@@ -33,10 +50,10 @@ serde_path_to_error = "0.1"
 yaml-rust2 = { version = "0.10", default-features = false }
 
 # CLI
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"], optional = true }
 
 # Async runtime
-tokio = { version = "1.49", features = ["full"] }
+tokio = { version = "1.49", features = ["full"], optional = true }
 
 # Error handling
 anyhow = "1.0"
@@ -48,29 +65,29 @@ htmd = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 url = "2.5"
 percent-encoding = "2.3"
-dirs = "5"
-async-trait = "0.1"
+dirs = { version = "5", optional = true }
+async-trait = { version = "0.1", optional = true }
 sha2 = "0.10"
 
 # LSP
-tower-lsp = "0.20"
+tower-lsp = { version = "0.20", optional = true }
 regex = "1"
-strsim = "0.11"
-dashmap = "6"
+strsim = { version = "0.11", optional = true }
+dashmap = { version = "6", optional = true }
 
 # Version checking
-moz-cli-version-check = "0.2"
+moz-cli-version-check = { version = "0.2", optional = true }
 
 # SIGPIPE handling
-libc = "0.2"
+libc = { version = "0.2", optional = true }
 
 # Diffing
 similar = "2"
 
 # PDF parsing (ITU-T Recommendations)
-lopdf = "0.36"
-pdf-extract = "0.9"
-euclid = "0.20.5"
+lopdf = { version = "0.36", optional = true }
+pdf-extract = { version = "0.9", optional = true }
+euclid = { version = "0.20.5", optional = true }
 
 [build-dependencies]
 serde_json = "1.0"

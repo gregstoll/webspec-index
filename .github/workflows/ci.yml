@@ -45,6 +45,27 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+  no-default-features:
+    name: No default features (host + wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: no-default-features
+      - name: Host tests without default features
+        run: cargo test --no-default-features --lib --verbose
+      - name: Clippy without default features
+        run: cargo clippy --no-default-features --lib -- -D warnings
+      - name: Check wasm32 build
+        run: cargo check --no-default-features --lib --target wasm32-unknown-unknown --verbose
+        env:
+          CC_wasm32_unknown_unknown: clang
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
