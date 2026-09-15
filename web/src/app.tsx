@@ -8,8 +8,10 @@ import { Search } from './views/Search';
 import { Headings } from './views/Headings';
 import { NotFound } from './views/NotFound';
 import { ErrorBanner } from './views/Status';
+import { TracePanel, TracePanelToggle } from './views/TracePanel';
 import { useRequest } from './hooks/useRequest';
 import { navigateForQuery } from './dispatch';
+import { traceStore } from './trace/store';
 
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 const client: WebspecClient = new WorkerClient(worker);
@@ -27,6 +29,8 @@ export function App() {
     const stored = localStorage.getItem('theme');
     return stored === 'light' || stored === 'dark' ? stored : 'system';
   });
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [traceCount, setTraceCount] = useState(() => traceStore.entries.length);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -46,12 +50,25 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    return traceStore.subscribe((entries) => setTraceCount(entries.length));
+  }, []);
+
+  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== '/') return;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-      e.preventDefault();
-      searchInputRef.current?.focus();
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (e.key === 't') {
+        const r = parseRoute(window.location.hash || '#/');
+        if (r.kind === 'section') {
+          traceStore.add({ spec: r.spec, anchor: r.anchor });
+          setTraceOpen(true);
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -99,6 +116,7 @@ export function App() {
           <div class="app-header-search">
             <SearchBox inputRef={searchInputRef} />
           </div>
+          <TracePanelToggle count={traceCount} onClick={() => setTraceOpen((o) => !o)} />
           <button class="theme-toggle" onClick={cycleTheme} title="Toggle theme" aria-label="Toggle colour theme">
             {themeLabel}
           </button>
@@ -106,6 +124,8 @@ export function App() {
       </header>
 
       {view}
+
+      {traceOpen && <TracePanel route={route} onClose={() => setTraceOpen(false)} />}
 
       <footer class="app-footer">
         Spec content:{' '}
