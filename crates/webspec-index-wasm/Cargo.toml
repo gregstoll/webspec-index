@@ -1,0 +1,28 @@
+[package]
+name = "webspec-index-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "webspec-index compiled to WebAssembly, reading the exported database over HTTP range requests"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+webspec-index = { path = "../..", default-features = false }
+rusqlite = "0.39"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = { version = "0.5", default-features = false }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = "s"
+lto = true

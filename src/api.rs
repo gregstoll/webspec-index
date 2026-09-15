@@ -3,9 +3,6 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
 use crate::effects;
 use crate::model;
 
@@ -33,22 +30,6 @@ fn default_graph_nodes() -> usize {
     150
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Render {
-    #[default]
-    Markdown,
-    Html,
-}
-
-#[derive(Debug, Serialize)]
-pub struct QueryResponse {
-    #[serde(flatten)]
-    pub query: effects::QueryWithEffects,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_html: Option<String>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
@@ -57,8 +38,6 @@ pub enum Request {
         target: String,
         #[serde(default)]
         effects: bool,
-        #[serde(default)]
-        render: Render,
     },
     Exists {
         target: String,
@@ -137,7 +116,7 @@ pub enum Response {
     Specs {
         specs: Vec<SpecInfo>,
     },
-    Query(QueryResponse),
+    Query(effects::QueryWithEffects),
     Exists(model::ExistsResult),
     Search(model::SearchResult),
     Anchors(model::AnchorsResult),
@@ -381,13 +360,12 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
         Request::Query {
             target,
             effects: with_effects,
-            render,
         } => {
             let (spec, anchor) = resolve_target(&target)?;
             let query = crate::query_section_from_conn(conn, &spec, &anchor)
                 .map_err(map_query_error)?
                 .ok_or_else(|| ApiError::not_found(format!("{spec}#{anchor}")))?;
-            let qwe = if with_effects {
+            Ok(Response::Query(if with_effects {
                 with_cached_effects(conn, query)
             } else {
                 effects::QueryWithEffects {
@@ -395,38 +373,6 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
                     effects: None,
                     effects_status: None,
                 }
-            };
-            let content_html = if render == Render::Html {
-                qwe.query.content.as_deref().map(|md| {
-                    let registry = crate::spec_registry::SpecRegistry::new();
-                    let indexed_cache = RefCell::new(HashMap::<String, bool>::new());
-                    crate::render::markdown_to_html(md, &|url| {
-                        let (spec_name, link_anchor) = registry.resolve_url(url)?;
-                        let is_indexed = *indexed_cache
-                            .borrow_mut()
-                            .entry(spec_name.clone())
-                            .or_insert_with(|| {
-                                crate::db::queries::get_snapshot(conn, &spec_name)
-                                    .ok()
-                                    .flatten()
-                                    .is_some()
-                            });
-                        if is_indexed {
-                            Some(crate::render::LinkTarget {
-                                spec: spec_name,
-                                anchor: link_anchor,
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                })
-            } else {
-                None
-            };
-            Ok(Response::Query(QueryResponse {
-                query: qwe,
-                content_html,
             }))
         }
         Request::Exists { target } => {
@@ -704,27 +650,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM effect_runs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(runs, 0);
-    }
-
-    #[test]
-    fn query_render_html_rewrites_indexed_links_only() {
-        let c = conn();
-        let v = call(
-            &c,
-            r#"{"type":"query","target":"HTML#navigate","render":"html"}"#,
-        );
-        let html = v["result"]["content_html"].as_str().unwrap();
-        assert!(html.contains(r##"href="#/DOM/concept-tree""##), "{html}");
-        assert!(
-            html.contains(r#"href="https://www.w3.org/TR/css-grid-1/#grid""#),
-            "{html}"
-        );
-        assert!(v["result"]["content"]
-            .as_str()
-            .unwrap()
-            .contains("**navigate**"));
-        let plain = call(&c, r#"{"type":"query","target":"HTML#navigate"}"#);
-        assert!(plain["result"].get("content_html").is_none());
     }
 
     #[test]
