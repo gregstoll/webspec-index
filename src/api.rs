@@ -162,9 +162,10 @@ pub struct SpecInfo {
     pub commit_date: String,
 }
 
-/// API-level error code. The `Effects` variant passes through the inner
-/// effects engine code (e.g. `"subject_not_found"`); all others serialize
-/// as their own snake_case strings.
+/// API-level error code. The `Effects` variant carries the inner effects
+/// engine code with an `effects_` prefix (e.g. `"effects_subject_not_found"`)
+/// so effects validation errors never collide with envelope errors such as
+/// `"invalid_request"`; all others serialize as their own snake_case strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiErrorCode {
     InvalidRequest,
@@ -181,7 +182,13 @@ impl Serialize for ApiErrorCode {
             ApiErrorCode::SpecNotIndexed => s.serialize_str("spec_not_indexed"),
             ApiErrorCode::NotFound => s.serialize_str("not_found"),
             ApiErrorCode::Internal => s.serialize_str("internal"),
-            ApiErrorCode::Effects(code) => code.serialize(s),
+            ApiErrorCode::Effects(code) => {
+                let inner = serde_json::to_value(code).map_err(serde::ser::Error::custom)?;
+                let inner = inner.as_str().ok_or_else(|| {
+                    serde::ser::Error::custom("effects error code is not a string")
+                })?;
+                s.serialize_str(&format!("effects_{inner}"))
+            }
         }
     }
 }
@@ -740,13 +747,20 @@ mod tests {
     }
 
     #[test]
-    fn api_error_code_effects_serializes_as_inner_code() {
+    fn api_error_code_effects_serializes_with_prefix() {
         assert_eq!(
             serde_json::to_string(&ApiErrorCode::Effects(
                 effects::RequestErrorCode::SubjectNotFound
             ))
             .unwrap(),
-            "\"subject_not_found\""
+            "\"effects_subject_not_found\""
+        );
+        assert_ne!(
+            serde_json::to_string(&ApiErrorCode::Effects(
+                effects::RequestErrorCode::InvalidRequest
+            ))
+            .unwrap(),
+            serde_json::to_string(&ApiErrorCode::InvalidRequest).unwrap()
         );
     }
 }
