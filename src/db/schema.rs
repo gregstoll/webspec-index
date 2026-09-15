@@ -67,6 +67,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
 
         CREATE INDEX idx_refs_outgoing ON refs(snapshot_id, from_anchor);
         CREATE INDEX idx_refs_incoming ON refs(snapshot_id, to_spec, to_anchor);
+        CREATE INDEX idx_refs_to ON refs(to_spec, to_anchor);
 
         CREATE TABLE idl_defs (
             id             INTEGER PRIMARY KEY,
@@ -155,6 +156,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             value TEXT NOT NULL
         );",
     )?;
+
+    if has_table(conn, "refs")? {
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_refs_to ON refs(to_spec, to_anchor);")?;
+    }
 
     // Rename the pre-existing `parser_version` column (from an earlier build)
     // to `index_version`, preserving its data, before ensuring the column exists.
@@ -788,5 +793,37 @@ mod tests {
                 "fresh schema is missing refs.{expected}"
             );
         }
+    }
+
+    #[test]
+    fn incoming_ref_lookup_uses_target_index() {
+        let conn = crate::db::open_test_db().unwrap();
+        let plan: Vec<String> = conn
+            .prepare("EXPLAIN QUERY PLAN SELECT from_anchor FROM refs WHERE to_spec = 'HTML' AND to_anchor = 'navigate'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|line| line.contains("idx_refs_to")),
+            "{plan:?}"
+        );
+    }
+
+    #[test]
+    fn migrations_add_target_index_to_existing_databases() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        conn.execute_batch("DROP INDEX idx_refs_to;").unwrap();
+        run_migrations(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_refs_to'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
