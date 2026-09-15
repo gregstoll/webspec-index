@@ -18,7 +18,6 @@ pub mod itu;
 pub mod lsp;
 pub mod model;
 pub mod parse;
-pub mod render;
 #[cfg(feature = "native")]
 pub mod spec_list;
 pub mod spec_registry;

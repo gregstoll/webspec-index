@@ -5,7 +5,7 @@ edition = "2021"
 description = "Query WHATWG/W3C/TC39 web specifications from the command line"
 license = "MIT"
 repository = "https://github.com/jnjaeschke/webspec-index"
-exclude = ["editors/", "bindings/", ".github/", "skills/", "csswg-drafts/", "groups/"]
+exclude = ["editors/", "bindings/", ".github/", "skills/", "csswg-drafts/", "groups/", "crates/"]
 
 [lib]
 name = "webspec_index"
@@ -61,9 +61,6 @@ anyhow = "1.0"
 
 # HTML to Markdown
 htmd = "0.5"
-
-# Markdown to HTML
-pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }

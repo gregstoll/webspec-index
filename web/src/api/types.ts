@@ -48,8 +48,8 @@ export interface QueryResult {
   navigation: Navigation;
   outgoing_refs: RefEntry[];
   incoming_refs: RefEntry[];
-  effects?: EffectSummary[];
-  effects_status?: EffectsStatus;
+  effects?: unknown;
+  effects_status?: unknown;
 }
 
 // --- Search ---
@@ -205,164 +205,6 @@ export interface SpecEntry {
   commit_date: string;
 }
 
-// --- Effects types ---
-
-export type EffectValue = string | boolean | number;
-export type EffectParams = Record<string, EffectValue | null>;
-
-export type Execution = 'inline' | 'separate' | 'unknown';
-export type Coverage = 'complete' | 'partial';
-export type Semantics = 'may';
-export type Relationship = 'invoke' | 'candidate_invoke' | 'define_body' | 'schedule_body' | 'resume' | 'implements' | 'mention';
-export type EvidenceBasis = 'matched' | 'declared';
-export type ContextKind = 'enclosing' | 'branch' | 'binding' | 'preceding_exit' | 'unsupported';
-export type PathFeasibility = 'unchecked';
-
-export type IssueCode =
-  | 'missing_spec'
-  | 'missing_anchor'
-  | 'unsupported_structure'
-  | 'unresolved_invocation'
-  | 'unresolved_body_binding'
-  | 'unresolved_argument'
-  | 'ambiguous_match'
-  | 'declaration_mismatch'
-  | 'analysis_budget'
-  | 'snapshot_changed'
-  | 'unsupported_preview'
-  | 'witness_budget'
-  | 'context_truncated';
-
-export interface Subject {
-  spec: string;
-  anchor: string;
-  snapshot_sha: string;
-  step_id?: string;
-  step_path?: number[];
-  body_id?: string;
-}
-
-export interface EffectLocation {
-  spec: string;
-  anchor: string;
-  step_path?: number[];
-  url: string;
-}
-
-export interface EffectSummary {
-  id: string;
-  kind: string;
-  params: EffectParams;
-  execution: Execution[];
-  location?: EffectLocation;
-  other_locations?: EffectLocation[];
-  additional_locations?: number;
-}
-
-export type EffectsStatus =
-  | { state: 'ready'; semantics: Semantics; coverage: Coverage; issues: IssueCode[]; omitted: number; analysis_id: string }
-  | { state: 'pending'; semantics: Semantics; issues: IssueCode[]; omitted: number }
-  | { state: 'unavailable'; semantics: Semantics; issues: IssueCode[]; omitted: number }
-  | { state: 'error'; semantics: Semantics; issues: IssueCode[]; omitted: number }
-  | { state: 'disabled'; semantics: Semantics; issues: IssueCode[]; omitted: number };
-
-export interface Span {
-  start: number;
-  end: number;
-}
-
-export interface SourceSite {
-  id: string;
-  subject: Subject;
-  url: string;
-  segment_id?: string;
-  span?: Span;
-  step_text?: string;
-}
-
-export interface Issue {
-  code: IssueCode;
-  message: string;
-  site?: SourceSite;
-}
-
-export interface Evidence {
-  id: string;
-  basis: EvidenceBasis;
-  rule_id: string;
-  site: SourceSite;
-  captures?: Record<string, string | null>;
-  argument_expressions?: Record<string, string>;
-  reason?: string;
-}
-
-export interface ContextItem {
-  kind: ContextKind;
-  text: string;
-  site: SourceSite;
-}
-
-export interface BoundaryEffect {
-  kind: string;
-  params: EffectParams;
-}
-
-export interface Boundary {
-  execution: Execution;
-  operation_site_id: string;
-  effect?: BoundaryEffect;
-}
-
-export interface WitnessHop {
-  from: Subject;
-  to: Subject;
-  relation: Relationship;
-  site: SourceSite;
-  context: ContextItem[];
-  boundary?: Boundary;
-}
-
-export interface Witness {
-  hops: WitnessHop[];
-  terminal_evidence: Evidence[];
-  path_feasibility: PathFeasibility;
-  issues: Issue[];
-}
-
-export interface EffectExplanation {
-  effect_id: string;
-  witnesses: Witness[];
-  witnesses_truncated: boolean;
-  issues: Issue[];
-}
-
-export interface DefinedBody {
-  subject: Subject;
-  effects: EffectSummary[];
-  effects_status: EffectsStatus;
-}
-
-export interface EffectSummaryResult {
-  schema_version: number;
-  subject: Subject;
-  effects: EffectSummary[];
-  effects_status: EffectsStatus;
-  defined_bodies: DefinedBody[];
-  issues: Issue[];
-  input_manifest?: unknown;
-}
-
-export interface ExplainEffectsResult {
-  schema_version: number;
-  subject: Subject;
-  effects: EffectSummary[];
-  effects_status: EffectsStatus;
-  defined_bodies: DefinedBody[];
-  explanations: EffectExplanation[];
-  issues: Issue[];
-  input_manifest?: unknown;
-}
-
 // --- Effects selectors ---
 
 export interface SubjectSelector {
@@ -429,5 +271,5 @@ export type Response =
   | { type: 'trace'; result: TraceResult }
   | { type: 'graph'; result: GraphResult }
   | { type: 'idl'; result: IdlResult }
-  | { type: 'effects'; result: EffectSummaryResult }
-  | { type: 'effects_explain'; result: ExplainEffectsResult };
+  | { type: 'effects'; result: unknown }
+  | { type: 'effects_explain'; result: unknown };
