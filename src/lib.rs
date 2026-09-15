@@ -9,6 +9,8 @@ pub mod api;
 pub mod db;
 pub mod effects;
 #[cfg(feature = "native")]
+pub mod export;
+#[cfg(feature = "native")]
 pub mod fetch;
 pub mod format;
 pub mod ietf;

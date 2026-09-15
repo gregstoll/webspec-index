@@ -642,6 +642,27 @@ enum Command {
         )]
         output: std::path::PathBuf,
     },
+
+    /// Write the chunked read-only database and manifest the web UI serves
+    ExportWeb {
+        #[arg(long, help = "Output directory (created if missing)")]
+        out: std::path::PathBuf,
+        #[arg(
+            long,
+            value_delimiter = ',',
+            default_value = "whatwg,w3c,tc39",
+            help = "Providers to include"
+        )]
+        providers: Vec<String>,
+        #[arg(long, default_value = "52428800", help = "Chunk size in bytes")]
+        chunk_size: u64,
+        #[arg(
+            long,
+            default_value = "943718400",
+            help = "Fail if the database exceeds this many bytes"
+        )]
+        max_size: u64,
+    },
 }
 
 fn is_llm_environment() -> bool {
@@ -663,6 +684,7 @@ effects [<SPEC#anchor|URL> | --all --summary-only] [--step N.N|--step-id ID|--bo
 update [-s SPEC] [-f force] [--effects auto|off] [--rules PATH] [--environment NAME]
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
+export-web --out DIR [--providers a,b] [--chunk-size N] [--max-size N] — write chunked read-only DB for the web UI
 specs — list indexed/discovered spec names+URLs
 lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
@@ -1180,6 +1202,27 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::ClearPr { spec, pr, all } => {
             let result = webspec_index::clear_pr_data(spec.as_deref(), pr, all)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(ExitCode::SUCCESS)
+        }
+
+        Command::ExportWeb {
+            out,
+            providers,
+            chunk_size,
+            max_size,
+        } => {
+            let options = webspec_index::export::ExportOptions {
+                providers,
+                chunk_size,
+                max_total_bytes: max_size,
+                ..Default::default()
+            };
+            let manifest = webspec_index::export::export_web(
+                &webspec_index::db::get_db_path(),
+                &out,
+                &options,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
             Ok(ExitCode::SUCCESS)
         }
 
