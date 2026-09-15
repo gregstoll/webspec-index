@@ -3139,9 +3139,9 @@ mod tests {
         use model::RefKind;
         let conn = db::open_test_db().unwrap();
         let html =
-            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org/", "whatwg")
+            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg")
                 .unwrap();
-        let dom = write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
+        let dom = write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org", "whatwg")
             .unwrap();
         let html_snap = write::insert_snapshot(&conn, html, "hash:aaaa", "2026-09-01").unwrap();
         let dom_snap = write::insert_snapshot(&conn, dom, "hash:bbbb", "2026-09-01").unwrap();
@@ -3213,7 +3213,7 @@ mod tests {
             .unwrap();
         assert_eq!(result.spec, "HTML");
         assert_eq!(result.sha, "hash:aaaa");
-        assert_eq!(result.url, "https://html.spec.whatwg.org//#navigate");
+        assert_eq!(result.url, "https://html.spec.whatwg.org/#navigate");
         assert_eq!(
             result.navigation.parent.as_ref().unwrap().anchor,
             "browsing"
