@@ -137,6 +137,43 @@ Spec data is fetched and cached locally on first query — no setup needed.
 Spec refreshes are freshness-based: once checked, a spec is considered fresh for 24h.
 When refreshed, the CLI fetches live HTML and re-indexes only if content changed.
 
+## Web UI
+
+Browse WHATWG, W3C, and TC39 specifications at <https://jnjaeschke.github.io/webspec-index/>.
+
+The site offers:
+- **Full-text and section search** across all indexed specs
+- **Cross-references** between specifications
+- **Algorithm effects** with possible behavior summaries and witness examples
+- **Trace recorder** — record your path through algorithms and export as markdown with shareable links
+- **Daily updates** from the latest spec snapshots via GitHub Actions
+- **Zero server** — entirely static; the database is a chunked SQLite file served over HTTP Range requests and read through WebAssembly in your browser
+
+### Navigation by URL
+
+Any spec URL can be opened directly by prepending it to the site:
+
+```
+https://jnjaeschke.github.io/webspec-index/#/https://html.spec.whatwg.org/#navigate
+```
+
+Or use the short form:
+
+```
+https://jnjaeschke.github.io/webspec-index/#/HTML/navigate
+```
+
+### Running locally
+
+Set up the site locally in three steps (after building the native binary):
+
+```bash
+./crates/webspec-index-wasm/build.sh
+webspec-index effects --all --summary-only
+webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39
+cd web && npm ci && npm run dev
+```
+
 ## AI Agent Integration
 
 ### Skill files
