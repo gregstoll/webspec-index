@@ -1,5 +1,6 @@
 //! Markdown output formatters for CLI commands
 
+use crate::effects::{Catalog, QueryWithEffects};
 use crate::model::{
     AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PrDiffResult, QueryResult,
     RefEntry, RefsResult, SearchResult, TraceDetail, TraceHop, TraceResult,
@@ -98,6 +99,16 @@ pub fn query(result: &QueryResult) -> String {
     }
 
     md
+}
+
+/// Format the additive query result using the shared effects renderer.
+pub fn query_with_effects(result: &QueryWithEffects, catalog: Option<&Catalog>) -> String {
+    let mut markdown = query(&result.query);
+    if let Some(effects) = result.effects_result() {
+        markdown.push('\n');
+        markdown.push_str(&crate::effects::render::summary_markdown(&effects, catalog));
+    }
+    markdown
 }
 
 /// Format an ExistsResult as markdown

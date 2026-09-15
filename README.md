@@ -62,9 +62,34 @@ webspec-index idl "HTML#dom-window-navigation"
 webspec-index idl "Window.navigation"
 webspec-index idl "Window.open()" --spec HTML
 
+# Query text with compact possible-effect summaries (default: up to 12 groups)
+webspec-index query "HTML#navigate"
+webspec-index query "HTML#navigate" --effects cached
+webspec-index query "HTML#navigate" --effects off  # original JSON shape
+
+# Inspect effect evidence for an algorithm or one of its steps
+webspec-index effects "HTML#navigate"
+webspec-index effects "HTML#navigate" --step 20 --kind event.fire
+webspec-index effects "HTML#navigate" --effect-id ef_0123456789abcdef --limit 5
+webspec-index effects "HTML#navigate" --summary-only --recompute
+
+# Refresh the indexed corpus once, after all requested specs have been indexed
+webspec-index effects --all --summary-only
+
 # Update specs to latest versions
 webspec-index update
+webspec-index update --effects off  # skip the post-update effects refresh
 ```
+
+Effect results describe behavior the selected specification subject may cause. A
+partial result and its issue codes identify incomplete inputs or analysis. Effect
+analysis does not fetch referenced specifications recursively; use `update` to
+populate dependencies. Add local catalog packages with repeated `--rules PATH`
+and select host mappings with `--environment NAME`. See the [effects guide](docs/effects.md)
+for rule examples, API entry points, supported semantics and measured performance.
+
+PR previews keep returning their requested section text, but effects are reported
+as unavailable with `unsupported_preview` until exact preview analysis is supported.
 
 ### PR Previews
 

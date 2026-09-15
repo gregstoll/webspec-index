@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use moz_cli_version_check::VersionChecker;
 
 use webspec_index::{format, model};
@@ -68,6 +68,142 @@ enum AnalyzeFormat {
     Searchfox,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum EffectsModeArg {
+    Auto,
+    Cached,
+    Off,
+}
+
+impl From<EffectsModeArg> for webspec_index::effects::EffectsMode {
+    fn from(value: EffectsModeArg) -> Self {
+        match value {
+            EffectsModeArg::Auto => Self::Auto,
+            EffectsModeArg::Cached => Self::Cached,
+            EffectsModeArg::Off => Self::Off,
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+struct QueryEffectsArgs {
+    #[arg(
+        long,
+        value_enum,
+        default_value = "auto",
+        help = "Possible-effects analysis: auto, cached, or off"
+    )]
+    effects: EffectsModeArg,
+
+    #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
+    rules: Vec<String>,
+
+    #[arg(long, default_value = "web", help = "Semantic analysis environment")]
+    environment: String,
+}
+
+#[derive(Args, Debug)]
+struct UpdateEffectsArgs {
+    #[arg(
+        long,
+        value_enum,
+        default_value = "auto",
+        help = "Effects refresh: auto or off"
+    )]
+    effects: UpdateEffectsMode,
+
+    #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
+    rules: Vec<String>,
+
+    #[arg(long, default_value = "web", help = "Semantic analysis environment")]
+    environment: String,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateEffectsMode {
+    Auto,
+    Off,
+}
+
+#[derive(Args, Debug)]
+struct EffectsArgs {
+    /// Section identifier: SPEC#anchor or full URL
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    subject: Option<String>,
+
+    #[arg(
+        long,
+        requires = "summary_only",
+        conflicts_with = "subject",
+        help = "Precompute effects for the indexed corpus"
+    )]
+    all: bool,
+
+    #[arg(long, help = "Return summaries without witness explanations")]
+    summary_only: bool,
+
+    #[arg(long, conflicts_with_all = ["summary_only", "all"], help = "Show query's short effects preview: up to 12 effects, without witness traces")]
+    compact: bool,
+
+    #[arg(long, conflicts_with_all = ["step_id", "body_id"], help = "Dotted step number, for example 14.12.3")]
+    step: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["step", "body_id"], help = "Exact structural step ID")]
+    step_id: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["step", "step_id"], help = "Exact structural body ID")]
+    body_id: Option<String>,
+
+    #[arg(long, help = "Select one effect kind")]
+    kind: Option<String>,
+
+    #[arg(long, help = "Select one effect category")]
+    category: Option<String>,
+
+    #[arg(long = "rule", help = "Select effects supported by this rule")]
+    rule_id: Option<String>,
+
+    #[arg(long, help = "Select one effect handle")]
+    effect_id: Option<String>,
+
+    #[arg(long, help = "Restrict witnesses to one source occurrence")]
+    occurrence_id: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with = "analysis_id",
+        help = "Bypass compatible cached analysis"
+    )]
+    recompute: bool,
+
+    #[arg(long, help = "Use an exact retained analysis run")]
+    analysis_id: Option<String>,
+
+    #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
+    rules: Vec<String>,
+
+    #[arg(long, default_value = "web", help = "Semantic analysis environment")]
+    environment: String,
+
+    #[arg(long, default_value_t = webspec_index::effects::DEFAULT_MAX_BODIES, value_parser = clap::value_parser!(u64).range(1..))]
+    max_bodies: u64,
+
+    #[arg(long, default_value_t = webspec_index::effects::DEFAULT_MAX_RELATIONSHIPS, value_parser = clap::value_parser!(u64).range(1..))]
+    max_relationships: u64,
+
+    #[arg(long, default_value_t = webspec_index::effects::DEFAULT_MAX_STATES, value_parser = clap::value_parser!(u64).range(1..))]
+    max_states: u64,
+
+    #[arg(long, default_value_t = webspec_index::effects::DEFAULT_MAX_DEPTH, value_parser = clap::value_parser!(u64).range(1..))]
+    max_depth: u64,
+
+    #[arg(long, default_value_t = webspec_index::effects::DEFAULT_MAX_WITNESS_STATES, value_parser = clap::value_parser!(u64).range(1..))]
+    max_witness_states: u64,
+
+    #[arg(long, short, default_value_t = webspec_index::effects::DEFAULT_WITNESS_LIMIT, value_parser = clap::value_parser!(u64).range(1..), help = "Maximum witnesses per effect group")]
+    limit: u64,
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Query a specific section in a specification
@@ -100,6 +236,9 @@ enum Command {
 
         #[arg(long, help = "Force re-fetch of PR preview data")]
         force_update: bool,
+
+        #[command(flatten)]
+        effect_options: QueryEffectsArgs,
     },
 
     /// Full-text search across specifications
@@ -358,7 +497,16 @@ enum Command {
 
         #[arg(long, short, help = "Force update even if recently checked")]
         force: bool,
+
+        #[command(flatten)]
+        effect_options: UpdateEffectsArgs,
     },
+
+    /// Inspect possible effects of a specification algorithm or step
+    #[command(
+        long_about = "Inspect possible effects and their evidence for one subject, or precompute the indexed corpus with --all --summary-only."
+    )]
+    Effects(Box<EffectsArgs>),
 
     /// Clear the local database (remove all indexed data)
     ClearDb {
@@ -498,14 +646,15 @@ fn is_llm_environment() -> bool {
 fn print_llm_help() {
     print!(
         r#"webspec-index: Query WHATWG/W3C/TC39 web specifications
-query <SPEC#anchor|URL> [--pr N] [--diff] [--format json|markdown]
+query <SPEC#anchor|URL> [--effects auto|cached|off] [--rules PATH] [--environment NAME] [--pr N] [--diff] [--format json|markdown]
 search <Q> [-s SPEC] [-l N(20)] [--pr N (requires -s)] [--format json|markdown]
 exists <SPEC#anchor|URL> [--pr N] exit:0=found,1=not
 anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
 list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
 trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-d verbose(default)|edges|compact] [--format json|markdown]
-update [-s SPEC] [-f force]
+effects [<SPEC#anchor|URL> | --all --summary-only] [--step N.N|--step-id ID|--body-id ID] [--compact|--summary-only] [--kind KIND] [--category CATEGORY] [--rule ID] [--effect-id ID] [--occurrence-id ID] [--recompute] [--analysis-id ID] [--rules PATH] [--environment NAME]
+update [-s SPEC] [-f force] [--effects auto|off] [--rules PATH] [--environment NAME]
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
 specs — list indexed/discovered spec names+URLs
@@ -571,6 +720,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             pr,
             diff,
             force_update,
+            effect_options,
         } => {
             let pr_opts = pr.map(|n| model::PrOpts {
                 pr_number: n,
@@ -588,8 +738,26 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 print_output(&cli.format, &result, format::pr_diff);
                 return Ok(ExitCode::SUCCESS);
             }
-            let result = webspec_index::query_section(&spec_anchor, pr_opts.as_ref()).await?;
-            print_output(&cli.format, &result, format::query);
+            let options = webspec_index::effects::EffectsOptions {
+                mode: effect_options.effects.into(),
+                rule_paths: effect_options.rules.clone(),
+                environment: effect_options.environment,
+                ..Default::default()
+            };
+            let result = webspec_index::effects::query_section_with_effects(
+                &spec_anchor,
+                pr_opts.as_ref(),
+                options,
+            )
+            .await?;
+            let catalog = if result.effects.is_some() {
+                webspec_index::effects::default_catalog(&effect_options.rules).ok()
+            } else {
+                None
+            };
+            print_output(&cli.format, &result, |result| {
+                format::query_with_effects(result, catalog.as_ref())
+            });
             Ok(ExitCode::SUCCESS)
         }
 
@@ -765,8 +933,25 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
-        Command::Update { spec, force } => {
+        Command::Update {
+            spec,
+            force,
+            effect_options,
+        } => {
             let results = webspec_index::update_specs(spec.as_deref(), force).await?;
+            if effect_options.effects == UpdateEffectsMode::Auto {
+                webspec_index::effects::recompute_effects(
+                    &webspec_index::effects::RecomputeEffectsRequest {
+                        schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
+                        scope: webspec_index::effects::AnalysisScope::All,
+                        options: webspec_index::effects::EffectsOptions {
+                            rule_paths: effect_options.rules,
+                            environment: effect_options.environment,
+                            ..Default::default()
+                        },
+                    },
+                )?;
+            }
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
                 .map(|(name, snapshot_id)| model::UpdateEntry {
@@ -775,6 +960,161 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 })
                 .collect();
             println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(ExitCode::SUCCESS)
+        }
+
+        Command::Effects(args) => {
+            let EffectsArgs {
+                subject,
+                all,
+                summary_only,
+                compact,
+                step,
+                step_id,
+                body_id,
+                kind,
+                category,
+                rule_id,
+                effect_id,
+                occurrence_id,
+                recompute,
+                analysis_id,
+                rules,
+                environment,
+                max_bodies,
+                max_relationships,
+                max_states,
+                max_depth,
+                max_witness_states,
+                limit,
+            } = *args;
+            use webspec_index::effects;
+
+            let has_filter = kind.is_some()
+                || category.is_some()
+                || rule_id.is_some()
+                || effect_id.is_some()
+                || occurrence_id.is_some();
+            if all
+                && (step.is_some()
+                    || step_id.is_some()
+                    || body_id.is_some()
+                    || has_filter
+                    || recompute
+                    || analysis_id.is_some())
+            {
+                anyhow::bail!(
+                    "--all cannot be combined with subject selectors, filters, --recompute, or --analysis-id"
+                );
+            }
+
+            let budgets = effects::DiscoveryBudgets {
+                max_bodies,
+                max_relationships,
+                max_states,
+            };
+            let mut options = effects::EffectsOptions {
+                mode: effects::EffectsMode::Auto,
+                rule_paths: rules.clone(),
+                environment,
+                analysis_id: analysis_id.clone(),
+                budgets,
+            };
+
+            if analysis_id.is_some()
+                && (!rules.is_empty()
+                    || options.environment != effects::DEFAULT_ENVIRONMENT
+                    || options.budgets != effects::DiscoveryBudgets::default())
+            {
+                anyhow::bail!(
+                    "--analysis-id cannot be combined with altered rules, environment, or discovery budgets"
+                );
+            }
+
+            if all {
+                let result = effects::recompute_effects(&effects::RecomputeEffectsRequest {
+                    schema_version: effects::EFFECTS_SCHEMA_VERSION,
+                    scope: effects::AnalysisScope::All,
+                    options,
+                })?;
+                print_output(&cli.format, &result, |_| {
+                    format!(
+                        "Effects analysis `{}` processed {} subjects; {} remain unprocessed.\n",
+                        result.analysis_id,
+                        result.processed_subjects.len(),
+                        result.unprocessed_subjects.len()
+                    )
+                });
+                return Ok(ExitCode::SUCCESS);
+            }
+
+            let subject_text = subject.context("a subject or --all is required")?;
+            let (parsed_spec, parsed_anchor, _) = webspec_index::parse_spec_anchor(&subject_text)?;
+            let step_path = step.as_deref().map(parse_step_path).transpose()?;
+            let mut selector = effects::SubjectSelector {
+                spec: parsed_spec,
+                anchor: parsed_anchor,
+                step_path,
+                step_id,
+                body_id,
+            };
+
+            // Only the explicitly requested root may be indexed here. Effect analysis
+            // itself reports missing dependencies rather than fetching them.
+            if analysis_id.is_none() {
+                let queried = webspec_index::query_section(&subject_text, None).await?;
+                selector.spec = queried.spec;
+                selector.anchor = queried.anchor;
+            }
+
+            if recompute {
+                let recomputed = effects::recompute_effects(&effects::RecomputeEffectsRequest {
+                    schema_version: effects::EFFECTS_SCHEMA_VERSION,
+                    scope: effects::AnalysisScope::Subject {
+                        subject: selector.clone(),
+                    },
+                    options: options.clone(),
+                })?;
+                options.analysis_id = Some(recomputed.analysis_id);
+            }
+
+            let filter = has_filter.then_some(effects::EffectFilter {
+                kind,
+                category,
+                rule_id,
+                effect_id,
+                occurrence_id,
+            });
+            let catalog = effects::default_catalog(&rules)?;
+            if summary_only || compact {
+                let mut result = effects::get_effect_summary(&effects::EffectsRequest {
+                    schema_version: effects::EFFECTS_SCHEMA_VERSION,
+                    subject: selector,
+                    options,
+                    filter,
+                })?;
+                if compact {
+                    result = effects::query::compact_summary(result);
+                }
+                print_output(&cli.format, &result, |result| {
+                    effects::render::summary_markdown(result, Some(&catalog))
+                });
+            } else {
+                let result = effects::explain_effects(&effects::ExplainEffectsRequest {
+                    schema_version: effects::EFFECTS_SCHEMA_VERSION,
+                    subject: selector,
+                    options,
+                    filter,
+                    explanation: effects::ExplanationOptions {
+                        max_depth,
+                        max_states: max_witness_states,
+                        limit,
+                    },
+                })?;
+                print_output(&cli.format, &result, |result| {
+                    effects::render::explanation_markdown(result, Some(&catalog))
+                });
+            }
             Ok(ExitCode::SUCCESS)
         }
 
@@ -962,6 +1302,23 @@ fn parse_ref_kind(kind: Option<&str>) -> anyhow::Result<Option<model::RefKind>> 
     }
 }
 
+fn parse_step_path(value: &str) -> anyhow::Result<Vec<u32>> {
+    if value.is_empty() {
+        anyhow::bail!("--step must be a dotted sequence of nonnegative integers");
+    }
+    value
+        .split('.')
+        .map(|part| {
+            if part.is_empty() {
+                anyhow::bail!("--step must be a dotted sequence of nonnegative integers");
+            }
+            part.parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("--step must be a dotted sequence of nonnegative integers")
+            })
+        })
+        .collect()
+}
+
 /// Print output in the requested format
 fn print_output<T: serde::Serialize>(
     fmt: &OutputFormat,
@@ -978,5 +1335,97 @@ fn print_output<T: serde::Serialize>(
         OutputFormat::Markdown => {
             print!("{}", markdown_fn(value));
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_effect_tests {
+    use super::*;
+
+    #[test]
+    fn compact_effects_is_a_distinct_summary_mode() {
+        let cli = Cli::try_parse_from(["webspec-index", "effects", "HTML#navigate", "--compact"])
+            .unwrap();
+        let Command::Effects(args) = cli.command else {
+            panic!("expected effects command")
+        };
+        assert!(args.compact);
+        assert!(!args.summary_only);
+        assert!(Cli::try_parse_from([
+            "webspec-index",
+            "effects",
+            "HTML#navigate",
+            "--compact",
+            "--summary-only"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "webspec-index",
+            "effects",
+            "--all",
+            "--summary-only",
+            "--compact"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn query_effects_off_is_accepted() {
+        let cli = Cli::try_parse_from([
+            "webspec-index",
+            "query",
+            "HTML#navigate",
+            "--effects",
+            "off",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query {
+                effect_options: QueryEffectsArgs {
+                    effects: EffectsModeArg::Off,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn effects_rejects_conflicting_subject_selectors() {
+        let result = Cli::try_parse_from([
+            "webspec-index",
+            "effects",
+            "HTML#navigate",
+            "--step",
+            "2",
+            "--step-id",
+            "st_exact",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn all_requires_summary_only() {
+        let result = Cli::try_parse_from(["webspec-index", "effects", "--all"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn numeric_limits_must_be_positive() {
+        let result = Cli::try_parse_from([
+            "webspec-index",
+            "effects",
+            "HTML#navigate",
+            "--max-depth",
+            "0",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_dotted_step_path() {
+        assert_eq!(parse_step_path("14.12.3").unwrap(), vec![14, 12, 3]);
+        assert!(parse_step_path("14..3").is_err());
     }
 }
