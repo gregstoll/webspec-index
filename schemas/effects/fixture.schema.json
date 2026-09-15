@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webspec-index.dev/schemas/effects/fixture.schema.json",
+  "title": "WebSpec semantic catalog fixture case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "sources", "subject", "expect_local_effects", "expect_issues"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["spec", "file"],
+        "properties": {"spec": {"type": "string", "minLength": 1}, "file": {"type": "string", "minLength": 1}}
+      }
+    },
+    "subject": {"$ref": "#/$defs/subject"},
+    "expect_local_effects": {"type": "array", "items": {"$ref": "#/$defs/expectedEffect"}},
+    "expect_effects": {"type": "array", "items": {"$ref": "#/$defs/expectedEffect"}},
+    "forbidden_effects": {"type": "array", "items": {"$ref": "#/$defs/effectSelector"}},
+    "expect_relationships": {"type": "array", "items": {"$ref": "#/$defs/expectedRelationship"}},
+    "expect_issues": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/issueCode"}},
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "subject": {
+      "type": "object", "additionalProperties": false, "required": ["spec", "anchor"],
+      "properties": {
+        "spec": {"type": "string", "minLength": 1}, "anchor": {"type": "string", "minLength": 1},
+        "step_path": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 0}},
+        "step_id": {"type": "string"}, "body_id": {"type": "string"}
+      },
+      "allOf": [
+        {"not": {"required": ["step_path", "step_id"]}},
+        {"not": {"required": ["step_path", "body_id"]}},
+        {"not": {"required": ["step_id", "body_id"]}}
+      ]
+    },
+    "params": {"type": "object", "additionalProperties": {"type": ["string", "boolean", "integer", "null"]}},
+    "effectSelector": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "params"],
+      "properties": {"kind": {"type": "string", "minLength": 1}, "params": {"$ref": "#/$defs/params"}}
+    },
+    "expectedEffect": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "params", "operation_count"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1}, "params": {"$ref": "#/$defs/params"},
+        "execution": {"type": "array", "uniqueItems": true, "items": {"enum": ["inline", "separate", "unknown"]}},
+        "operation_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "expectedRelationship": {
+      "type": "object", "additionalProperties": false, "required": ["relation", "from_site", "to_subject"],
+      "properties": {
+        "relation": {"enum": ["invoke", "candidate_invoke", "define_body", "schedule_body", "resume", "implements", "mention"]},
+        "from_site": {"type": "string"}, "to_subject": {"$ref": "#/$defs/subject"},
+        "execution": {"enum": ["inline", "separate", "unknown"]}
+      }
+    },
+    "issueCode": {
+      "enum": ["missing_spec", "missing_anchor", "unsupported_structure", "unresolved_invocation", "unresolved_body_binding", "unresolved_argument", "ambiguous_match", "declaration_mismatch", "analysis_budget", "snapshot_changed", "unsupported_preview", "witness_budget", "context_truncated"]
+    }
+  }
+}

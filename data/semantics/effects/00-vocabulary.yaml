@@ -1,0 +1,48 @@
+schema: 1
+package: webspec-semantics
+
+effects:
+  event.fire:
+    category: events
+    label: fire an event
+    parameters:
+      name:
+        type: string
+  event.dispatch:
+    category: events
+    label: dispatch an event
+    parameters:
+      name:
+        type: string
+  scheduling.enqueue:
+    category: async
+    label: schedule work
+    parameters:
+      queue:
+        type: string
+      source:
+        type: string
+  scheduling.parallel:
+    category: async
+    label: run work in parallel
+    parameters: {}
+  scheduling.promise-continuation:
+    category: async
+    label: schedule promise continuations
+    parameters: {}
+  script.invoke:
+    category: script
+    label: invoke author code
+    parameters:
+      mechanism:
+        type: string
+  script.opportunity:
+    category: script
+    label: allow scripts to run
+    parameters: {}
+  execution.context:
+    category: context
+    label: enter an execution context operation
+    parameters:
+      operation:
+        type: string

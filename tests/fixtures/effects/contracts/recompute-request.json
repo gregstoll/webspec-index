@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "scope": {"kind": "all"},
+  "options": {
+    "mode": "auto",
+    "rule_paths": [],
+    "environment": "web",
+    "budgets": {"max_bodies": 20000, "max_relationships": 500000, "max_states": 2000000}
+  }
+}

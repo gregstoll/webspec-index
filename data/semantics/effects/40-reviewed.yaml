@@ -1,0 +1,25 @@
+schema: 1
+package: webspec-semantics
+summaries:
+- id: wait-for-all
+  subject: WEBIDL#wait-for-all
+  expect_text: PerformPromiseThen
+  reason: This reviewed Web IDL primitive schedules success and failure continuations
+    through promise jobs; the declaration is intrinsic and does not claim every branch
+    runs.
+  emit:
+    kind: scheduling.promise-continuation
+    params: {}
+  continuations: separate
+rules:
+- id: navigate-script-opportunity
+  description: The document update algorithm explicitly permits author script execution
+    after a new document is committed.
+  match:
+    subject: HTML#update-document-for-history-step-application
+    text: (?i)At this point scripts may run for the newly-created document
+  emit:
+    kind: script.opportunity
+    params: {}
+  expect:
+  - queued-event-boundary

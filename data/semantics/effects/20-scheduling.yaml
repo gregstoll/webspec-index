@@ -1,0 +1,164 @@
+schema: 1
+package: webspec-semantics
+
+rules:
+  - id: queue-global-task
+    match:
+      anchor: HTML#queue-a-global-task
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source: null
+    continuations: separate
+    expect:
+      - navigation-history-events
+      - direct-scheduling
+  - id: queue-element-task
+    match:
+      anchor: HTML#queue-an-element-task
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source: null
+    continuations: separate
+    expect:
+      - direct-scheduling
+  - id: queue-microtask
+    match:
+      anchor: HTML#queue-a-microtask
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: microtask
+        source: null
+    continuations: separate
+    expect:
+      - direct-scheduling
+      - promise-empty-list-candidate
+  - id: queue-session-history-traversal
+    match:
+      anchor: HTML#tn-append-session-history-traversal-steps
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: traversal
+        source: null
+    continuations: separate
+    expect:
+      - traverseto-summary
+      - navigation-history-events
+  - id: run-in-parallel
+    match:
+      anchor: HTML#in-parallel
+    emit:
+      kind: scheduling.parallel
+      params: {}
+    continuations: separate
+    expect:
+      - navigation-history-events
+      - direct-scheduling
+  - id: queue-task
+    match:
+      anchor: HTML#queue-a-task
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source: null
+    continuations: separate
+    expect:
+      - scheduling-queue-task
+  - id: enqueue-parallel
+    match:
+      anchor: HTML#enqueue-the-following-steps
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: parallel queue
+        source: null
+    continuations: separate
+    expect:
+      - scheduling-enqueue-parallel
+  - id: append-sync-navigation
+    match:
+      anchor: HTML#tn-append-session-history-sync-nav-steps
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: traversal
+        source: null
+    continuations: separate
+    expect:
+      - scheduling-append-sync-navigation
+  - id: queue-media-element-task
+    match:
+      anchor: HTML#queue-a-media-element-task
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source: media element event task source
+    continuations: separate
+    expect:
+      - scheduling-queue-media-element-task
+  - id: queue-task-named-source
+    description: Preserve the task source named at this queueing operation; dynamic sources remain unknown.
+    match:
+      anchor: HTML#queue-a-task
+      text: '(?i)queue a task (?:on|using) (?:the |\*[^*]+\*[''’]s |the media element[''’]s )?(?P<source>embed task source|media element event task source|canvas blob serialization task source|speculation rules task source|JavaScript engine task source|microtask task source|DOM manipulation task source|user interaction task source|networking task source|navigation and traversal task source|rendering task source|timer task source|bitmap task source|remote event task source|posted message task source|port message queue|unshipped port message queue)\b'
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source:
+          capture: source
+          from: text
+    continuations: separate
+    expect:
+      - scheduling-named-task-sources
+  - id: queue-global-task-named-source
+    description: Preserve the task source named at this queueing operation; dynamic sources remain unknown.
+    match:
+      anchor: HTML#queue-a-global-task
+      text: '(?i)queue a global task (?:on|using) (?:the |\*[^*]+\*[''’]s |the media element[''’]s )?(?P<source>embed task source|media element event task source|canvas blob serialization task source|speculation rules task source|JavaScript engine task source|microtask task source|DOM manipulation task source|user interaction task source|networking task source|navigation and traversal task source|rendering task source|timer task source|bitmap task source|remote event task source|posted message task source|port message queue|unshipped port message queue)\b'
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source:
+          capture: source
+          from: text
+    continuations: separate
+    expect:
+      - scheduling-named-global-task-sources
+  - id: queue-element-task-named-source
+    description: Preserve the task source named at this queueing operation; dynamic sources remain unknown.
+    match:
+      anchor: HTML#queue-an-element-task
+      text: '(?i)queue an element task (?:on|using) (?:the |\*[^*]+\*[''’]s |the media element[''’]s )?(?P<source>embed task source|media element event task source|canvas blob serialization task source|speculation rules task source|JavaScript engine task source|microtask task source|DOM manipulation task source|user interaction task source|networking task source|navigation and traversal task source|rendering task source|timer task source|bitmap task source|remote event task source|posted message task source|port message queue|unshipped port message queue)\b'
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source:
+          capture: source
+          from: text
+    continuations: separate
+    expect:
+      - scheduling-named-element-task-sources
+  - id: add-port-message-task
+    description: MessagePort queues tasks directly; a mere reference to the queue does not enqueue work.
+    match:
+      anchor: HTML#port-message-queue
+      text: '(?i)add a task that runs the following steps to the port message queue\b'
+    emit:
+      kind: scheduling.enqueue
+      params:
+        queue: task
+        source: port message queue
+    continuations: separate
+    expect:
+      - scheduling-port-message
+      - scheduling-port-message-mention

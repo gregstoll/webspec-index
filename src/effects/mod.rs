@@ -1,0 +1,23 @@
+//! Shared possible-effects analysis for specification queries and editors.
+pub mod bundled;
+pub mod catalog;
+pub mod engine;
+pub mod graph;
+mod local;
+pub mod matcher;
+pub mod model;
+pub mod query;
+pub mod render;
+pub mod service;
+
+pub use bundled::{default_catalog, CATALOG_LOCK};
+pub use catalog::{
+    load_catalog, load_catalog_sources, load_package, load_package_files, Catalog, CatalogError,
+    Package,
+};
+pub use engine::{
+    analyze, AnalysisArtifact, AnalysisInput, ArtifactSummary, IndexedAnchor, SourceSpec,
+};
+pub use model::*;
+pub use query::{query_section_with_effects, QueryWithEffects};
+pub use service::{explain_effects, get_effect_summary, input_fingerprint, recompute_effects};

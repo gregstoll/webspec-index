@@ -1,0 +1,44 @@
+schema: 1
+package: example
+
+effects:
+  event.fire:
+    category: events
+    label: fire an event
+    parameters:
+      name: {type: string}
+  scheduling.enqueue:
+    category: async
+    label: schedule work
+    parameters:
+      queue: {type: string}
+  scheduling.promise-continuation:
+    category: async
+    label: schedule promise continuations
+    parameters: {}
+
+rules:
+  - id: fire-event
+    match:
+      anchor: DOM#concept-event-fire
+    emit:
+      kind: event.fire
+      params: {name: null}
+
+  - id: fire-named-event
+    match:
+      anchor: DOM#concept-event-fire
+      text: '(?i)fire an event named `(?P<name>[^`]+)`'
+    emit:
+      kind: event.fire
+      params:
+        name: {capture: name}
+    expect: [direct-two-sites, variable-name]
+
+  - id: queue-microtask
+    match:
+      anchor: HTML#queue-a-microtask
+    emit:
+      kind: scheduling.enqueue
+      params: {queue: microtask}
+    continuations: separate

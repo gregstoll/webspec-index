@@ -1,0 +1,12 @@
+schema: 1
+package: example
+
+summaries:
+  - id: wait-for-all
+    subject: WEBIDL#wait-for-all
+    expect_text: PerformPromiseThen
+    reason: This primitive arranges execution of success or failure continuations.
+    emit:
+      kind: scheduling.promise-continuation
+      params: {}
+    continuations: separate

@@ -1,0 +1,76 @@
+schema: 1
+package: webspec-semantics
+
+rules:
+  - id: invoke-callback-function
+    match:
+      anchor: WEBIDL#invoke-a-callback-function
+    emit:
+      kind: script.invoke
+      params:
+        mechanism: callback-function
+    expect:
+      - author-code-endpoints
+  - id: invoke-user-object-operation
+    match:
+      anchor: WEBIDL#call-a-user-objects-operation
+    emit:
+      kind: script.invoke
+      params:
+        mechanism: user-object-operation
+    expect:
+      - author-code-endpoints
+  - id: run-classic-script
+    match:
+      anchor: HTML#run-a-classic-script
+    emit:
+      kind: script.invoke
+      params:
+        mechanism: classic-script
+    expect:
+      - author-code-endpoints
+  - id: run-module-script
+    match:
+      anchor: HTML#run-a-module-script
+    emit:
+      kind: script.invoke
+      params:
+        mechanism: module-script
+    expect:
+      - author-code-endpoints
+  - id: prepare-script-context
+    match:
+      anchor: HTML#prepare-to-run-script
+    emit:
+      kind: execution.context
+      params:
+        operation: prepare-script
+    expect:
+      - execution-context
+  - id: cleanup-script-context
+    match:
+      anchor: HTML#clean-up-after-running-script
+    emit:
+      kind: execution.context
+      params:
+        operation: cleanup-script
+    expect:
+      - execution-context
+  - id: prepare-callback-context
+    match:
+      anchor: HTML#prepare-to-run-a-callback
+    emit:
+      kind: execution.context
+      params:
+        operation: prepare-callback
+    expect:
+      - execution-context
+  - id: cleanup-callback-context
+    match:
+      anchor: HTML#clean-up-after-running-a-callback
+    emit:
+      kind: execution.context
+      params:
+        operation: cleanup-callback
+    expect:
+      - execution-context

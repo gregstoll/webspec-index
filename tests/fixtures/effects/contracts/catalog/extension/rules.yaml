@@ -1,0 +1,11 @@
+schema: 1
+package: example-extension
+
+rules:
+  - id: scoped-load-event
+    match:
+      subject: TEST#r
+      anchor: DOM#concept-event-fire
+    emit:
+      kind: event.fire
+      params: {name: load}

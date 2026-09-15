@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webspec-index.dev/schemas/effects/catalog.schema.json",
+  "title": "WebSpec effect catalog file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "package"],
+  "properties": {
+    "schema": {"const": 1},
+    "package": {"$ref": "#/$defs/id"},
+    "effects": {
+      "type": "object",
+      "default": {},
+      "propertyNames": {"$ref": "#/$defs/effectKind"},
+      "additionalProperties": {"$ref": "#/$defs/effectDefinition"}
+    },
+    "rules": {"type": "array", "default": [], "items": {"$ref": "#/$defs/rule"}},
+    "summaries": {"type": "array", "default": [], "items": {"$ref": "#/$defs/summary"}},
+    "implementations": {"type": "array", "default": [], "items": {"$ref": "#/$defs/implementation"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "effectKind": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"},
+    "parameterName": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "anchor": {"type": "string", "pattern": "^[^#\\s]+#[^#\\s]+$"},
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["string", "boolean", "integer", "anchor"]},
+        "enum": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      },
+      "allOf": [
+        {"if": {"required": ["enum"]}, "then": {"properties": {"type": {"const": "string"}}}}
+      ]
+    },
+    "effectDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "label"],
+      "properties": {
+        "category": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "parameters": {
+          "type": "object",
+          "default": {},
+          "propertyNames": {"$ref": "#/$defs/parameterName"},
+          "additionalProperties": {"$ref": "#/$defs/parameter"}
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture"],
+      "properties": {
+        "capture": {"type": "string", "minLength": 1},
+        "from": {"enum": ["literal", "text", "anchor"]}
+      }
+    },
+    "emitValue": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string"},
+        {"type": "boolean"},
+        {"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807},
+        {"$ref": "#/$defs/capture"}
+      ]
+    },
+    "emit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/effectKind"},
+        "params": {"type": "object", "default": {}, "additionalProperties": {"$ref": "#/$defs/emitValue"}}
+      }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {"$ref": "#/$defs/anchor"},
+        "subject": {"$ref": "#/$defs/anchor"},
+        "text": {"type": "string", "minLength": 1},
+        "exclude_text": {"type": "array", "items": {"type": "string"}}
+      },
+      "anyOf": [{"required": ["anchor"]}, {"required": ["text"]}]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "emit"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "match": {"$ref": "#/$defs/match"},
+        "emit": {"$ref": "#/$defs/emit"},
+        "continuations": {"enum": ["inline", "separate", "unknown"]},
+        "description": {"type": "string"},
+        "expect": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "subject", "expect_text", "reason", "emit"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "subject": {"$ref": "#/$defs/anchor"},
+        "expect_text": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1},
+        "emit": {"$ref": "#/$defs/emit"},
+        "continuations": {"enum": ["inline", "separate", "unknown"]}
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "environment", "operation", "implementation", "expect_text", "reason"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "environment": {"type": "string", "minLength": 1},
+        "operation": {"$ref": "#/$defs/anchor"},
+        "implementation": {"$ref": "#/$defs/anchor"},
+        "expect_text": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

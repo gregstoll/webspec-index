@@ -1,0 +1,10 @@
+schema: 1
+package: webspec-semantics
+
+implementations:
+  - id: ecma-host-enqueue-promise-job-html
+    environment: web
+    operation: ECMA-262#sec-hostenqueuepromisejob
+    implementation: HTML#hostenqueuepromisejob
+    expect_text: '(?i)Queue a microtask'
+    reason: HTML provides the web-environment implementation of ECMAScript's HostEnqueuePromiseJob operation.

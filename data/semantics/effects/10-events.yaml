@@ -1,0 +1,70 @@
+schema: 1
+package: webspec-semantics
+
+rules:
+  - id: event-fire-generic
+    description: The DOM fire-an-event primitive is an intrinsic event effect. The name is unknown until a caller provides a supported literal.
+    match:
+      anchor: DOM#concept-event-fire
+    emit:
+      kind: event.fire
+      params:
+        name: null
+  - id: event-fire-literal-name
+    description: Recover a literal event name when the complete fire operation is present at the linked reference.
+    match:
+      anchor: DOM#concept-event-fire
+      text: '(?i)\b(?:fire|firing) an event named (?P<name>`[^`]+`|\*[^*]+\*)'
+    emit:
+      kind: event.fire
+      params:
+        name:
+          capture: name
+          from: literal
+    expect:
+      - direct-two-sites
+      - variable-name
+      - named-event-note
+      - multiple-event-operations
+      - mention-only
+      - navigation-history-events
+      - inflected-event-names
+  - id: event-fire-code-name
+    description: Recover the event name from the unquoted code-token spelling used by HTML for fixed event names such as popstate and hashchange. The capture excludes variable tokens and quoted code.
+    match:
+      anchor: DOM#concept-event-fire
+      text: '(?i)\b(?:fire|firing) an event named `(?P<name>[a-z][a-z0-9_-]*)`'
+    emit:
+      kind: event.fire
+      params:
+        name:
+          capture: name
+          from: text
+    expect:
+      - navigation-history-events
+      - inflected-event-names
+      - queued-event-boundary
+  - id: event-dispatch-generic
+    description: Dispatch is a separate DOM operation from firing; generic dispatch keeps its name unknown.
+    match:
+      anchor: DOM#concept-event-dispatch
+    emit:
+      kind: event.dispatch
+      params:
+        name: null
+    expect:
+      - navigation-dispatch
+      - dispatch-initialization-negative
+  - id: navigation-dispatch-name
+    description: "Reviewed Navigation API case: initialization of the NavigateEvent type does not itself dispatch; the later dispatch operation is scoped to this algorithm and reports the known navigate name."
+    match:
+      anchor: DOM#concept-event-dispatch
+      subject: HTML#inner-navigate-event-firing-algorithm
+      text: '(?i)dispatching\s+\*event\*\s+at\s+\*navigation\*'
+    emit:
+      kind: event.dispatch
+      params:
+        name: navigate
+    expect:
+      - navigation-dispatch
+      - dispatch-initialization-negative

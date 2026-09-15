@@ -1,0 +1,69 @@
+//! The maintained catalog is embedded in installed binaries, with no network lookup.
+use super::catalog::{load_catalog, load_package_files, Catalog};
+use super::model::{RequestError, RequestErrorCode};
+use std::sync::OnceLock;
+
+const FILES: &str = include_str!("../../data/semantics/embedded.json");
+pub const CATALOG_LOCK: &str = include_str!("../../data/semantics/catalog-lock.json");
+
+pub fn default_catalog(additional_paths: &[String]) -> Result<Catalog, RequestError> {
+    static BUNDLED: OnceLock<Result<Catalog, String>> = OnceLock::new();
+    let bundled = BUNDLED.get_or_init(|| {
+        let files: Vec<(String, String)> =
+            serde_json::from_str(FILES).map_err(|e| e.to_string())?;
+        let files: Vec<_> = files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        let package = load_package_files(&files).map_err(|e| e.to_string())?;
+        load_catalog([package]).map_err(|e| e.to_string())
+    });
+    let bundled = bundled
+        .as_ref()
+        .map_err(|message| invalid_catalog(message.clone()))?;
+    if additional_paths.is_empty() {
+        return Ok(bundled.clone());
+    }
+    let mut packages = bundled.packages.clone();
+    for path in additional_paths {
+        packages
+            .push(super::catalog::load_package(path).map_err(|e| invalid_catalog(e.to_string()))?);
+    }
+    load_catalog(packages).map_err(|e| invalid_catalog(e.to_string()))
+}
+
+fn invalid_catalog(message: String) -> RequestError {
+    RequestError {
+        code: RequestErrorCode::InvalidCatalog,
+        message,
+        details: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn embedded_catalog_matches_release_lock() {
+        let files: Vec<(String, String)> = serde_json::from_str(FILES).unwrap();
+        let mut hash = Sha256::new();
+        for (path, text) in files {
+            hash.update(path);
+            hash.update([0]);
+            hash.update(text);
+            hash.update([0]);
+        }
+        let lock: serde_json::Value = serde_json::from_str(CATALOG_LOCK).unwrap();
+        assert_eq!(
+            lock["content_sha256"].as_str().unwrap(),
+            format!("{:x}", hash.finalize())
+        );
+        let catalog = default_catalog(&[]).unwrap();
+        assert_eq!(catalog.effects.len(), 8);
+        assert!(catalog.rules().any(
+            |rule| rule.emit.kind == "script.opportunity" && rule.match_spec.subject.is_some()
+        ));
+    }
+}

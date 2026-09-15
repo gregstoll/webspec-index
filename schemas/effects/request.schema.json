@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webspec-index.dev/schemas/effects/request.schema.json",
+  "title": "WebSpec effects API requests",
+  "oneOf": [
+    {"$ref": "#/$defs/summaryRequest"},
+    {"$ref": "#/$defs/explainRequest"},
+    {"$ref": "#/$defs/recomputeRequest"}
+  ],
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spec", "anchor"],
+      "properties": {
+        "spec": {"type": "string", "minLength": 1},
+        "anchor": {"type": "string", "minLength": 1},
+        "step_path": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}},
+        "step_id": {"type": "string", "minLength": 1},
+        "body_id": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"not": {"required": ["step_path", "step_id"]}},
+        {"not": {"required": ["step_path", "body_id"]}},
+        {"not": {"required": ["step_id", "body_id"]}}
+      ]
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_bodies", "max_relationships", "max_states"],
+      "properties": {
+        "max_bodies": {"type": "integer", "minimum": 1},
+        "max_relationships": {"type": "integer", "minimum": 1},
+        "max_states": {"type": "integer", "minimum": 1}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["auto", "cached", "off"], "default": "auto"},
+        "rule_paths": {"type": "array", "default": [], "items": {"type": "string"}},
+        "environment": {"type": "string", "minLength": 1, "default": "web"},
+        "analysis_id": {"type": "string", "pattern": "^an_[0-9a-f]{16,64}$"},
+        "budgets": {"$ref": "#/$defs/budgets"}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string"},
+        "category": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "effect_id": {"type": "string", "pattern": "^ef_[0-9a-f]{16,64}$"},
+        "occurrence_id": {"type": "string"}
+      }
+    },
+    "explanation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_depth": {"type": "integer", "minimum": 1, "default": 20000},
+        "max_states": {"type": "integer", "minimum": 1, "default": 20000},
+        "limit": {"type": "integer", "minimum": 1, "default": 1}
+      }
+    },
+    "summaryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "subject"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "subject": {"$ref": "#/$defs/subject"},
+        "options": {"$ref": "#/$defs/options"},
+        "filter": {"$ref": "#/$defs/filter"}
+      }
+    },
+    "explainRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "subject", "explanation"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "subject": {"$ref": "#/$defs/subject"},
+        "options": {"$ref": "#/$defs/options"},
+        "filter": {"$ref": "#/$defs/filter"},
+        "explanation": {"$ref": "#/$defs/explanation"}
+      }
+    },
+    "scope": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "all"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "subject"], "properties": {"kind": {"const": "subject"}, "subject": {"$ref": "#/$defs/subject"}}}
+      ]
+    },
+    "recomputeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "scope"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "scope": {"$ref": "#/$defs/scope"},
+        "options": {"$ref": "#/$defs/options"}
+      }
+    }
+  }
+}

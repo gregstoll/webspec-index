@@ -1,0 +1,4 @@
+schema: 1
+package: invalid
+effects: &effects {}
+rules: *effects

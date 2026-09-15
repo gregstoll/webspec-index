@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "subject": {"spec": "TEST", "anchor": "r", "step_path": [1]},
+  "options": {
+    "mode": "cached",
+    "rule_paths": ["catalog/extension"],
+    "environment": "web",
+    "budgets": {"max_bodies": 20000, "max_relationships": 500000, "max_states": 2000000}
+  },
+  "filter": {"kind": "event.fire"}
+}

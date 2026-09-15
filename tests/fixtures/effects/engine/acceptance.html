@@ -1,0 +1,88 @@
+<!doctype html>
+<div class="algorithm">
+  <p>To <dfn id="direct">run direct</dfn>:</p>
+  <ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>; then <a href="#fire">fire an event</a> named <code>"b"</code>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="variable">run variable</dfn>:</p>
+  <ol><li><p><a href="#fire">Fire an event</a> named <var>name</var>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="text-only">run text only</dfn>:</p>
+  <ol>
+    <li><p>At this point scripts may run. At this point scripts may run.</p></li>
+    <li><p>At this point scripts may run in example only.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="text-other">run other text</dfn>:</p>
+  <ol><li><p>At this point scripts may run.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="text-definition">run a text definition</dfn>:</p>
+  <ol>
+    <li><p>Let <var>A</var> be the following steps:</p><ol><li><p>Perform a text-only checkpoint.</p></li></ol></li>
+    <li><p><a href="#queue">Queue a microtask</a>, given <var>A</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="same-segment">run same segment</dfn>:</p>
+  <ol><li><p><a href="#queue">Queue a microtask</a> to <a href="#fire">fire an event</a> named <code>"a"</code>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="caller-r">run caller R</dfn>:</p>
+  <ol>
+    <li><p>Let <var>A</var> be the following steps:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol></li>
+    <li><p><a href="#queue">Queue a microtask</a>, given <var>A</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="caller-s">run caller S</dfn>:</p>
+  <ol>
+    <li><p>Let <var>B</var> be the following steps:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"b"</code>.</p></li></ol></li>
+    <li><p><a href="#queue">Queue a microtask</a>, given <var>B</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="cycle-r">run cycle R</dfn>:</p>
+  <ol><li><p><a href="#cycle-s">Run cycle S</a>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="cycle-s">run cycle S</dfn>:</p>
+  <ol><li><p><a href="#cycle-r">Run cycle R</a>, then <a href="#fire">fire an event</a> named <code>"a"</code>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="unknown-timing">run unknown timing</dfn>:</p>
+  <ol>
+    <li><p>Let <var>A</var> be the following steps:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol></li>
+    <li><p><a href="#consume">Consume these steps</a>, given <var>A</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="mention">run mention</dfn>:</p>
+  <ol><li><p>See the <a href="#fire">fire an event</a> algorithm for background.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="host-caller">run host caller</dfn>:</p>
+  <ol><li><p>Call the <a href="#host-operation">host operation</a>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="host-implementation">run host implementation</dfn>:</p>
+  <ol><li><p><a href="#queue">Queue a microtask</a>.</p></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="nested-context">run nested context</dfn>:</p>
+  <ol>
+    <li><p>Return.</p></li>
+    <li><p>If the document is active, then:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="clipped-context">run clipped context</dfn>:</p>
+  <ol><li><p>If this deliberately long condition xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx holds, then:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol></li></ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="item-clipped-context">run deeply nested context</dfn>:</p>
+  <ol><li><p>Loop level 1:</p><ol><li><p>Loop level 2:</p><ol><li><p>Loop level 3:</p><ol><li><p>Loop level 4:</p><ol><li><p>Loop level 5:</p><ol><li><p>Loop level 6:</p><ol><li><p>Loop level 7:</p><ol><li><p>Loop level 8:</p><ol><li><p>Loop level 9:</p><ol><li><p>Loop level 10:</p><ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol></li></ol>
+</div>
+<p><dfn id="fire">fire an event</dfn>, <dfn id="queue">queue a microtask</dfn>, <dfn id="consume">consume steps</dfn>, and <dfn id="host-operation">host operation</dfn> are target stubs.</p>

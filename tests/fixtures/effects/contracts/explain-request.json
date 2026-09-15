@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "subject": {"spec": "TEST", "anchor": "r"},
+  "options": {
+    "mode": "auto",
+    "rule_paths": [],
+    "environment": "web",
+    "budgets": {"max_bodies": 20000, "max_relationships": 500000, "max_states": 2000000}
+  },
+  "filter": {"effect_id": "ef_0123456789abcdef"},
+  "explanation": {"max_depth": 32, "max_states": 20000, "limit": 1}
+}

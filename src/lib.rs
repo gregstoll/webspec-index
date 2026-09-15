@@ -5,6 +5,7 @@
 
 pub mod analyze;
 pub mod db;
+pub mod effects;
 pub mod fetch;
 pub mod format;
 pub mod ietf;

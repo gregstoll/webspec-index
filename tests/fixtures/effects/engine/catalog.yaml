@@ -1,0 +1,60 @@
+schema: 1
+package: engine-test
+effects:
+  event.fire:
+    category: events
+    label: fire an event
+    parameters:
+      name: {type: string}
+  scheduling.enqueue:
+    category: async
+    label: enqueue work
+    parameters:
+      queue: {type: string}
+  script.opportunity:
+    category: script
+    label: allow scripts to run
+    parameters: {}
+rules:
+  - id: fire-generic
+    match: {anchor: TEST#fire}
+    emit:
+      kind: event.fire
+      params: {name: null}
+  - id: fire-name
+    match:
+      anchor: TEST#fire
+      text: '(?i)fire an event named (?P<name>`[^`]+`|\*[^*]+\*)'
+    emit:
+      kind: event.fire
+      params:
+        name: {capture: name, from: literal}
+  - id: queue
+    match: {anchor: TEST#queue}
+    emit:
+      kind: scheduling.enqueue
+      params: {queue: microtask}
+    continuations: separate
+  - id: text-script-opportunity
+    match:
+      subject: TEST#text-only
+      text: '(?i)At this point scripts may run'
+      exclude_text:
+        - '(?i)example only'
+    emit:
+      kind: script.opportunity
+      params: {}
+  - id: text-definition-checkpoint
+    match:
+      subject: TEST#text-definition
+      text: '(?i)Perform a text-only checkpoint'
+    emit:
+      kind: script.opportunity
+      params: {}
+implementations:
+  - id: test-host
+    environment: web
+    operation: TEST#host-operation
+    implementation: TEST#host-implementation
+    expect_text: '(?i)Queue a microtask'
+    reason: The synthetic web environment supplies this implementation.

@@ -1,0 +1,20 @@
+{
+  "id": "direct-two-sites",
+  "sources": [
+    {"spec": "TEST", "file": "sources/direct-two-sites.html"},
+    {"spec": "DOM", "file": "sources/dom-fire-stub.html"}
+  ],
+  "subject": {"spec": "TEST", "anchor": "r", "step_path": [1]},
+  "expect_local_effects": [
+    {"kind": "event.fire", "params": {"name": "a"}, "execution": ["inline"], "operation_count": 1},
+    {"kind": "event.fire", "params": {"name": "b"}, "execution": ["inline"], "operation_count": 1}
+  ],
+  "expect_issues": [],
+  "forbidden_effects": [
+    {"kind": "event.fire", "params": {"name": null}}
+  ],
+  "metadata": {
+    "semantics": "may",
+    "note": "Two operations in one segment remain distinct occurrences."
+  }
+}

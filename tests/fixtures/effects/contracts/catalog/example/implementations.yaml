@@ -1,0 +1,10 @@
+schema: 1
+package: example
+
+implementations:
+  - id: html-promise-jobs
+    environment: web
+    operation: ECMA-262#sec-hostenqueuepromisejob
+    implementation: HTML#hostenqueuepromisejob
+    expect_text: Queue a microtask
+    reason: HTML supplies the web environment implementation of this host operation.
