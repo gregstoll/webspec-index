@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 #[cfg(feature = "native")]
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(feature = "native")]
+use std::path::Path;
+use std::path::PathBuf;
 use yaml_rust2::parser::{Event, MarkedEventReceiver, Parser};
 use yaml_rust2::scanner::Marker;
 use yaml_rust2::{Yaml, YamlLoader};

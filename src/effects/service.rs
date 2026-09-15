@@ -5,7 +5,9 @@ use super::engine::{
     self, AnalysisArtifact, AnalysisInput, ArtifactSummary, IndexedAnchor, SourceSpec,
 };
 use super::model::*;
-use crate::db::{self, effects as storage};
+#[cfg(any(feature = "native", test))]
+use crate::db;
+use crate::db::effects as storage;
 use crate::parse::steps::{StructuralSpec, STRUCTURE_VERSION};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::json;
@@ -927,6 +929,7 @@ mod tests {
             RequestErrorCode::AnalysisUnavailable
         );
     }
+    #[cfg(feature = "native")]
     #[test]
     fn changing_rule_contents_invalidates_without_reparsing_sources() {
         let (conn, _) = setup();

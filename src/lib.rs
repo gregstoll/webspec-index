@@ -21,7 +21,9 @@ pub mod parse;
 pub mod spec_list;
 pub mod spec_registry;
 
-use anyhow::{Context, Result};
+#[cfg(feature = "native")]
+use anyhow::Context;
+use anyhow::Result;
 use regex::Regex;
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -344,9 +346,9 @@ pub async fn check_exists(
     })
 }
 
-type AnchorRow = (String, String, Option<String>, String);
+pub type AnchorRow = (String, String, Option<String>, String);
 
-fn find_anchors_sql(
+pub fn find_anchors_sql(
     conn: &Connection,
     sql_pattern: &str,
     spec: Option<&str>,
@@ -562,7 +564,7 @@ pub async fn search_sections(
     })
 }
 
-fn search_sections_fts(
+pub fn search_sections_fts(
     conn: &Connection,
     query: &str,
     spec: Option<&str>,
@@ -603,14 +605,14 @@ fn search_sections_fts(
     }
 }
 
-fn is_fts_syntax_error(err: &rusqlite::Error) -> bool {
+pub fn is_fts_syntax_error(err: &rusqlite::Error) -> bool {
     match err {
         rusqlite::Error::SqliteFailure(_, Some(message)) => message.contains("fts5: syntax error"),
         _ => false,
     }
 }
 
-fn sanitize_for_fts(query: &str) -> Option<String> {
+pub fn sanitize_for_fts(query: &str) -> Option<String> {
     let terms = query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|token| !token.is_empty())
@@ -702,10 +704,10 @@ fn node_id(spec: &str, anchor: &str) -> String {
 }
 
 #[derive(Clone)]
-struct GraphFilters {
-    include: Vec<String>,
-    exclude: Vec<String>,
-    same_spec_only: bool,
+pub struct GraphFilters {
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub same_spec_only: bool,
 }
 
 fn compile_pattern(pattern: &str) -> Result<Regex> {
@@ -814,7 +816,7 @@ fn outgoing_edges_for_node(
     db::queries::get_outgoing_edges(conn, snapshot_id, anchor, kind)
 }
 
-fn build_graph_from_conn(
+pub fn build_graph_from_conn(
     conn: &Connection,
     root_spec: &str,
     root_anchor: &str,
@@ -1200,7 +1202,7 @@ fn edge_to_entry(edge: db::queries::RefEdge) -> model::RefEntry {
     }
 }
 
-fn find_references_from_conn(
+pub fn find_references_from_conn(
     conn: &Connection,
     exact_target: Option<(String, String)>,
     query: &str,
@@ -1305,6 +1307,7 @@ const TRACE_NODE_BUDGET: usize = 20_000;
 /// work at a few seconds rather than letting one query walk the whole registry.
 #[cfg(feature = "native")]
 const TRACE_SELF_HEAL_ROUNDS: usize = 2;
+#[cfg(feature = "native")]
 const TRACE_SELF_HEAL_SPECS_PER_ROUND: usize = 8;
 
 /// Distance from each node to `target` following references backwards, for nodes
@@ -1490,7 +1493,7 @@ fn find_traces_from_conn(
 }
 
 /// The search proper, also reporting specs it could not see into.
-fn search_traces(
+pub fn search_traces(
     conn: &Connection,
     from: (String, String),
     to: (String, String),
@@ -1548,7 +1551,7 @@ fn normalize_idl_query(query: &str) -> String {
     trimmed.trim_end_matches("()").to_string()
 }
 
-fn query_idl_from_conn(
+pub fn query_idl_from_conn(
     conn: &Connection,
     query: &str,
     spec_filter: Option<&str>,
@@ -2610,6 +2613,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn spec_urls_returns_without_panicking() {
         let urls = spec_urls();

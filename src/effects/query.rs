@@ -6,9 +6,9 @@
 
 use serde::Serialize;
 
-use crate::model::QueryResult;
 #[cfg(feature = "native")]
 use crate::model::PrOpts;
+use crate::model::QueryResult;
 
 use super::model::{
     EffectSummary, EffectSummaryResult, EffectsStatus, IssueCode, Semantics, Subject,
@@ -51,10 +51,12 @@ impl QueryWithEffects {
     }
 }
 
+#[cfg(feature = "native")]
 fn empty_status(state: fn(Semantics, Vec<IssueCode>, u64) -> EffectsStatus) -> EffectsStatus {
     state(Semantics::May, Vec::new(), 0)
 }
 
+#[cfg(feature = "native")]
 fn error_status() -> EffectsStatus {
     empty_status(|semantics, issues, omitted| EffectsStatus::Error {
         semantics,
@@ -63,6 +65,7 @@ fn error_status() -> EffectsStatus {
     })
 }
 
+#[cfg(feature = "native")]
 fn preview_status() -> EffectsStatus {
     EffectsStatus::Unavailable {
         semantics: Semantics::May,
@@ -100,7 +103,7 @@ pub fn compact_summary(result: EffectSummaryResult) -> EffectSummaryResult {
     result
 }
 
-fn attach_summary(query: QueryResult, result: EffectSummaryResult) -> QueryWithEffects {
+pub fn attach_summary(query: QueryResult, result: EffectSummaryResult) -> QueryWithEffects {
     if result.subject.snapshot_sha != query.sha {
         return QueryWithEffects {
             query,

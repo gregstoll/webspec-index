@@ -3,7 +3,9 @@ pub mod queries;
 pub mod schema;
 pub mod write;
 
+#[cfg(any(feature = "native", test))]
 use anyhow::Result;
+#[cfg(any(feature = "native", test))]
 use rusqlite::Connection;
 #[cfg(feature = "native")]
 use std::path::PathBuf;
