@@ -59,6 +59,30 @@ describe('parseRoute', () => {
   it('returns not_found for a fragment without leading slash', () => {
     expect(parseRoute('#HTML')).toEqual({ kind: 'not_found' });
   });
+
+  it('parses ?step=1 on a section route', () => {
+    expect(parseRoute('#/HTML/navigate?step=1')).toEqual({
+      kind: 'section', spec: 'HTML', anchor: 'navigate', step: [1],
+    });
+  });
+
+  it('parses ?step=3.1 as a nested path', () => {
+    expect(parseRoute('#/HTML/navigate?step=3.1')).toEqual({
+      kind: 'section', spec: 'HTML', anchor: 'navigate', step: [3, 1],
+    });
+  });
+
+  it('ignores a malformed step param (zero)', () => {
+    expect(parseRoute('#/HTML/navigate?step=0')).toEqual({
+      kind: 'section', spec: 'HTML', anchor: 'navigate',
+    });
+  });
+
+  it('ignores a malformed step param (non-numeric)', () => {
+    expect(parseRoute('#/HTML/navigate?step=abc')).toEqual({
+      kind: 'section', spec: 'HTML', anchor: 'navigate',
+    });
+  });
 });
 
 describe('routeToHash', () => {
@@ -72,6 +96,14 @@ describe('routeToHash', () => {
 
   it('section → "#/SPEC/anchor"', () => {
     expect(routeToHash({ kind: 'section', spec: 'HTML', anchor: 'navigate' })).toBe('#/HTML/navigate');
+  });
+
+  it('section with step → "#/SPEC/anchor?step=N"', () => {
+    expect(routeToHash({ kind: 'section', spec: 'HTML', anchor: 'navigate', step: [1] })).toBe('#/HTML/navigate?step=1');
+  });
+
+  it('section with nested step → "#/SPEC/anchor?step=N.M"', () => {
+    expect(routeToHash({ kind: 'section', spec: 'HTML', anchor: 'navigate', step: [3, 1] })).toBe('#/HTML/navigate?step=3.1');
   });
 
   it('search with spec → "#/search?q=...&spec=..."', () => {
@@ -100,6 +132,11 @@ describe('routeToHash', () => {
 describe('round-trip: routeToHash → parseRoute', () => {
   it('section round-trips', () => {
     const route = { kind: 'section' as const, spec: 'HTML', anchor: 'navigate' };
+    expect(parseRoute(routeToHash(route))).toEqual(route);
+  });
+
+  it('section with step round-trips', () => {
+    const route = { kind: 'section' as const, spec: 'HTML', anchor: 'navigate', step: [3, 1] };
     expect(parseRoute(routeToHash(route))).toEqual(route);
   });
 

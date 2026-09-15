@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
 import type { RefEntry } from '../api/types';
+import { routeToHash } from '../router';
 import { useRequest } from '../hooks/useRequest';
 import { Loading, ErrorBanner } from './Status';
 import { EffectsPanel } from './EffectsPanel';
+import { remember } from '../trace/titles';
+import { annotateSteps } from '../content/steps';
 
 interface Props {
   client: WebspecClient;
@@ -23,11 +26,18 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
     if (state.kind === 'ok') {
       const { result } = state.value;
       document.title = `${result.spec}#${result.anchor} · webspec-index`;
+      remember(result);
     } else {
       document.title = 'webspec-index';
     }
     return () => { document.title = 'webspec-index'; };
   }, [state]);
+
+  function handleStepSelect(path: number[] | undefined) {
+    location.hash = path
+      ? routeToHash({ kind: 'section', spec, anchor, step: path })
+      : routeToHash({ kind: 'section', spec, anchor });
+  }
 
   if (state.kind === 'loading') return <div class="page"><Loading /></div>;
   if (state.kind === 'error') {
@@ -89,7 +99,11 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
       )}
 
       {result.content_html ? (
-        <ContentBlock html={result.content_html} />
+        <ContentBlock
+          html={result.content_html}
+          selectedStepPath={selectedStepPath}
+          onStepSelect={handleStepSelect}
+        />
       ) : result.content ? (
         <pre class="section-content">{result.content}</pre>
       ) : null}
@@ -102,6 +116,7 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         spec={result.spec}
         anchor={result.anchor}
         selectedStepPath={selectedStepPath}
+        onClearStep={() => handleStepSelect(undefined)}
       />
     </div>
   );
@@ -109,9 +124,11 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
 
 interface ContentBlockProps {
   html: string;
+  selectedStepPath?: number[];
+  onStepSelect: (path: number[] | undefined) => void;
 }
 
-function ContentBlock({ html }: ContentBlockProps) {
+function ContentBlock({ html, selectedStepPath, onStepSelect }: ContentBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -125,7 +142,43 @@ function ContentBlock({ html }: ContentBlockProps) {
         a.setAttribute('rel', 'noopener');
       }
     }
+    annotateSteps(el);
   }, [html]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    function handleClick(e: MouseEvent) {
+      const btn = (e.target as Element).closest<HTMLButtonElement>('.step-select-btn');
+      if (!btn) return;
+      const li = btn.closest<HTMLLIElement>('li[data-step-path]');
+      if (!li || !li.dataset.stepPath) return;
+      const pathStr = li.dataset.stepPath;
+      const path = pathStr.split('.').map(Number);
+      onStepSelect(
+        selectedStepPath && selectedStepPath.join('.') === pathStr ? undefined : path,
+      );
+    }
+    el.addEventListener('click', handleClick);
+    return () => el.removeEventListener('click', handleClick);
+  }, [html, selectedStepPath, onStepSelect]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    for (const li of el.querySelectorAll<HTMLLIElement>('li[aria-current]')) {
+      li.removeAttribute('aria-current');
+      li.classList.remove('step-selected');
+    }
+    if (selectedStepPath) {
+      const key = selectedStepPath.join('.');
+      const li = el.querySelector<HTMLLIElement>(`li[data-step-path="${key}"]`);
+      if (li) {
+        li.setAttribute('aria-current', 'true');
+        li.classList.add('step-selected');
+      }
+    }
+  }, [selectedStepPath]);
 
   return (
     <div

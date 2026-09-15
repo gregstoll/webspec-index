@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/preact';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/preact';
 
 afterEach(cleanup);
 import { Section } from './Section';
@@ -73,5 +73,43 @@ describe('Section', () => {
       expect(int.getAttribute('target')).toBeNull();
       expect(int.getAttribute('rel')).toBeNull();
     });
+  });
+});
+
+describe('Section step selection', () => {
+  beforeEach(() => {
+    // Reset hash before each test
+    window.location.hash = '#/HTML/navigate';
+  });
+
+  it('clicking a step-select-btn sets location.hash to #/HTML/navigate?step=1', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(document.querySelector('.step-select-btn')).toBeTruthy();
+    });
+    const btns = document.querySelectorAll<HTMLButtonElement>('.step-select-btn');
+    fireEvent.click(btns[0]);
+    expect(window.location.hash).toBe('#/HTML/navigate?step=1');
+  });
+
+  it('rendering with selectedStepPath=[1] marks the first step li with aria-current="true"', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" selectedStepPath={[1]} />);
+    await waitFor(() => {
+      const li = document.querySelector<HTMLLIElement>('li[data-step-path="1"]');
+      expect(li).toBeTruthy();
+      expect(li!.getAttribute('aria-current')).toBe('true');
+    });
+  });
+
+  it('clicking the already-selected step button clears ?step from the hash', async () => {
+    window.location.hash = '#/HTML/navigate?step=1';
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" selectedStepPath={[1]} />);
+    await waitFor(() => {
+      expect(document.querySelector('li[aria-current="true"]')).toBeTruthy();
+    });
+    const btn = document.querySelector<HTMLButtonElement>('li[data-step-path="1"] .step-select-btn');
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn!);
+    expect(window.location.hash).toBe('#/HTML/navigate');
   });
 });

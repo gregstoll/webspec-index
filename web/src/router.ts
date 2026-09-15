@@ -4,7 +4,7 @@
 export type Route =
   | { kind: 'landing' }
   | { kind: 'headings'; spec: string }
-  | { kind: 'section'; spec: string; anchor: string }
+  | { kind: 'section'; spec: string; anchor: string; step?: number[] }
   | { kind: 'search'; q: string; spec?: string }
   | { kind: 'trace'; payload: string }
   | { kind: 'resolve'; url: string }
@@ -58,8 +58,20 @@ export function parseRoute(hash: string): Route {
   }
 
   const spec = path.slice(0, slashIdx);
-  const anchor = path.slice(slashIdx + 1);
-  return { kind: 'section', spec, anchor };
+  const remaining = path.slice(slashIdx + 1);
+  const qmarkIdx = remaining.indexOf('?');
+  const anchor = qmarkIdx === -1 ? remaining : remaining.slice(0, qmarkIdx);
+  const qs = qmarkIdx === -1 ? '' : remaining.slice(qmarkIdx + 1);
+  const params = new URLSearchParams(qs);
+  const stepStr = params.get('step');
+  let step: number[] | undefined;
+  if (stepStr) {
+    const parts = stepStr.split('.').map(Number);
+    if (parts.length > 0 && parts.every((n) => Number.isInteger(n) && n > 0)) {
+      step = parts;
+    }
+  }
+  return step ? { kind: 'section', spec, anchor, step } : { kind: 'section', spec, anchor };
 }
 
 // Serialise a Route back to a hash string.
@@ -70,7 +82,9 @@ export function routeToHash(route: Route): string {
     case 'headings':
       return `#/${route.spec}`;
     case 'section':
-      return `#/${route.spec}/${route.anchor}`;
+      return route.step && route.step.length > 0
+        ? `#/${route.spec}/${route.anchor}?step=${route.step.join('.')}`
+        : `#/${route.spec}/${route.anchor}`;
     case 'search': {
       const qs = new URLSearchParams({ q: route.q });
       if (route.spec !== undefined) qs.set('spec', route.spec);

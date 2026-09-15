@@ -85,7 +85,7 @@ export function App() {
       view = <Landing client={client} />;
       break;
     case 'section':
-      view = <Section client={client} spec={route.spec} anchor={route.anchor} />;
+      view = <Section client={client} spec={route.spec} anchor={route.anchor} selectedStepPath={route.step} />;
       break;
     case 'search':
       view = <Search client={client} query={route.q} spec={route.spec} />;
@@ -128,7 +128,7 @@ export function App() {
 
       {view}
 
-      {traceOpen && <TracePanel route={route} onClose={() => setTraceOpen(false)} />}
+      {traceOpen && <TracePanel route={route} selectedStepPath={route.kind === 'section' ? route.step : undefined} onClose={() => setTraceOpen(false)} />}
 
       <footer class="app-footer">
         Spec content:{' '}

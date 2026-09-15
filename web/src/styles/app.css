@@ -510,6 +510,39 @@ code, pre, .mono {
   padding: var(--space-2) 0;
 }
 
+/* Step selection in content */
+.step-select-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  line-height: inherit;
+  opacity: 0;
+  transition: opacity 0.1s;
+  vertical-align: baseline;
+  font-family: inherit;
+}
+
+.section-content li[data-step-path]:hover .step-select-btn,
+.section-content li[aria-current="true"] .step-select-btn {
+  opacity: 1;
+}
+
+.step-select-btn:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.section-content li[aria-current="true"],
+.section-content li.step-selected {
+  background: var(--color-accent-subtle);
+  border-radius: var(--radius-sm);
+}
+
 .effects-issues {
   list-style: none;
   margin-top: var(--space-4);
