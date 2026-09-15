@@ -3,16 +3,21 @@
 //! This library provides parsing, indexing, and querying of web specifications.
 //! It's designed to be used via Python bindings (PyO3), but can also be used directly from Rust.
 
+#[cfg(feature = "native")]
 pub mod analyze;
 pub mod db;
 pub mod effects;
+#[cfg(feature = "native")]
 pub mod fetch;
 pub mod format;
 pub mod ietf;
+#[cfg(feature = "native")]
 pub mod itu;
+#[cfg(feature = "native")]
 pub mod lsp;
 pub mod model;
 pub mod parse;
+#[cfg(feature = "native")]
 pub mod spec_list;
 pub mod spec_registry;
 
@@ -72,6 +77,7 @@ pub fn diff_spec_name(spec_anchor: &str) -> Result<String> {
 }
 
 /// Return indexed/discovered spec base URLs
+#[cfg(feature = "native")]
 pub fn spec_urls() -> Vec<model::SpecUrlEntry> {
     let conn = match db::open_or_create_db() {
         Ok(conn) => conn,
@@ -85,6 +91,7 @@ pub fn spec_urls() -> Vec<model::SpecUrlEntry> {
         .collect()
 }
 
+#[cfg(feature = "native")]
 fn resolve_spec_metadata(
     conn: &Connection,
     registry: &spec_registry::SpecRegistry,
@@ -119,6 +126,7 @@ fn resolve_spec_metadata(
     anyhow::bail!("Unknown spec: {}", spec_name)
 }
 
+#[cfg(feature = "native")]
 async fn ensure_indexed_for_spec_name(
     conn: &Connection,
     registry: &spec_registry::SpecRegistry,
@@ -158,6 +166,7 @@ async fn ensure_indexed_for_spec_name(
 /// # Arguments
 /// * `spec_anchor` - Format: "SPEC#anchor" (e.g., "HTML#navigate")
 /// * `pr` - Optional PR options (number + force_update) to query against a WHATWG PR preview
+#[cfg(feature = "native")]
 pub async fn query_section(
     spec_anchor: &str,
     pr: Option<&model::PrOpts>,
@@ -282,6 +291,7 @@ pub async fn query_section(
 ///
 /// # Returns
 /// `ExistsResult` with existence status and section type if found
+#[cfg(feature = "native")]
 pub async fn check_exists(
     spec_anchor: &str,
     pr: Option<&model::PrOpts>,
@@ -388,6 +398,7 @@ fn find_anchors_sql(
     }
 }
 
+#[cfg(feature = "native")]
 fn search_sections_pr(
     conn: &Connection,
     query: &str,
@@ -433,6 +444,7 @@ fn search_sections_pr(
 ///
 /// # Returns
 /// `AnchorsResult` with matching anchors
+#[cfg(feature = "native")]
 pub async fn find_anchors(
     pattern: &str,
     spec: Option<&str>,
@@ -499,6 +511,7 @@ pub async fn find_anchors(
 ///
 /// # Returns
 /// `SearchResult` with matching sections and snippets
+#[cfg(feature = "native")]
 pub async fn search_sections(
     query: &str,
     spec: Option<&str>,
@@ -617,6 +630,7 @@ fn sanitize_for_fts(query: &str) -> Option<String> {
 ///
 /// # Returns
 /// Vector of `ListEntry` with heading hierarchy
+#[cfg(feature = "native")]
 pub async fn list_headings(
     spec: &str,
     pr: Option<&model::PrOpts>,
@@ -1289,6 +1303,7 @@ const TRACE_NODE_BUDGET: usize = 20_000;
 /// How many times `trace` will index newly discovered specs and search again.
 /// Each round costs roughly a second per spec, so this caps the implicit network
 /// work at a few seconds rather than letting one query walk the whole registry.
+#[cfg(feature = "native")]
 const TRACE_SELF_HEAL_ROUNDS: usize = 2;
 const TRACE_SELF_HEAL_SPECS_PER_ROUND: usize = 8;
 
@@ -1673,6 +1688,7 @@ fn query_idl_from_conn(
 }
 
 /// Build a cross-reference graph rooted at SPEC#anchor from currently indexed specs.
+#[cfg(feature = "native")]
 pub async fn graph_section(
     spec_anchor: &str,
     direction: &str,
@@ -1706,6 +1722,7 @@ pub async fn graph_section(
 /// `query` supports:
 /// - exact anchor: `SPEC#anchor` or full URL
 /// - canonical name: `Interface.member`, `Interface.method()`, `Interface`
+#[cfg(feature = "native")]
 pub async fn query_idl(
     query: &str,
     spec_filter: Option<&str>,
@@ -1756,6 +1773,7 @@ pub async fn query_idl(
 ///
 /// Both endpoints must be exact (`SPEC#anchor` or a full URL); this traces a
 /// known route rather than guessing what the caller meant.
+#[cfg(feature = "native")]
 pub async fn find_traces(
     from: &str,
     to: &str,
@@ -1827,6 +1845,7 @@ pub async fn find_traces(
 }
 
 /// Find incoming/outgoing references for SPEC#anchor or a shorthand query (e.g. Window.navigation).
+#[cfg(feature = "native")]
 pub async fn find_references(
     target: &str,
     direction: &str,
@@ -1868,6 +1887,7 @@ pub async fn find_references(
 }
 
 /// Compute diff between a PR preview and its merge base for a spec.
+#[cfg(feature = "native")]
 pub async fn pr_diff(spec: &str, pr_opts: &model::PrOpts) -> Result<model::PrDiffResult> {
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
@@ -1924,6 +1944,7 @@ pub async fn pr_diff(spec: &str, pr_opts: &model::PrOpts) -> Result<model::PrDif
 /// With no arguments, lists all cached PR snapshots.
 /// With `--all`, clears PR data for all specs.
 /// With `--spec`, clears PR data for a specific spec (optionally a single PR with `pr_number`).
+#[cfg(feature = "native")]
 pub fn clear_pr_data(
     spec: Option<&str>,
     pr_number: Option<i64>,
@@ -1978,6 +1999,7 @@ pub fn clear_pr_data(
 /// # Returns
 /// Vector of tuples (spec_name, Option<snapshot_id>)
 /// - None indicates spec was already up to date
+#[cfg(feature = "native")]
 pub async fn update_specs(spec: Option<&str>, force: bool) -> Result<Vec<(String, Option<i64>)>> {
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
@@ -2014,6 +2036,7 @@ pub async fn update_specs(spec: Option<&str>, force: bool) -> Result<Vec<(String
 ///
 /// # Returns
 /// Path to the deleted database file
+#[cfg(feature = "native")]
 pub fn clear_database() -> Result<String> {
     let db_path = db::get_db_path();
 
