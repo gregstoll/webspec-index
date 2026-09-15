@@ -490,13 +490,21 @@ enum Command {
         Examples:\n  \
         webspec-index update\n  \
         webspec-index update --spec HTML\n  \
-        webspec-index update --force")]
+        webspec-index update --force\n  \
+        webspec-index update --providers whatwg,w3c,tc39")]
     Update {
         #[arg(long, short, help = "Update only this spec")]
         spec: Option<String>,
 
         #[arg(long, short, help = "Force update even if recently checked")]
         force: bool,
+
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Update only specs from these providers (comma-separated: whatwg,w3c,tc39)"
+        )]
+        providers: Vec<String>,
 
         #[command(flatten)]
         effect_options: UpdateEffectsArgs,
@@ -681,7 +689,7 @@ list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
 trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-d verbose(default)|edges|compact] [--format json|markdown]
 effects [<SPEC#anchor|URL> | --all --summary-only] [--step N.N|--step-id ID|--body-id ID] [--compact|--summary-only] [--kind KIND] [--category CATEGORY] [--rule ID] [--effect-id ID] [--occurrence-id ID] [--recompute] [--analysis-id ID] [--rules PATH] [--environment NAME]
-update [-s SPEC] [-f force] [--effects auto|off] [--rules PATH] [--environment NAME]
+update [-s SPEC] [-f force] [--providers a,b] [--effects auto|off] [--rules PATH] [--environment NAME]
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
 export-web --out DIR [--providers a,b] [--chunk-size N] [--max-size N] — write chunked read-only DB for the web UI
@@ -964,9 +972,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Update {
             spec,
             force,
+            providers,
             effect_options,
         } => {
-            let results = webspec_index::update_specs(spec.as_deref(), force).await?;
+            let results = webspec_index::update_specs(spec.as_deref(), force, &providers).await?;
             if effect_options.effects == UpdateEffectsMode::Auto {
                 webspec_index::effects::recompute_effects(
                     &webspec_index::effects::RecomputeEffectsRequest {

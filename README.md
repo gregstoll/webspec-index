@@ -81,6 +81,7 @@ webspec-index export-web --out DIR   # chunked read-only DB + manifest for the w
 
 # Update specs to latest versions
 webspec-index update
+webspec-index update --providers whatwg,w3c,tc39   # limit to specific providers
 webspec-index update --effects off  # skip the post-update effects refresh
 ```
 

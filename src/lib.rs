@@ -2040,12 +2040,17 @@ pub fn clear_pr_data(
 /// # Arguments
 /// * `spec` - Optional spec name (updates all if None)
 /// * `force` - Force update even if recently checked
+/// * `providers` - Filter to only these provider ids (e.g. `["whatwg", "w3c"]`); empty means all
 ///
 /// # Returns
 /// Vector of tuples (spec_name, Option<snapshot_id>)
 /// - None indicates spec was already up to date
 #[cfg(feature = "native")]
-pub async fn update_specs(spec: Option<&str>, force: bool) -> Result<Vec<(String, Option<i64>)>> {
+pub async fn update_specs(
+    spec: Option<&str>,
+    force: bool,
+    providers: &[String],
+) -> Result<Vec<(String, Option<i64>)>> {
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
 
@@ -2059,9 +2064,10 @@ pub async fn update_specs(spec: Option<&str>, force: bool) -> Result<Vec<(String
             fetch::update_if_needed(&conn, &canonical_name, &base_url, &provider, force).await?;
         results.push((canonical_name, snapshot_id));
     } else {
-        // Update all indexed/discovered specs.
+        // Update all indexed/discovered specs, optionally filtered by provider.
         let specs = db::queries::list_specs(&conn)?;
-        let all_results = fetch::update_all_specs(&conn, &specs, force).await;
+        let filtered = filter_specs_by_provider(specs, providers);
+        let all_results = fetch::update_all_specs(&conn, &filtered, force).await;
 
         for (spec_name, result) in all_results {
             match result {
@@ -2075,6 +2081,72 @@ pub async fn update_specs(spec: Option<&str>, force: bool) -> Result<Vec<(String
     }
 
     Ok(results)
+}
+
+/// Retain only specs whose provider matches one of `providers` (case-insensitive).
+/// If `providers` is empty, all specs are retained.
+fn filter_specs_by_provider(
+    specs: Vec<(String, String, String)>,
+    providers: &[String],
+) -> Vec<(String, String, String)> {
+    if providers.is_empty() {
+        return specs;
+    }
+    specs
+        .into_iter()
+        .filter(|(_, _, provider)| {
+            providers
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(provider))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::filter_specs_by_provider;
+
+    fn specs() -> Vec<(String, String, String)> {
+        vec![
+            ("HTML".into(), "https://html.spec.whatwg.org".into(), "whatwg".into()),
+            ("DOM".into(), "https://dom.spec.whatwg.org".into(), "whatwg".into()),
+            ("CSS-GRID".into(), "https://drafts.csswg.org/css-grid".into(), "w3c".into()),
+            ("ECMA-262".into(), "https://tc39.es/ecma262".into(), "tc39".into()),
+        ]
+    }
+
+    #[test]
+    fn empty_providers_keeps_all() {
+        let result = filter_specs_by_provider(specs(), &[]);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn single_provider_filters() {
+        let result = filter_specs_by_provider(specs(), &["whatwg".to_string()]);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|(_, _, p)| p == "whatwg"));
+    }
+
+    #[test]
+    fn multiple_providers_filter() {
+        let result =
+            filter_specs_by_provider(specs(), &["whatwg".to_string(), "tc39".to_string()]);
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|(_, _, p)| p == "whatwg" || p == "tc39"));
+    }
+
+    #[test]
+    fn case_insensitive_match() {
+        let result = filter_specs_by_provider(specs(), &["WHATWG".to_string()]);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn unknown_provider_yields_empty() {
+        let result = filter_specs_by_provider(specs(), &["ietf".to_string()]);
+        assert_eq!(result.len(), 0);
+    }
 }
 
 /// Clear the database (remove all indexed data)
