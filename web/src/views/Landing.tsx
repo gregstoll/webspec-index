@@ -2,26 +2,55 @@ import { useState, useEffect } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
 import type { SpecEntry } from '../api/types';
 import { navigateForQuery } from '../dispatch';
+import { useRequest } from '../hooks/useRequest';
+import { Loading } from './Status';
 
 interface Props {
   client: WebspecClient;
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  whatwg: 'WHATWG',
+  w3c: 'W3C',
+  csswg: 'W3C',
+  tc39: 'TC39',
+};
+
+function providerGroup(provider: string): string {
+  return PROVIDER_LABELS[provider] ?? 'Other';
+}
+
 export function Landing({ client }: Props) {
   const [query, setQuery] = useState('');
-  const [specs, setSpecs] = useState<SpecEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const state = useRequest<{ type: 'specs'; result: { specs: SpecEntry[] } }>(
+    client,
+    { type: 'specs' },
+    [client],
+  );
 
   useEffect(() => {
-    client.request({ type: 'specs' }).then((resp) => {
-      if (resp.type === 'specs') setSpecs(resp.result.specs);
-    }).finally(() => setLoading(false));
-  }, [client]);
+    document.title = 'webspec-index';
+  }, []);
 
   function handleSubmit(e: Event) {
     e.preventDefault();
     navigateForQuery(query);
   }
+
+  const specs = state.kind === 'ok' ? state.value.result.specs : [];
+
+  const groups = new Map<string, SpecEntry[]>();
+  for (const spec of specs) {
+    const group = providerGroup(spec.provider);
+    const arr = groups.get(group) ?? [];
+    arr.push(spec);
+    groups.set(group, arr);
+  }
+  const ORDER = ['WHATWG', 'W3C', 'TC39', 'Other'];
+  const sortedGroups = [...groups.entries()].sort(
+    ([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b),
+  );
 
   return (
     <div class="page">
@@ -47,15 +76,26 @@ export function Landing({ client }: Props) {
         <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
           Indexed specifications
         </h2>
-        {loading ? (
-          <div class="loading">Loading…</div>
+        {state.kind === 'loading' ? (
+          <Loading />
         ) : (
-          <div class="spec-grid">
-            {specs.map((s) => (
-              <a key={s.name} href={`#/${s.name}`} class="spec-card">
-                <span class="spec-card-name">{s.name}</span>
-                <span class="spec-card-provider">{s.provider}</span>
-              </a>
+          <div>
+            {sortedGroups.map(([group, groupSpecs]) => (
+              <div key={group} style={{ marginBottom: 'var(--space-6)' }}>
+                <h3 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2)' }}>
+                  {group}
+                </h3>
+                <div class="spec-grid">
+                  {groupSpecs.map((s) => (
+                    <a key={s.name} href={`#/${s.name}`} class="spec-card">
+                      <span class="spec-card-name">{s.name}</span>
+                      <span class="spec-card-provider" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                        {s.sha.slice(0, 7)} · {s.commit_date}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

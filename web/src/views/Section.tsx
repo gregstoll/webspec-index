@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
-import type { QueryResult, RefEntry } from '../api/types';
-import { NotFound } from './NotFound';
+import type { RefEntry } from '../api/types';
+import { useRequest } from '../hooks/useRequest';
+import { Loading, ErrorBanner } from './Status';
 
 interface Props {
   client: WebspecClient;
@@ -10,27 +11,32 @@ interface Props {
 }
 
 export function Section({ client, spec, anchor }: Props) {
-  const [result, setResult] = useState<QueryResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
+    client,
+    { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
+    [client, spec, anchor],
+  );
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    client.request({ type: 'query', target: `${spec}#${anchor}`, render: 'html' }).then((resp) => {
-      if (resp.type === 'query') {
-        setResult(resp.result);
-      } else if (resp.type === 'error') {
-        setError(resp.message);
-      }
-    }).catch((e: unknown) => setError(String(e))).finally(() => setLoading(false));
-  }, [client, spec, anchor]);
+    if (state.kind === 'ok') {
+      const { result } = state.value;
+      document.title = `${result.spec}#${result.anchor} · webspec-index`;
+    } else {
+      document.title = 'webspec-index';
+    }
+    return () => { document.title = 'webspec-index'; };
+  }, [state]);
 
-  if (loading) return <div class="page loading">Loading…</div>;
-  if (error) return <NotFound message={error} />;
-  if (!result) return <NotFound />;
+  if (state.kind === 'loading') return <div class="page"><Loading /></div>;
+  if (state.kind === 'error') {
+    return (
+      <div class="page">
+        <ErrorBanner code={state.code} message={state.message} spec={spec} anchor={anchor} />
+      </div>
+    );
+  }
 
+  const result = state.value.result;
   const nav = result.navigation;
 
   return (
@@ -38,9 +44,9 @@ export function Section({ client, spec, anchor }: Props) {
       <div class="section-meta">
         <span class={`badge badge-${result.type}`}>{result.type}</span>
         <a href={`#/${result.spec}`} class="mono">{result.spec}</a>
-        <span class="mono" title="Snapshot SHA">{result.sha.slice(0, 8)}</span>
-        <a href={result.url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-xs)' }}>
-          live spec ↗
+        <span class="mono" title={result.sha}>{result.sha.slice(0, 7)}</span>
+        <a href={result.url} target="_blank" rel="noopener" style={{ fontSize: 'var(--text-xs)' }}>
+          Open in spec ↗
         </a>
       </div>
 
@@ -49,7 +55,6 @@ export function Section({ client, spec, anchor }: Props) {
         {result.spec}#{result.anchor}
       </p>
 
-      {/* Navigation */}
       <nav class="nav-strip" aria-label="Section navigation">
         {nav.parent && (
           <span class="nav-strip-item">
@@ -71,7 +76,6 @@ export function Section({ client, spec, anchor }: Props) {
         )}
       </nav>
 
-      {/* Children */}
       {nav.children.length > 0 && (
         <ul class="children-list" aria-label="Child sections">
           {nav.children.map((c) => (
@@ -82,27 +86,53 @@ export function Section({ client, spec, anchor }: Props) {
         </ul>
       )}
 
-      {/* Content */}
       {result.content_html ? (
-        <div class="section-content" dangerouslySetInnerHTML={{ __html: result.content_html }} />
+        <ContentBlock html={result.content_html} />
       ) : result.content ? (
         <pre class="section-content">{result.content}</pre>
       ) : null}
 
-      {/* References */}
-      <RefSection heading="Outgoing references" refs={result.outgoing_refs} specName={result.spec} />
-      <RefSection heading="Incoming references" refs={result.incoming_refs} specName={result.spec} />
+      <RefSection heading="Outgoing references" refs={result.outgoing_refs} />
+      <RefSection heading="Incoming references" refs={result.incoming_refs} />
     </div>
+  );
+}
+
+interface ContentBlockProps {
+  html: string;
+}
+
+function ContentBlock({ html }: ContentBlockProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    for (const a of el.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+      const href = a.getAttribute('href') ?? '';
+      if (href.startsWith('#/') || href.startsWith('#')) continue;
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener');
+      }
+    }
+  }, [html]);
+
+  return (
+    <div
+      class="section-content"
+      ref={ref}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 
 interface RefSectionProps {
   heading: string;
   refs: RefEntry[];
-  specName: string;
 }
 
-function RefSection({ heading, refs, specName: _specName }: RefSectionProps) {
+function RefSection({ heading, refs }: RefSectionProps) {
   if (refs.length === 0) return null;
 
   const bySpec = new Map<string, RefEntry[]>();
@@ -127,7 +157,8 @@ function RefSection({ heading, refs, specName: _specName }: RefSectionProps) {
             {group.map((ref, i) => (
               <li key={`${ref.anchor}-${i}`} class="ref-entry">
                 <a href={`#/${ref.spec}/${ref.anchor}`} class="mono">{ref.anchor}</a>
-                {ref.step_path && <span class="ref-step">step {ref.step_path}</span>}
+                {ref.step_text && <span class="ref-step">{ref.step_text}</span>}
+                {ref.step_path && !ref.step_text && <span class="ref-step">step {ref.step_path}</span>}
                 {ref.kind && ref.kind !== 'prose' && <span class={`badge badge-${ref.kind}`}>{ref.kind}</span>}
               </li>
             ))}

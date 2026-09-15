@@ -71,6 +71,7 @@ const MOCK_NAVIGATE: QueryResult = {
   title: 'navigate',
   type: 'algorithm',
   content: 'To navigate, given a navigable navigable, a URL url, and other parameters...',
+  content_html: '<p><a href="https://example.com/x">ext</a> <a href="#/DOM/concept-tree">int</a></p>',
   navigation: {
     parent: { anchor: 'navigation', title: 'Navigation' },
     prev: { anchor: 'beginning-navigation', title: 'Beginning navigation' },
@@ -127,9 +128,9 @@ const MOCK_CONCEPT_TREE: QueryResult = {
 const MOCK_SEARCH: SearchResult = {
   query: 'navigate',
   results: [
-    { spec: 'HTML', anchor: 'navigate', title: 'navigate', type: 'algorithm', snippet: 'To <b>navigate</b>, given a navigable...' },
-    { spec: 'HTML', anchor: 'beginning-navigation', title: 'Beginning navigation', type: 'algorithm', snippet: '...before <b>navigating</b>, the user agent must...' },
-    { spec: 'DOM', anchor: 'concept-tree', title: 'Trees', type: 'heading', snippet: 'Objects that participate in a tree <b>can</b> also...' },
+    { spec: 'HTML', anchor: 'navigate', title: 'navigate', type: 'algorithm', snippet: 'To <mark>navigate</mark>, given a navigable...' },
+    { spec: 'HTML', anchor: 'beginning-navigation', title: 'Beginning navigation', type: 'algorithm', snippet: '...before <mark>navigating</mark>, the user agent must...' },
+    { spec: 'DOM', anchor: 'concept-tree', title: 'Trees', type: 'heading', snippet: 'Objects that participate in a tree <mark>can</mark> also...' },
   ],
 };
 
@@ -165,6 +166,15 @@ export class MockClient implements WebspecClient {
         }
         if (target === 'DOM#concept-tree') {
           return { type: 'query', result: MOCK_CONCEPT_TREE };
+        }
+        // Detect unknown spec vs unknown anchor to return appropriate error codes.
+        const hashIdx = target.indexOf('#');
+        if (hashIdx !== -1) {
+          const spec = target.slice(0, hashIdx);
+          const knownSpecs = new Set(MOCK_SPECS.map((s) => s.name));
+          if (!knownSpecs.has(spec)) {
+            return { type: 'error', code: 'spec_not_indexed', message: `${spec} is not part of this index` };
+          }
         }
         return { type: 'error', code: 'not_found', message: `No fixture for target: ${target}` };
       }

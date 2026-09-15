@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useEffect } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
-import type { ListEntry } from '../api/types';
+import { useRequest } from '../hooks/useRequest';
+import { Loading, ErrorBanner } from './Status';
 
 interface Props {
   client: WebspecClient;
@@ -8,28 +9,27 @@ interface Props {
 }
 
 export function Headings({ client, spec }: Props) {
-  const [entries, setEntries] = useState<ListEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const state = useRequest<{ type: 'list'; result: { spec: string; entries: import('../api/types').ListEntry[] } }>(
+    client,
+    { type: 'list', spec },
+    [client, spec],
+  );
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    client.request({ type: 'list', spec }).then((resp) => {
-      if (resp.type === 'list') {
-        setEntries(resp.result.entries);
-      } else if (resp.type === 'error') {
-        setError(resp.message);
-      }
-    }).catch((e: unknown) => setError(String(e))).finally(() => setLoading(false));
-  }, [client, spec]);
+    document.title = `${spec} · webspec-index`;
+    return () => { document.title = 'webspec-index'; };
+  }, [spec]);
 
-  if (loading) return <div class="page loading">Loading…</div>;
-  if (error) return (
-    <div class="page">
-      <div class="error-banner">{error}</div>
-    </div>
-  );
+  if (state.kind === 'loading') return <div class="page"><Loading /></div>;
+  if (state.kind === 'error') {
+    return (
+      <div class="page">
+        <ErrorBanner code={state.code} message={state.message} spec={spec} />
+      </div>
+    );
+  }
+
+  const { entries } = state.value.result;
 
   return (
     <div class="page">

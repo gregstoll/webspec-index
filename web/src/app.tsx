@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { parseRoute, routeToHash } from './router';
 import { WorkerClient } from './api/client';
 import type { WebspecClient } from './api/client';
@@ -7,10 +7,10 @@ import { Section } from './views/Section';
 import { Search } from './views/Search';
 import { Headings } from './views/Headings';
 import { NotFound } from './views/NotFound';
+import { ErrorBanner } from './views/Status';
+import { useRequest } from './hooks/useRequest';
 import { navigateForQuery } from './dispatch';
 
-// The worker answers from MockClient via loadBackend(). Swap loadBackend() in
-// worker.ts to use the wasm client once webspec-index-wasm is built.
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 const client: WebspecClient = new WorkerClient(worker);
 
@@ -27,6 +27,7 @@ export function App() {
     const stored = localStorage.getItem('theme');
     return stored === 'light' || stored === 'dark' ? stored : 'system';
   });
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const resolved = resolvedTheme(theme);
@@ -42,6 +43,18 @@ export function App() {
     const onHashChange = () => setHash(window.location.hash || '#/');
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== '/') return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   const route = parseRoute(hash);
@@ -84,7 +97,7 @@ export function App() {
             webspec-index
           </a>
           <div class="app-header-search">
-            <SearchBox />
+            <SearchBox inputRef={searchInputRef} />
           </div>
           <button class="theme-toggle" onClick={cycleTheme} title="Toggle theme" aria-label="Toggle colour theme">
             {themeLabel}
@@ -108,7 +121,11 @@ export function App() {
   );
 }
 
-function SearchBox() {
+interface SearchBoxProps {
+  inputRef: import('preact').RefObject<HTMLInputElement>;
+}
+
+function SearchBox({ inputRef }: SearchBoxProps) {
   const [q, setQ] = useState('');
 
   function handleSubmit(e: Event) {
@@ -120,6 +137,7 @@ function SearchBox() {
   return (
     <form onSubmit={handleSubmit}>
       <input
+        ref={inputRef}
         class="search-input"
         type="search"
         placeholder="SPEC#anchor or search…"
@@ -137,20 +155,26 @@ interface ResolveViewProps {
 }
 
 function ResolveView({ client, url }: ResolveViewProps) {
-  const [error, setError] = useState<string | null>(null);
+  const state = useRequest<{ type: 'query'; result: import('./api/types').QueryResult }>(
+    client,
+    { type: 'query', target: url },
+    [client, url],
+  );
 
   useEffect(() => {
-    client.request({ type: 'query', target: url }).then((resp) => {
-      if (resp.type === 'error') {
-        setError(resp.message);
-        return;
-      }
-      if (resp.type === 'query') {
-        window.location.hash = `#/${resp.result.spec}/${resp.result.anchor}`;
-      }
-    }).catch((e: unknown) => setError(String(e)));
-  }, [client, url]);
+    if (state.kind === 'ok') {
+      const { spec, anchor } = state.value.result;
+      window.location.replace(`#/${spec}/${anchor}`);
+    }
+  }, [state]);
 
-  if (error) return <NotFound message={error} />;
-  return <div class="page loading">Resolving…</div>;
+  if (state.kind === 'loading') return <div class="page loading">Resolving…</div>;
+  if (state.kind === 'error') {
+    return (
+      <div class="page">
+        <ErrorBanner code={state.code} message={state.message} />
+      </div>
+    );
+  }
+  return null;
 }
