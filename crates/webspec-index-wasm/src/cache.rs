@@ -84,7 +84,11 @@ pub fn read_through(
             return Ok(false);
         }
         let block = pos / BLOCK_SIZE;
-        if cache.get(block).is_none() {
+        let local = (pos - block * BLOCK_SIZE) as usize;
+        let n = if let Some(data) = cache.get(block) {
+            stats.cache_hits += 1;
+            copy_block(buf, done, data, local)
+        } else {
             let start = block * BLOCK_SIZE;
             let end = (start + BLOCK_SIZE - 1).min(layout.size - 1);
             let mut data = vec![0u8; (end - start + 1) as usize];
@@ -95,17 +99,19 @@ pub fn read_through(
                 stats.bytes_fetched += bytes.len() as u64;
                 data[piece.buf_offset..piece.buf_offset + bytes.len()].copy_from_slice(&bytes);
             }
+            let n = copy_block(buf, done, &data, local);
             cache.insert(block, data);
-        } else {
-            stats.cache_hits += 1;
-        }
-        let data = cache.get(block).expect("just inserted");
-        let local = (pos - block * BLOCK_SIZE) as usize;
-        let n = (buf.len() - done).min(data.len() - local);
-        buf[done..done + n].copy_from_slice(&data[local..local + n]);
+            n
+        };
         done += n;
     }
     Ok(true)
+}
+
+fn copy_block(buf: &mut [u8], done: usize, data: &[u8], local: usize) -> usize {
+    let n = (buf.len() - done).min(data.len() - local);
+    buf[done..done + n].copy_from_slice(&data[local..local + n]);
+    n
 }
 
 #[cfg(test)]
@@ -162,6 +168,22 @@ mod tests {
         assert!(read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 70_050).unwrap());
         assert_eq!(stats.fetches, 2);
         assert_eq!(stats.cache_hits, 1);
+    }
+
+    #[test]
+    fn read_through_serves_data_even_when_cache_cannot_hold_one_block() {
+        let src = source(200 * 1024, 100_000);
+        let layout = ChunkLayout {
+            size: 200 * 1024,
+            chunk_size: 100_000,
+        };
+        let mut cache = BlockCache::new(1);
+        let mut stats = Stats::default();
+        let mut buf = vec![0u8; 100];
+        assert!(read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 65_500).unwrap());
+        assert_eq!(buf, src.data[65_500..65_600]);
+        assert!(read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 65_500).unwrap());
+        assert_eq!(stats.cache_hits, 0);
     }
 
     #[test]
