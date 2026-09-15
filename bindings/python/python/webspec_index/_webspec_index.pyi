@@ -1,8 +1,16 @@
 """Type stubs for the compiled webspec-index extension module."""
 
 from typing import Any, Optional
+from .effects import (
+    EffectsRequest, ExplainEffectsRequest, RecomputeEffectsRequest,
+    EffectSummaryResult, ExplainEffectsResult, RecomputeEffectsResult,
+)
 
 __version__: str
+
+def get_effect_summary(request: EffectsRequest) -> EffectSummaryResult: ...
+def explain_effects(request: ExplainEffectsRequest) -> ExplainEffectsResult: ...
+def recompute_effects(request: RecomputeEffectsRequest) -> RecomputeEffectsResult: ...
 
 class WebspecError(Exception):
     """Raised when a webspec-index operation fails."""

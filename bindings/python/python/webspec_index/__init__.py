@@ -8,6 +8,12 @@ All functions are synchronous; spec data is fetched and cached locally on first
 use, exactly as the ``webspec-index`` CLI does.
 """
 
+from .effects import (
+    EffectsRequest, ExplainEffectsRequest, RecomputeEffectsRequest,
+    EffectSummaryResult, ExplainEffectsResult, RecomputeEffectsResult,
+    EffectSummary, EffectLocation, EffectsStatus, SubjectSelector,
+)
+
 from ._webspec_index import (
     __version__,
     WebspecError,
@@ -41,6 +47,9 @@ from ._webspec_index import (
     CoverageSummary,
     # functions
     query,
+    get_effect_summary,
+    explain_effects,
+    recompute_effects,
     exists,
     search,
     anchors,
@@ -58,6 +67,9 @@ from ._webspec_index import (
 )
 
 __all__ = [
+    "EffectsRequest", "ExplainEffectsRequest", "RecomputeEffectsRequest",
+    "EffectSummaryResult", "ExplainEffectsResult", "RecomputeEffectsResult",
+    "EffectSummary", "EffectLocation", "EffectsStatus", "SubjectSelector",
     "__version__",
     "WebspecError",
     "QueryResult",
@@ -88,6 +100,9 @@ __all__ = [
     "StepValidation",
     "CoverageSummary",
     "query",
+    "get_effect_summary",
+    "explain_effects",
+    "recompute_effects",
     "exists",
     "search",
     "anchors",

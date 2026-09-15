@@ -80,6 +80,61 @@ fn query(spec_anchor: &str, pr: Option<i64>, force_update: bool) -> PyResult<Que
     Ok((&r).into())
 }
 
+fn effect_request<T: serde::de::DeserializeOwned>(request: &Bound<'_, PyAny>) -> PyResult<T> {
+    let encoded: String = request
+        .py()
+        .import("json")?
+        .call_method1("dumps", (request,))?
+        .extract()?;
+    serde_json::from_str(&encoded)
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+}
+
+fn effect_result<'py, T: serde::Serialize>(
+    py: Python<'py>,
+    value: T,
+) -> PyResult<Bound<'py, PyAny>> {
+    let encoded =
+        serde_json::to_string(&value).map_err(|error| WebspecError::new_err(error.to_string()))?;
+    py.import("json")?.call_method1("loads", (encoded,))
+}
+
+/// Return a versioned possible-effects summary for an indexed specification subject.
+#[pyfunction]
+fn get_effect_summary<'py>(
+    py: Python<'py>,
+    request: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let request = effect_request(request)?;
+    let result = webspec_index::effects::get_effect_summary(&request)
+        .map_err(|error| WebspecError::new_err(error.to_string()))?;
+    effect_result(py, result)
+}
+
+/// Return condensed evidence for possible effects, using the shared bounded analysis.
+#[pyfunction]
+fn explain_effects<'py>(
+    py: Python<'py>,
+    request: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let request = effect_request(request)?;
+    let result = webspec_index::effects::explain_effects(&request)
+        .map_err(|error| WebspecError::new_err(error.to_string()))?;
+    effect_result(py, result)
+}
+
+/// Recompute a selected subject or the explicitly selected indexed corpus.
+#[pyfunction]
+fn recompute_effects<'py>(
+    py: Python<'py>,
+    request: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let request = effect_request(request)?;
+    let result = webspec_index::effects::recompute_effects(&request)
+        .map_err(|error| WebspecError::new_err(error.to_string()))?;
+    effect_result(py, result)
+}
+
 /// Check whether a section exists.
 #[pyfunction]
 #[pyo3(signature = (spec_anchor, pr=None, force_update=false))]
@@ -300,6 +355,9 @@ fn _webspec_index(m: &Bound<'_, PyModule>) -> PyResult<()> {
     types::register(m)?;
 
     m.add_function(wrap_pyfunction!(query, m)?)?;
+    m.add_function(wrap_pyfunction!(get_effect_summary, m)?)?;
+    m.add_function(wrap_pyfunction!(explain_effects, m)?)?;
+    m.add_function(wrap_pyfunction!(recompute_effects, m)?)?;
     m.add_function(wrap_pyfunction!(exists, m)?)?;
     m.add_function(wrap_pyfunction!(search, m)?)?;
     m.add_function(wrap_pyfunction!(anchors, m)?)?;

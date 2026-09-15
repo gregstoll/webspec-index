@@ -52,6 +52,28 @@ for file in wsi.analyze("src/", recursive=True):
 section.to_dict()
 ```
 
+Possible specification effects use dedicated, versioned request dictionaries;
+the existing `query()` result remains unchanged:
+
+```python
+request: wsi.EffectsRequest = {
+    "schema_version": 1,
+    "subject": {"spec": "WEBIDL", "anchor": "wait-for-all"},
+}
+summary = wsi.get_effect_summary(request)
+for effect in summary["effects"]:
+    print(effect["kind"], effect["execution"])
+
+details = wsi.explain_effects({**request, "explanation": {"limit": 1}})
+for explanation in details["explanations"]:
+    print(explanation["effect_id"], explanation["witnesses"])
+```
+
+`get_effect_summary()`, `explain_effects()`, and `recompute_effects()` are
+synchronous. Results are JSON-compatible dictionaries following effects schema
+version 1. Use `options.rule_paths` for additional local rule packages and
+`options.environment` to select host implementation mappings.
+
 Errors are raised as `webspec_index.WebspecError`.
 
 ## Development
