@@ -25,11 +25,11 @@ pub fn default_catalog(additional_paths: &[String]) -> Result<Catalog, RequestEr
         return Ok(bundled.clone());
     }
     #[cfg(not(feature = "native"))]
-    if let Some(path) = additional_paths.first() {
-        return Err(invalid_catalog(format!(
+    {
+        Err(invalid_catalog(format!(
             "catalog directory {} requires the native feature",
-            path
-        )));
+            additional_paths[0]
+        )))
     }
     #[cfg(feature = "native")]
     {
@@ -41,8 +41,6 @@ pub fn default_catalog(additional_paths: &[String]) -> Result<Catalog, RequestEr
         }
         load_catalog(packages).map_err(|e| invalid_catalog(e.to_string()))
     }
-    #[cfg(not(feature = "native"))]
-    unreachable!()
 }
 
 fn invalid_catalog(message: String) -> RequestError {
