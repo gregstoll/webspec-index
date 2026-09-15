@@ -6,12 +6,16 @@
 
 use serde::Serialize;
 
-use crate::model::{PrOpts, QueryResult};
+use crate::model::QueryResult;
+#[cfg(feature = "native")]
+use crate::model::PrOpts;
 
 use super::model::{
-    EffectSummary, EffectSummaryResult, EffectsMode, EffectsOptions, EffectsRequest, EffectsStatus,
-    IssueCode, Semantics, Subject, SubjectSelector, EFFECTS_SCHEMA_VERSION,
+    EffectSummary, EffectSummaryResult, EffectsStatus, IssueCode, Semantics, Subject,
+    EFFECTS_SCHEMA_VERSION,
 };
+#[cfg(feature = "native")]
+use super::model::{EffectsMode, EffectsOptions, EffectsRequest, SubjectSelector};
 
 pub const DEFAULT_QUERY_EFFECT_LIMIT: usize = 12;
 
@@ -113,6 +117,7 @@ fn attach_summary(query: QueryResult, result: EffectSummaryResult) -> QueryWithE
 }
 
 /// Query section content and optionally attach a compact possible-effects summary.
+#[cfg(feature = "native")]
 pub async fn query_section_with_effects(
     spec_anchor: &str,
     pr: Option<&PrOpts>,

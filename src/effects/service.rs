@@ -130,6 +130,7 @@ fn semantic_key(manifest: &InputManifest, generation: i64) -> Result<String, Req
         "engine":manifest.analysis_engine_version,"catalog":manifest.catalog_digest,"environment":manifest.environment})).map_err(failure)
 }
 
+#[cfg(feature = "native")]
 pub fn input_fingerprint(options: &EffectsOptions) -> Result<String, RequestError> {
     options.validate()?;
     let conn = db::open_or_create_db().map_err(failure)?;
@@ -591,12 +592,13 @@ fn compute(
     })
 }
 
+#[cfg(feature = "native")]
 pub fn get_effect_summary(request: &EffectsRequest) -> Result<EffectSummaryResult, RequestError> {
     let conn = db::open_or_create_db().map_err(failure)?;
     get_effect_summary_on(&conn, request)
 }
 
-pub(crate) fn get_effect_summary_on(
+pub fn get_effect_summary_on(
     conn: &Connection,
     request: &EffectsRequest,
 ) -> Result<EffectSummaryResult, RequestError> {
@@ -625,6 +627,7 @@ pub(crate) fn get_effect_summary_on(
 }
 
 /// Editor details only read prepared rows. A cache miss never starts analysis.
+#[cfg(feature = "native")]
 pub fn prepared_effect_details(
     request: &EffectsRequest,
 ) -> Result<ExplainEffectsResult, RequestError> {
@@ -632,7 +635,7 @@ pub fn prepared_effect_details(
     prepared_effect_details_on(&conn, request)
 }
 
-fn prepared_effect_details_on(
+pub fn prepared_effect_details_on(
     conn: &Connection,
     request: &EffectsRequest,
 ) -> Result<ExplainEffectsResult, RequestError> {
@@ -672,6 +675,7 @@ fn prepared_effect_details_on(
     })
 }
 
+#[cfg(feature = "native")]
 pub fn explain_effects(
     request: &ExplainEffectsRequest,
 ) -> Result<ExplainEffectsResult, RequestError> {
@@ -710,6 +714,7 @@ pub fn explain_effects(
     })
 }
 
+#[cfg(feature = "native")]
 pub fn recompute_effects(
     request: &RecomputeEffectsRequest,
 ) -> Result<RecomputeEffectsResult, RequestError> {

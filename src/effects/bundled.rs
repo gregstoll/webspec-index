@@ -24,12 +24,25 @@ pub fn default_catalog(additional_paths: &[String]) -> Result<Catalog, RequestEr
     if additional_paths.is_empty() {
         return Ok(bundled.clone());
     }
-    let mut packages = bundled.packages.clone();
-    for path in additional_paths {
-        packages
-            .push(super::catalog::load_package(path).map_err(|e| invalid_catalog(e.to_string()))?);
+    #[cfg(not(feature = "native"))]
+    if let Some(path) = additional_paths.first() {
+        return Err(invalid_catalog(format!(
+            "catalog directory {} requires the native feature",
+            path
+        )));
     }
-    load_catalog(packages).map_err(|e| invalid_catalog(e.to_string()))
+    #[cfg(feature = "native")]
+    {
+        let mut packages = bundled.packages.clone();
+        for path in additional_paths {
+            packages.push(
+                super::catalog::load_package(path).map_err(|e| invalid_catalog(e.to_string()))?,
+            );
+        }
+        load_catalog(packages).map_err(|e| invalid_catalog(e.to_string()))
+    }
+    #[cfg(not(feature = "native"))]
+    unreachable!()
 }
 
 fn invalid_catalog(message: String) -> RequestError {

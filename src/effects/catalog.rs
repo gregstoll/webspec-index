@@ -6,6 +6,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+#[cfg(feature = "native")]
 use std::fs;
 use std::path::{Path, PathBuf};
 use yaml_rust2::parser::{Event, MarkedEventReceiver, Parser};
@@ -345,6 +346,7 @@ struct RawImplementation {
     reason: String,
 }
 
+#[cfg(feature = "native")]
 pub fn load_package(path: impl AsRef<Path>) -> Result<Package, CatalogError> {
     let root = path.as_ref();
     let mut paths = Vec::new();
@@ -442,12 +444,21 @@ pub fn load_catalog_sources(
     for files in embedded {
         packages.push(load_package_files(files)?);
     }
+    #[cfg(feature = "native")]
     for directory in additional_dirs {
         packages.push(load_package(directory)?);
+    }
+    #[cfg(not(feature = "native"))]
+    if let Some(directory) = additional_dirs.first() {
+        return Err(CatalogError::new(format!(
+            "catalog directory {} requires the native feature",
+            directory.display()
+        )));
     }
     load_catalog(packages)
 }
 
+#[cfg(feature = "native")]
 fn collect_yaml_files(
     root: &Path,
     directory: &Path,
@@ -1060,6 +1071,21 @@ rules:
             catalog.rules().next().unwrap().public_id,
             "example/fire-event"
         );
+    }
+
+    #[test]
+    fn embedded_catalog_loads_with_no_extension_dirs() {
+        let catalog = crate::effects::default_catalog(&[]).unwrap();
+        assert!(!catalog.packages.is_empty());
+    }
+
+    #[cfg(not(feature = "native"))]
+    #[test]
+    fn extension_dirs_are_rejected_without_native() {
+        let error = load_catalog_sources(&[], &[std::path::PathBuf::from("/nonexistent")])
+            .err()
+            .expect("directories need the native feature");
+        assert!(error.to_string().contains("native"), "{error}");
     }
 
     #[test]
