@@ -1,0 +1,32 @@
+<!doctype html>
+<p>To <dfn id="named-definition">run the named-definition case</dfn>:</p>
+<ol>
+  <li>
+    <p>Let <var>A</var> be the following steps:</p>
+    <ol>
+      <li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li>
+    </ol>
+  </li>
+  <li><p>Run <var>A</var>.</p></li>
+</ol>
+<p><dfn id="fire">fire an event</dfn> is a target stub.</p>
+
+<p>To <dfn id="inline-definition">run the inline-definition case</dfn>:</p>
+<ol>
+  <li><p>Let <var>updateDocument</var> be an algorithm step which is to <a href="#update-document">update the document for history step application</a>.</p></li>
+  <li><p>If ready, run <var>updateDocument</var>.</p></li>
+  <li><p>Otherwise, <a href="#queue-global">queue a global task</a>, given <var>updateDocument</var>.</p></li>
+</ol>
+<p><dfn id="update-document">update the document for history step application</dfn> and <dfn id="queue-global">queue a global task</dfn> are target stubs.</p>
+
+<p>To <dfn id="named-remainder">run the named-body remainder case</dfn>:</p>
+<ol>
+  <li>
+    <p>Let <var>A</var> be the following steps:</p>
+    <ol>
+      <li><p>Continue these steps.</p></li>
+      <li><p><a href="#fire">Fire an event</a> named <code>"inside-a"</code>.</p></li>
+    </ol>
+  </li>
+  <li><p>Run <var>A</var>.</p></li>
+</ol>

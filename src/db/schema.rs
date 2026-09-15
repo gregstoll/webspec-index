@@ -175,6 +175,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "refs", "guard_path", "TEXT")?;
     ensure_column(conn, "refs", "call_site_id", "TEXT")?;
     ensure_column(conn, "refs", "kind", "TEXT")?;
+    super::effects::initialize(conn)?;
     Ok(())
 }
 
@@ -194,7 +195,20 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
 
     let tx = conn.unchecked_transaction()?;
     // Order matters: children before the snapshots they reference.
-    for table in ["refs", "idl_defs", "sections", "snapshots", "update_checks"] {
+    for table in [
+        "effect_subjects",
+        "effect_witnesses",
+        "effect_issues",
+        "effect_runs",
+        "effect_local_matches",
+        "effect_anchors",
+        "effect_structures",
+        "refs",
+        "idl_defs",
+        "sections",
+        "snapshots",
+        "update_checks",
+    ] {
         if has_table(&tx, table)? {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }

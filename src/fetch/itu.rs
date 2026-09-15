@@ -64,26 +64,29 @@ fn sync_from_pdf(
 
     let sections = parse::itu_pdf::parse_itu_pdf(&bytes)?;
     let sections = parse::sections::build_section_tree(sections);
-    write::delete_spec_data(conn, spec_id)?;
+    write::atomic_write(conn, |conn| {
+        write::delete_spec_data(conn, spec_id)?;
 
-    let synthetic_sha = format!("hash:{content_hash}");
-    let commit_date = now.to_rfc3339();
-    let spec_id_reloaded = write::insert_or_get_spec(conn, spec_name, base_url, PROVIDER_NAME)?;
-    let snapshot_id = write::insert_snapshot(conn, spec_id_reloaded, &synthetic_sha, &commit_date)?;
-    write::insert_sections_bulk(conn, snapshot_id, &sections)?;
-    write::insert_refs_bulk(conn, snapshot_id, &[])?;
-    write::insert_idl_defs_bulk(conn, snapshot_id, &[])?;
+        let synthetic_sha = format!("hash:{content_hash}");
+        let commit_date = now.to_rfc3339();
+        let spec_id_reloaded = write::insert_or_get_spec(conn, spec_name, base_url, PROVIDER_NAME)?;
+        let snapshot_id =
+            write::insert_snapshot(conn, spec_id_reloaded, &synthetic_sha, &commit_date)?;
+        write::insert_sections_bulk(conn, snapshot_id, &sections)?;
+        write::insert_refs_bulk(conn, snapshot_id, &[])?;
+        write::insert_idl_defs_bulk(conn, snapshot_id, &[])?;
 
-    let checked = now.to_rfc3339();
-    write::record_update_check(
-        conn,
-        spec_id_reloaded,
-        &checked,
-        Some(&checked),
-        Some(&content_hash),
-        Some(parse::INDEX_VERSION),
-    )?;
-    Ok((snapshot_id, true))
+        let checked = now.to_rfc3339();
+        write::record_update_check(
+            conn,
+            spec_id_reloaded,
+            &checked,
+            Some(&checked),
+            Some(&content_hash),
+            Some(parse::INDEX_VERSION),
+        )?;
+        Ok((snapshot_id, true))
+    })
 }
 
 /// PDF equivalent of `fetch::sync_known_spec`: same freshness/fallback

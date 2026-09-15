@@ -1,0 +1,27 @@
+<!doctype html>
+<emu-clause id="sec-ecma-operation" type="abstract operation" aoid="TestOperation">
+  <h1><span class="secnum">1</span> TestOperation ( <var>argument</var> )</h1>
+  <emu-alg>
+    <ol>
+      <li>
+        <p>Let <var>value</var> be <emu-xref href="#target">Call</emu-xref>(<var>argument</var>) with <emu-val>undefined</emu-val>.</p>
+        <p><var>value</var> is an <a data-link-type="element" href="#iframe">iframe</a> element.</p>
+      </li>
+      <li>
+        <p>Return <var>value</var>.</p>
+        <div class="note">Note: See <a href="#note-target">the other operation</a> for background.</div>
+      </li>
+    </ol>
+  </emu-alg>
+</emu-clause>
+<emu-clause id="target"><h1>Call</h1></emu-clause>
+<emu-clause id="note-target"><h1>Other</h1></emu-clause>
+<emu-clause id="iframe"><h1>iframe</h1></emu-clause>
+<emu-clause id="sec-source-form" type="abstract operation" aoid="SourceForm">
+  <h1>SourceForm ( <var>input</var> )</h1>
+  <emu-alg>
+1. Let <var>value</var> be <emu-xref href="#target">Call</emu-xref>(<var>input</var>).
+  1. Return <var>value</var> if it is present.
+1. Return <emu-val>undefined</emu-val>.
+  </emu-alg>
+</emu-clause>

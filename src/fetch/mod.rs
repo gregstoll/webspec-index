@@ -83,7 +83,15 @@ fn sync_from_html(
         let content_unchanged = state.content_hash.as_deref() == Some(content_hash.as_str());
         // A forced refresh exists to rebuild a suspect index, so it must reach
         // the parser even when the bytes and the index version both match.
-        if !force && content_unchanged && index_is_current(state) {
+        if !force
+            && content_unchanged
+            && index_is_current(state)
+            && crate::db::effects::has_structure(
+                conn,
+                snapshot_id,
+                parse::steps::STRUCTURE_VERSION,
+            )?
+        {
             store_update_check(
                 conn,
                 spec_id,
@@ -96,18 +104,30 @@ fn sync_from_html(
     }
 
     let parsed = parse::parse_spec(&html, spec_name, base_url)?;
-    write::delete_spec_data(conn, spec_id)?;
-
     let synthetic_sha = format!("hash:{content_hash}");
-    let commit_date = now.to_rfc3339();
-    let spec_id_reloaded = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
-    let snapshot_id = write::insert_snapshot(conn, spec_id_reloaded, &synthetic_sha, &commit_date)?;
-    write::insert_sections_bulk(conn, snapshot_id, &parsed.sections)?;
-    write::insert_refs_bulk(conn, snapshot_id, &parsed.references)?;
-    write::insert_idl_defs_bulk(conn, snapshot_id, &parsed.idl_definitions)?;
+    let structure =
+        parse::steps::extract_step_structure(&html, spec_name, base_url, &synthetic_sha);
+    let structure_json = serde_json::to_string(&structure)?;
+    write::atomic_write(conn, |conn| {
+        write::delete_spec_data(conn, spec_id)?;
 
-    store_update_check(conn, spec_id_reloaded, now, Some(now), Some(&content_hash))?;
-    Ok((snapshot_id, true))
+        let commit_date = now.to_rfc3339();
+        let spec_id_reloaded = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
+        let snapshot_id =
+            write::insert_snapshot(conn, spec_id_reloaded, &synthetic_sha, &commit_date)?;
+        write::insert_sections_bulk(conn, snapshot_id, &parsed.sections)?;
+        write::insert_refs_bulk(conn, snapshot_id, &parsed.references)?;
+        write::insert_idl_defs_bulk(conn, snapshot_id, &parsed.idl_definitions)?;
+        crate::db::effects::store_structure(
+            conn,
+            snapshot_id,
+            parse::steps::STRUCTURE_VERSION,
+            &structure_json,
+        )?;
+
+        store_update_check(conn, spec_id_reloaded, now, Some(now), Some(&content_hash))?;
+        Ok((snapshot_id, true))
+    })
 }
 
 fn is_respec_source(html: &str) -> bool {
@@ -219,7 +239,13 @@ async fn sync_known_spec(
 
     if !force {
         if let (Some(snapshot_id), Some(sync_state)) = (previous_snapshot_id, state.as_ref()) {
-            if cache_is_current(sync_state, &now) {
+            if cache_is_current(sync_state, &now)
+                && crate::db::effects::has_structure(
+                    conn,
+                    snapshot_id,
+                    parse::steps::STRUCTURE_VERSION,
+                )?
+            {
                 return Ok((snapshot_id, false));
             }
         }
@@ -436,6 +462,53 @@ mod tests {
 
         // Forced refresh always surfaces the failure, even on the query path.
         assert!(run(true, true).is_err());
+    }
+
+    #[test]
+    fn failed_replacement_preserves_previous_snapshot() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "TEST", "https://example.test", "test").unwrap();
+        let now = fixed_now();
+        let (original, _) = sync_from_html(
+            &conn,
+            spec_id,
+            "TEST",
+            "https://example.test",
+            "test",
+            "<h2 id=\"original\">Original</h2>".into(),
+            None,
+            None,
+            &now,
+            false,
+        )
+        .unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_replacement BEFORE INSERT ON sections
+            WHEN NEW.anchor = 'replacement' BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;").unwrap();
+        let result = sync_from_html(
+            &conn,
+            spec_id,
+            "TEST",
+            "https://example.test",
+            "test",
+            "<h2 id=\"replacement\">Replacement</h2>".into(),
+            Some(original),
+            queries::get_update_check(&conn, spec_id).unwrap(),
+            &now,
+            true,
+        );
+        assert!(result.is_err());
+        let old_sections: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sections WHERE snapshot_id = ?1 AND anchor = 'original'",
+                [original],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            old_sections, 1,
+            "failed publication must preserve the previous corpus"
+        );
     }
 
     // The freshness gate must require BOTH a fresh timestamp and a matching

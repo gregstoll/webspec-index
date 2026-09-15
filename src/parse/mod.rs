@@ -5,6 +5,7 @@ pub mod itu_pdf;
 pub mod markdown;
 pub mod references;
 pub mod sections;
+pub mod steps;
 
 use crate::model::{ParsedSection, ParsedSpec, SectionType};
 use anyhow::Result;

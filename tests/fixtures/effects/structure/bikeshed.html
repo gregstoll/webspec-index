@@ -1,0 +1,28 @@
+<!doctype html>
+<div class="algorithm">
+  <p>To <dfn id="caller-r">run caller R</dfn>:</p>
+  <ol>
+    <li>
+      <p>Let <var>A</var> be the following steps:</p>
+      <ol><li><p><a href="#fire">Fire an event</a> named <code>"a"</code>.</p></li></ol>
+    </li>
+    <li><p><a href="#queue">Queue a microtask</a>, given <var>A</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="caller-s">run caller S</dfn>:</p>
+  <ol>
+    <li>
+      <p>Let <var>B</var> be the following steps:</p>
+      <ol><li><p><a href="#fire">Fire an event</a> named <code>"b"</code>.</p></li></ol>
+    </li>
+    <li><p><a href="#queue">Queue a microtask</a>, given <var>B</var>.</p></li>
+  </ol>
+</div>
+<div class="algorithm">
+  <p>To <dfn id="same-segment">run the same-segment case</dfn>:</p>
+  <ol>
+    <li><p><a href="#queue">Queue a microtask</a> to <a href="operations.html#fire">fire an event</a> named <code>"a"</code>.</p></li>
+  </ol>
+</div>
+<p><dfn id="queue">queue a microtask</dfn> and <dfn id="fire">fire an event</dfn> are target stubs.</p>

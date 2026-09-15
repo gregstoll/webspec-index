@@ -111,7 +111,7 @@ pub fn parse_steps(content: &str) -> Vec<AlgorithmStep> {
         path: vec![],
     }];
 
-    for (indent, _num, text) in &raw_steps {
+    for (indent, num, text) in &raw_steps {
         let plain_text = strip_markdown(text);
         let indent = *indent as isize;
 
@@ -122,9 +122,21 @@ pub fn parse_steps(content: &str) -> Vec<AlgorithmStep> {
 
         let parent_path = stack.last().unwrap().path.clone();
 
+        let mut number = parent_path
+            .first()
+            .map(|first| {
+                let mut parent = &steps[*first];
+                for index in &parent_path[1..] {
+                    parent = &parent.children[*index];
+                }
+                parent.number.clone()
+            })
+            .unwrap_or_default();
+        number.push(*num);
+
         // Navigate to the parent's children list and add the new step
         let step = AlgorithmStep {
-            number: vec![], // assigned later
+            number,
             text: plain_text,
             children: vec![],
         };
@@ -152,7 +164,6 @@ pub fn parse_steps(content: &str) -> Vec<AlgorithmStep> {
         }
     }
 
-    assign_numbers(&mut steps, &[]);
     steps
 }
 
@@ -171,16 +182,6 @@ fn get_children_mut<'a>(
     &mut current.children
 }
 
-/// Assign hierarchical step numbers based on tree position.
-fn assign_numbers(steps: &mut [AlgorithmStep], prefix: &[u32]) {
-    for (i, step) in steps.iter_mut().enumerate() {
-        let mut num = prefix.to_vec();
-        num.push((i + 1) as u32);
-        step.number = num.clone();
-        assign_numbers(&mut step.children, &num);
-    }
-}
-
 /// Find a step by its hierarchical number path.
 pub fn find_step<'a>(steps: &'a [AlgorithmStep], number: &[u32]) -> Option<&'a AlgorithmStep> {
     if number.is_empty() {
@@ -188,12 +189,12 @@ pub fn find_step<'a>(steps: &'a [AlgorithmStep], number: &[u32]) -> Option<&'a A
     }
     let mut current = steps;
     let mut target = None;
-    for &n in number {
-        if n < 1 || n as usize > current.len() {
-            return None;
-        }
-        target = Some(&current[(n - 1) as usize]);
-        current = &target.unwrap().children;
+    for (depth, _) in number.iter().enumerate() {
+        let found = current
+            .iter()
+            .find(|step| step.number.as_slice() == &number[..=depth])?;
+        target = Some(found);
+        current = &found.children;
     }
     target
 }
@@ -254,6 +255,17 @@ mod tests {
         assert_eq!(steps[2].number, vec![3]);
         assert!(steps[0].text.contains("First step"));
         assert!(steps[1].text.contains("Second step"));
+    }
+
+    #[test]
+    fn preserves_rendered_list_start_numbers() {
+        let content = "5. First step.\n6. Second step.\n\n    3. Nested step.";
+        let steps = parse_steps(content);
+        assert_eq!(steps[0].number, vec![5]);
+        assert_eq!(steps[1].number, vec![6]);
+        assert_eq!(steps[1].children[0].number, vec![6, 3]);
+        assert_eq!(find_step(&steps, &[5]).unwrap().text, "First step.");
+        assert_eq!(find_step(&steps, &[6, 3]).unwrap().text, "Nested step.");
     }
 
     #[test]

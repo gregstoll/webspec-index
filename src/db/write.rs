@@ -3,6 +3,21 @@ use crate::model::{ParsedIdlDefinition, ParsedReference, ParsedSection};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 
+/// Join the caller's publication transaction, or own one for standalone writes.
+/// Errors propagate to the owner, which rolls the whole publication back.
+pub(crate) fn atomic_write<T>(
+    conn: &Connection,
+    write: impl FnOnce(&Connection) -> Result<T>,
+) -> Result<T> {
+    if !conn.is_autocommit() {
+        return write(conn);
+    }
+    let tx = conn.unchecked_transaction()?;
+    let result = write(&tx)?;
+    tx.commit()?;
+    Ok(result)
+}
+
 /// Insert or get a spec, returning its ID
 /// Uses INSERT OR IGNORE to avoid duplicates
 pub fn insert_or_get_spec(
@@ -92,32 +107,32 @@ pub fn insert_sections_bulk(
     snapshot_id: i64,
     sections: &[ParsedSection],
 ) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-
-    {
-        let mut stmt = tx.prepare(
+    atomic_write(conn, |tx| {
+        {
+            let mut stmt = tx.prepare(
             "INSERT OR IGNORE INTO sections
              (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
 
-        for section in sections {
-            stmt.execute((
-                snapshot_id,
-                &section.anchor,
-                &section.title,
-                &section.content_text,
-                section.section_type.as_str(),
-                &section.parent_anchor,
-                &section.prev_anchor,
-                &section.next_anchor,
-                section.depth,
-            ))?;
+            for section in sections {
+                stmt.execute((
+                    snapshot_id,
+                    &section.anchor,
+                    &section.title,
+                    &section.content_text,
+                    section.section_type.as_str(),
+                    &section.parent_anchor,
+                    &section.prev_anchor,
+                    &section.next_anchor,
+                    section.depth,
+                ))?;
+            }
         }
-    }
 
-    tx.commit()?;
-    Ok(())
+        super::effects::invalidate(tx)?;
+        Ok(())
+    })
 }
 
 /// Bulk insert references for a snapshot
@@ -126,32 +141,32 @@ pub fn insert_refs_bulk(
     snapshot_id: i64,
     refs: &[ParsedReference],
 ) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
+    atomic_write(conn, |tx| {
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
                                step_path, step_text, guard_path, call_site_id, kind)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )?;
+            )?;
 
-        for reference in refs {
-            stmt.execute((
-                snapshot_id,
-                &reference.from_anchor,
-                &reference.to_spec,
-                &reference.to_anchor,
-                &reference.step_path,
-                &reference.step_text,
-                super::encode_guard_path(&reference.guard_path),
-                &reference.call_site_id,
-                reference.kind.as_str(),
-            ))?;
+            for reference in refs {
+                stmt.execute((
+                    snapshot_id,
+                    &reference.from_anchor,
+                    &reference.to_spec,
+                    &reference.to_anchor,
+                    &reference.step_path,
+                    &reference.step_text,
+                    super::encode_guard_path(&reference.guard_path),
+                    &reference.call_site_id,
+                    reference.kind.as_str(),
+                ))?;
+            }
         }
-    }
 
-    tx.commit()?;
-    Ok(())
+        super::effects::invalidate(tx)?;
+        Ok(())
+    })
 }
 
 /// Bulk insert IDL definitions for a snapshot
@@ -160,29 +175,29 @@ pub fn insert_idl_defs_bulk(
     snapshot_id: i64,
     defs: &[ParsedIdlDefinition],
 ) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-
-    {
-        let mut stmt = tx.prepare(
+    atomic_write(conn, |tx| {
+        {
+            let mut stmt = tx.prepare(
             "INSERT INTO idl_defs (snapshot_id, anchor, name, owner, kind, canonical_name, idl_text)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
 
-        for def in defs {
-            stmt.execute((
-                snapshot_id,
-                &def.anchor,
-                &def.name,
-                &def.owner,
-                &def.kind,
-                &def.canonical_name,
-                &def.idl_text,
-            ))?;
+            for def in defs {
+                stmt.execute((
+                    snapshot_id,
+                    &def.anchor,
+                    &def.name,
+                    &def.owner,
+                    &def.kind,
+                    &def.canonical_name,
+                    &def.idl_text,
+                ))?;
+            }
         }
-    }
 
-    tx.commit()?;
-    Ok(())
+        super::effects::invalidate(tx)?;
+        Ok(())
+    })
 }
 
 /// Insert a PR snapshot, returning its ID.
@@ -218,7 +233,13 @@ fn delete_snapshot_children(
     snapshot_filter: &str,
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<()> {
-    for table in ["refs", "idl_defs", "sections"] {
+    for table in [
+        "effect_anchors",
+        "effect_structures",
+        "refs",
+        "idl_defs",
+        "sections",
+    ] {
         let sql = format!(
             "DELETE FROM {table} WHERE snapshot_id IN \
              (SELECT id FROM snapshots WHERE {snapshot_filter})"
@@ -230,52 +251,52 @@ fn delete_snapshot_children(
 
 /// Delete all indexed data for a specific PR number.
 pub fn delete_pr_data(conn: &Connection, spec_id: i64, pr_number: i64) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    let filter = "spec_id = ?1 AND pr_number = ?2";
-    delete_snapshot_children(&tx, filter, &[&spec_id, &pr_number])?;
-    tx.execute(
-        &format!("DELETE FROM snapshots WHERE {filter}"),
-        (spec_id, pr_number),
-    )?;
-    tx.commit()?;
-    Ok(())
+    atomic_write(conn, |tx| {
+        let filter = "spec_id = ?1 AND pr_number = ?2";
+        delete_snapshot_children(tx, filter, &[&spec_id, &pr_number])?;
+        tx.execute(
+            &format!("DELETE FROM snapshots WHERE {filter}"),
+            (spec_id, pr_number),
+        )?;
+        Ok(())
+    })
 }
 
 /// Delete a single snapshot and its indexed data (sections, refs, IDL defs).
 pub fn delete_commit_snapshot(conn: &Connection, snapshot_id: i64) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    delete_snapshot_children(&tx, "id = ?1", &[&snapshot_id])?;
-    tx.execute("DELETE FROM snapshots WHERE id = ?1", [snapshot_id])?;
-    tx.commit()?;
-    Ok(())
+    atomic_write(conn, |tx| {
+        delete_snapshot_children(tx, "id = ?1", &[&snapshot_id])?;
+        tx.execute("DELETE FROM snapshots WHERE id = ?1", [snapshot_id])?;
+        Ok(())
+    })
 }
 
 /// Delete all PR data for a spec (all PR snapshots + orphaned commit snapshots).
 /// Returns the number of PR snapshots deleted.
 pub fn delete_all_pr_data_for_spec(conn: &Connection, spec_id: i64) -> Result<usize> {
-    let tx = conn.unchecked_transaction()?;
-    let pr_count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM snapshots WHERE spec_id = ?1 AND pr_number IS NOT NULL",
-        [spec_id],
-        |row| row.get(0),
-    )?;
-    let pr_filter = "spec_id = ?1 AND pr_number IS NOT NULL";
-    delete_snapshot_children(&tx, pr_filter, &[&spec_id])?;
-    tx.execute(
-        &format!("DELETE FROM snapshots WHERE {pr_filter}"),
-        [spec_id],
-    )?;
-    // Delete orphaned commit snapshots (merge bases no longer referenced).
-    let orphan_filter = "spec_id = ?1 AND pr_number IS NULL \
+    atomic_write(conn, |tx| {
+        let pr_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM snapshots WHERE spec_id = ?1 AND pr_number IS NOT NULL",
+            [spec_id],
+            |row| row.get(0),
+        )?;
+        let pr_filter = "spec_id = ?1 AND pr_number IS NOT NULL";
+        delete_snapshot_children(tx, pr_filter, &[&spec_id])?;
+        tx.execute(
+            &format!("DELETE FROM snapshots WHERE {pr_filter}"),
+            [spec_id],
+        )?;
+        // Delete orphaned commit snapshots (merge bases no longer referenced).
+        let orphan_filter = "spec_id = ?1 AND pr_number IS NULL \
          AND sha NOT LIKE 'hash:%' \
          AND sha NOT IN (SELECT merge_base_sha FROM snapshots WHERE spec_id = ?1 AND pr_number IS NOT NULL)";
-    delete_snapshot_children(&tx, orphan_filter, &[&spec_id])?;
-    tx.execute(
-        &format!("DELETE FROM snapshots WHERE {orphan_filter}"),
-        [spec_id],
-    )?;
-    tx.commit()?;
-    Ok(pr_count as usize)
+        delete_snapshot_children(tx, orphan_filter, &[&spec_id])?;
+        tx.execute(
+            &format!("DELETE FROM snapshots WHERE {orphan_filter}"),
+            [spec_id],
+        )?;
+        Ok(pr_count as usize)
+    })
 }
 
 /// Delete trunk indexed data for a spec (snapshot, sections, refs).
@@ -283,12 +304,12 @@ pub fn delete_all_pr_data_for_spec(conn: &Connection, spec_id: i64) -> Result<us
 /// preserving PR snapshots and commit snapshots (merge bases).
 /// Used before re-indexing to avoid clobbering PR data.
 pub fn delete_spec_data(conn: &Connection, spec_id: i64) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    let filter = "spec_id = ?1 AND pr_number IS NULL AND sha LIKE 'hash:%'";
-    delete_snapshot_children(&tx, filter, &[&spec_id])?;
-    tx.execute(&format!("DELETE FROM snapshots WHERE {filter}"), [spec_id])?;
-    tx.commit()?;
-    Ok(())
+    atomic_write(conn, |tx| {
+        let filter = "spec_id = ?1 AND pr_number IS NULL AND sha LIKE 'hash:%'";
+        delete_snapshot_children(tx, filter, &[&spec_id])?;
+        tx.execute(&format!("DELETE FROM snapshots WHERE {filter}"), [spec_id])?;
+        Ok(())
+    })
 }
 
 /// Record spec sync metadata for freshness/content-hash based updates.
