@@ -62,6 +62,9 @@ anyhow = "1.0"
 # HTML to Markdown
 htmd = "0.5"
 
+# Markdown to HTML
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 url = "2.5"
