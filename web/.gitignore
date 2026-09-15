@@ -1,2 +1,5 @@
 node_modules
 dist
+src/wasm/*
+!src/wasm/webspec_index_wasm.d.ts
+public/db/

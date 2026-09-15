@@ -1,13 +1,14 @@
 import { MockClient } from './api/client';
+import { WasmClient } from './api/wasm';
 import type { WebspecClient } from './api/client';
 import type { Request } from './api/types';
 
 type InboundMessage = { id: string; request: Request };
 
-// Replace the return value of loadBackend() with the wasm client once
-// webspec-index-wasm is built and the HTTP-range VFS is initialised.
 function loadBackend(): WebspecClient {
-  return new MockClient();
+  if (import.meta.env.VITE_BACKEND === 'mock') return new MockClient();
+  const manifestUrl = new URL('db/manifest.json', new URL(import.meta.env.BASE_URL, self.location.href)).href;
+  return new WasmClient(() => import('./wasm/webspec_index_wasm.js'), manifestUrl);
 }
 
 const client = loadBackend();
