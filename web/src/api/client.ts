@@ -1,4 +1,4 @@
-import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry } from './types';
+import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry, EffectSummaryResult, ExplainEffectsResult } from './types';
 
 export interface WebspecClient {
   request(req: Request): Promise<Response>;
@@ -141,6 +141,88 @@ const MOCK_HTML_HEADINGS: ListEntry[] = [
   { anchor: 'beginning-navigation', title: 'Beginning navigation', depth: 3, parent: 'browsing-the-web' },
 ];
 
+// --- Effects fixtures ---
+
+const MOCK_EFFECTS_HTML_NAVIGATE: EffectSummaryResult = {
+  schema_version: 1,
+  subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+  effects: [
+    {
+      id: 'effect-1',
+      kind: 'fire_event',
+      params: { name: 'load', target: null },
+      execution: ['inline'],
+      location: { spec: 'HTML', anchor: 'navigate', url: 'https://html.spec.whatwg.org/#navigate' },
+    },
+    {
+      id: 'effect-2',
+      kind: 'queue_task',
+      params: { task: 'networking task' },
+      execution: ['separate'],
+      location: { spec: 'HTML', anchor: 'navigate', url: 'https://html.spec.whatwg.org/#navigate' },
+    },
+  ],
+  effects_status: {
+    state: 'ready',
+    semantics: 'may',
+    coverage: 'partial',
+    issues: ['unresolved_invocation'],
+    omitted: 0,
+    analysis_id: 'analysis-1',
+  },
+  defined_bodies: [],
+  issues: [],
+};
+
+const MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE: ExplainEffectsResult = {
+  schema_version: 1,
+  subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+  effects: MOCK_EFFECTS_HTML_NAVIGATE.effects,
+  effects_status: MOCK_EFFECTS_HTML_NAVIGATE.effects_status,
+  defined_bodies: [],
+  explanations: [
+    {
+      effect_id: 'effect-1',
+      witnesses: [
+        {
+          hops: [
+            {
+              from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+              to: { spec: 'HTML', anchor: 'fire-an-event', snapshot_sha: 'abc123' },
+              relation: 'invoke',
+              site: {
+                id: 'site-1',
+                subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+                url: 'https://html.spec.whatwg.org/#navigate',
+                step_text: 'Fire an event named load at the document',
+              },
+              context: [],
+            },
+            {
+              from: { spec: 'HTML', anchor: 'fire-an-event', snapshot_sha: 'abc123' },
+              to: { spec: 'HTML', anchor: 'concept-event-fire', snapshot_sha: 'abc123' },
+              relation: 'invoke',
+              site: {
+                id: 'site-2',
+                subject: { spec: 'HTML', anchor: 'fire-an-event', snapshot_sha: 'abc123' },
+                url: 'https://html.spec.whatwg.org/#fire-an-event',
+                step_text: 'Dispatch event at target',
+              },
+              context: [],
+            },
+          ],
+          terminal_evidence: [],
+          path_feasibility: 'unchecked',
+          issues: [],
+        },
+      ],
+      witnesses_truncated: false,
+      issues: [],
+    },
+  ],
+  issues: [],
+};
+
 // --- MockClient ---
 
 export class MockClient implements WebspecClient {
@@ -187,6 +269,22 @@ export class MockClient implements WebspecClient {
           type: 'list',
           result: { spec: req.spec, entries: req.spec === 'HTML' ? MOCK_HTML_HEADINGS : [] },
         };
+
+      case 'effects': {
+        const { spec, anchor } = req.subject;
+        if (spec === 'HTML' && anchor === 'navigate') {
+          return { type: 'effects', result: MOCK_EFFECTS_HTML_NAVIGATE };
+        }
+        return { type: 'error', code: 'subject_not_found', message: 'No prepared analysis for this subject' };
+      }
+
+      case 'effects_explain': {
+        const { spec, anchor } = req.subject;
+        if (spec === 'HTML' && anchor === 'navigate') {
+          return { type: 'effects_explain', result: MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE };
+        }
+        return { type: 'error', code: 'subject_not_found', message: 'No prepared analysis for this subject' };
+      }
 
       default:
         return { type: 'error', code: 'not_implemented', message: `MockClient does not implement: ${req.type}` };

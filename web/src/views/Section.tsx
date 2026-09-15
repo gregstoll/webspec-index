@@ -3,14 +3,16 @@ import type { WebspecClient } from '../api/client';
 import type { RefEntry } from '../api/types';
 import { useRequest } from '../hooks/useRequest';
 import { Loading, ErrorBanner } from './Status';
+import { EffectsPanel } from './EffectsPanel';
 
 interface Props {
   client: WebspecClient;
   spec: string;
   anchor: string;
+  selectedStepPath?: number[];
 }
 
-export function Section({ client, spec, anchor }: Props) {
+export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
     { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
@@ -94,6 +96,13 @@ export function Section({ client, spec, anchor }: Props) {
 
       <RefSection heading="Outgoing references" refs={result.outgoing_refs} />
       <RefSection heading="Incoming references" refs={result.incoming_refs} />
+
+      <EffectsPanel
+        client={client}
+        spec={result.spec}
+        anchor={result.anchor}
+        selectedStepPath={selectedStepPath}
+      />
     </div>
   );
 }
