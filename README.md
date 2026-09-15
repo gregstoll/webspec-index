@@ -76,6 +76,9 @@ webspec-index effects "HTML#navigate" --summary-only --recompute
 # Refresh the indexed corpus once, after all requested specs have been indexed
 webspec-index effects --all --summary-only
 
+# Export a chunked read-only database for the web UI
+webspec-index export-web --out DIR   # chunked read-only DB + manifest for the web UI
+
 # Update specs to latest versions
 webspec-index update
 webspec-index update --effects off  # skip the post-update effects refresh
@@ -164,7 +167,7 @@ cargo clippy        # lint
 cargo fmt --check   # format check
 ```
 
-The `native` feature (default) holds every OS and network dependency; `pdf` holds ITU PDF parsing. Both are off for the WebAssembly build.
+The `native` feature (default) holds every OS and network dependency; `pdf` holds ITU PDF parsing. Both are off for the WebAssembly build. `webspec_index::api::handle_json` is the request/response entry point shared by the wasm build and editor clients; see `src/api.rs` for the request variants.
 
 ```text
 cargo test --no-default-features --lib                          # OS/network-free build (used by the wasm target)
