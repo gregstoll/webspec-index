@@ -21,7 +21,6 @@ pub mod parse;
 pub mod spec_list;
 pub mod spec_registry;
 
-#[cfg(feature = "native")]
 use anyhow::Context;
 use anyhow::Result;
 use regex::Regex;
@@ -161,6 +160,142 @@ async fn ensure_indexed_for_spec_name(
     Ok((snapshot_id, canonical_name))
 }
 
+fn assemble_query_result(
+    conn: &Connection,
+    spec_name: &str,
+    snapshot_id: i64,
+    section: model::ParsedSection,
+) -> Result<model::QueryResult> {
+    let snapshot_sha: String = conn.query_row(
+        "SELECT sha FROM snapshots WHERE id = ?1",
+        [snapshot_id],
+        |row| row.get(0),
+    )?;
+
+    let children = db::queries::get_children(conn, snapshot_id, &section.anchor)?
+        .iter()
+        .map(|(child_anchor, title)| model::NavEntry {
+            anchor: child_anchor.clone(),
+            title: title.clone(),
+        })
+        .collect();
+
+    let navigation = model::Navigation {
+        parent: section.parent_anchor.as_ref().and_then(|p| {
+            db::queries::get_section(conn, snapshot_id, p)
+                .ok()?
+                .map(|s| model::NavEntry {
+                    anchor: s.anchor,
+                    title: s.title,
+                })
+        }),
+        prev: section.prev_anchor.as_ref().and_then(|p| {
+            db::queries::get_section(conn, snapshot_id, p)
+                .ok()?
+                .map(|s| model::NavEntry {
+                    anchor: s.anchor,
+                    title: s.title,
+                })
+        }),
+        next: section.next_anchor.as_ref().and_then(|n| {
+            db::queries::get_section(conn, snapshot_id, n)
+                .ok()?
+                .map(|s| model::NavEntry {
+                    anchor: s.anchor,
+                    title: s.title,
+                })
+        }),
+        children,
+    };
+
+    let out_refs = db::queries::get_outgoing_refs(conn, snapshot_id, &section.anchor)?;
+    let outgoing = out_refs
+        .iter()
+        .map(|(to_spec, to_anchor)| model::RefEntry::plain(to_spec.clone(), to_anchor.clone()))
+        .collect();
+
+    let in_refs = db::queries::get_incoming_refs(conn, spec_name, &section.anchor)?;
+    let incoming = in_refs
+        .iter()
+        .map(|(from_spec, from_anchor)| {
+            model::RefEntry::plain(from_spec.clone(), from_anchor.clone())
+        })
+        .collect();
+
+    let (base_url, provider) = db::queries::get_spec_meta(conn, spec_name)?
+        .map(|(_, base_url, provider)| (base_url, provider))
+        .unwrap_or_default();
+    let url = anchor_url(&base_url, &provider, &section.anchor);
+
+    Ok(model::QueryResult {
+        spec: spec_name.to_string(),
+        sha: snapshot_sha,
+        anchor: section.anchor,
+        url,
+        title: section.title,
+        section_type: section.section_type.as_str().to_string(),
+        content: section.content_text,
+        navigation,
+        outgoing_refs: outgoing,
+        incoming_refs: incoming,
+    })
+}
+
+pub fn query_section_from_conn(
+    conn: &Connection,
+    spec_name: &str,
+    anchor: &str,
+) -> Result<Option<model::QueryResult>> {
+    let snapshot_id = db::queries::get_snapshot(conn, spec_name)?
+        .with_context(|| format!("spec {spec_name} is not indexed"))?;
+    let Some(section) = db::queries::get_section(conn, snapshot_id, anchor)? else {
+        return Ok(None);
+    };
+    Ok(Some(assemble_query_result(
+        conn,
+        spec_name,
+        snapshot_id,
+        section,
+    )?))
+}
+
+fn heading_to_list_entry(h: &model::ParsedSection) -> model::ListEntry {
+    model::ListEntry {
+        anchor: h.anchor.clone(),
+        title: h.title.clone(),
+        depth: h.depth.unwrap_or(0),
+        parent: h.parent_anchor.clone(),
+    }
+}
+
+pub fn list_headings_from_conn(
+    conn: &Connection,
+    spec_name: &str,
+) -> Result<Vec<model::ListEntry>> {
+    let snapshot_id = db::queries::get_snapshot(conn, spec_name)?
+        .with_context(|| format!("spec {spec_name} is not indexed"))?;
+    Ok(db::queries::list_headings(conn, snapshot_id)?
+        .iter()
+        .map(heading_to_list_entry)
+        .collect())
+}
+
+pub fn check_exists_from_conn(
+    conn: &Connection,
+    spec_name: &str,
+    anchor: &str,
+) -> Result<model::ExistsResult> {
+    let snapshot_id = db::queries::get_snapshot(conn, spec_name)?
+        .with_context(|| format!("spec {spec_name} is not indexed"))?;
+    let section = db::queries::get_section(conn, snapshot_id, anchor)?;
+    Ok(model::ExistsResult {
+        exists: section.is_some(),
+        spec: spec_name.to_string(),
+        anchor: anchor.to_string(),
+        section_type: section.map(|s| s.section_type.as_str().to_string()),
+    })
+}
+
 /// Query a specific section in a specification
 ///
 /// Returns complete section information including navigation, children, and cross-references.
@@ -177,7 +312,7 @@ pub async fn query_section(
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
 
-    let (snapshot_id, spec_name, fallback_snapshot_id) = if let Some(pr_opts) = pr {
+    if let Some(pr_opts) = pr {
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, &spec_name, base_url_hint.as_deref())?;
         let _ =
@@ -192,97 +327,22 @@ pub async fn query_section(
             pr_opts.force_update,
         )
         .await?;
-        (pr_snap, canonical_name, Some(base_snap))
+        let section = db::queries::get_section(&conn, pr_snap, &anchor)?
+            .or_else(|| {
+                db::queries::get_section(&conn, base_snap, &anchor)
+                    .ok()
+                    .flatten()
+            })
+            .ok_or_else(|| anyhow::anyhow!("Section not found: {}#{}", canonical_name, anchor))?;
+        assemble_query_result(&conn, &canonical_name, pr_snap, section)
     } else {
         let (snap_id, name) =
             ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
                 .await?;
-        (snap_id, name, None)
-    };
-
-    let snapshot_sha: String = conn.query_row(
-        "SELECT sha FROM snapshots WHERE id = ?1",
-        [snapshot_id],
-        |row| row.get(0),
-    )?;
-
-    let section = db::queries::get_section(&conn, snapshot_id, &anchor)?
-        .or_else(|| {
-            fallback_snapshot_id.and_then(|fb_id| {
-                db::queries::get_section(&conn, fb_id, &anchor)
-                    .ok()
-                    .flatten()
-            })
-        })
-        .ok_or_else(|| anyhow::anyhow!("Section not found: {}#{}", spec_name, anchor))?;
-
-    let children = db::queries::get_children(&conn, snapshot_id, &anchor)?
-        .iter()
-        .map(|(child_anchor, title)| model::NavEntry {
-            anchor: child_anchor.clone(),
-            title: title.clone(),
-        })
-        .collect();
-
-    let navigation = model::Navigation {
-        parent: section.parent_anchor.as_ref().and_then(|p| {
-            db::queries::get_section(&conn, snapshot_id, p)
-                .ok()?
-                .map(|s| model::NavEntry {
-                    anchor: s.anchor,
-                    title: s.title,
-                })
-        }),
-        prev: section.prev_anchor.as_ref().and_then(|p| {
-            db::queries::get_section(&conn, snapshot_id, p)
-                .ok()?
-                .map(|s| model::NavEntry {
-                    anchor: s.anchor,
-                    title: s.title,
-                })
-        }),
-        next: section.next_anchor.as_ref().and_then(|n| {
-            db::queries::get_section(&conn, snapshot_id, n)
-                .ok()?
-                .map(|s| model::NavEntry {
-                    anchor: s.anchor,
-                    title: s.title,
-                })
-        }),
-        children,
-    };
-
-    let out_refs = db::queries::get_outgoing_refs(&conn, snapshot_id, &anchor)?;
-    let outgoing = out_refs
-        .iter()
-        .map(|(to_spec, to_anchor)| model::RefEntry::plain(to_spec.clone(), to_anchor.clone()))
-        .collect();
-
-    let in_refs = db::queries::get_incoming_refs(&conn, &spec_name, &anchor)?;
-    let incoming = in_refs
-        .iter()
-        .map(|(from_spec, from_anchor)| {
-            model::RefEntry::plain(from_spec.clone(), from_anchor.clone())
-        })
-        .collect();
-
-    let (base_url, provider) = db::queries::get_spec_meta(&conn, &spec_name)?
-        .map(|(_, base_url, provider)| (base_url, provider))
-        .unwrap_or_default();
-    let url = anchor_url(&base_url, &provider, &section.anchor);
-
-    Ok(model::QueryResult {
-        spec: spec_name.clone(),
-        sha: snapshot_sha,
-        anchor: section.anchor,
-        url,
-        title: section.title,
-        section_type: section.section_type.as_str().to_string(),
-        content: section.content_text,
-        navigation,
-        outgoing_refs: outgoing,
-        incoming_refs: incoming,
-    })
+        let section = db::queries::get_section(&conn, snap_id, &anchor)?
+            .ok_or_else(|| anyhow::anyhow!("Section not found: {}#{}", name, anchor))?;
+        assemble_query_result(&conn, &name, snap_id, section)
+    }
 }
 
 /// Check if a section exists in the specification
@@ -302,7 +362,7 @@ pub async fn check_exists(
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
 
-    let (snapshot_id, spec_name, fallback_snapshot_id) = if let Some(pr_opts) = pr {
+    if let Some(pr_opts) = pr {
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, &spec_name, base_url_hint.as_deref())?;
         let _ =
@@ -317,33 +377,25 @@ pub async fn check_exists(
             pr_opts.force_update,
         )
         .await?;
-        (pr_snap, canonical_name, Some(base_snap))
-    } else {
-        let (snap_id, name) =
-            ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
-                .await?;
-        (snap_id, name, None)
-    };
-
-    // Check if section exists, with fallback to merge base
-    let section = db::queries::get_section(&conn, snapshot_id, &anchor)?.or_else(|| {
-        fallback_snapshot_id.and_then(|fb_id| {
-            db::queries::get_section(&conn, fb_id, &anchor)
+        let section = db::queries::get_section(&conn, pr_snap, &anchor)?.or_else(|| {
+            db::queries::get_section(&conn, base_snap, &anchor)
                 .ok()
                 .flatten()
+        });
+        let exists = section.is_some();
+        let section_type = section.map(|s| s.section_type.as_str().to_string());
+        Ok(model::ExistsResult {
+            exists,
+            spec: canonical_name,
+            anchor,
+            section_type,
         })
-    });
-    let exists = section.is_some();
-    let section_type = section
-        .as_ref()
-        .map(|s| s.section_type.as_str().to_string());
-
-    Ok(model::ExistsResult {
-        exists,
-        spec: spec_name,
-        anchor,
-        section_type,
-    })
+    } else {
+        let (_, name) =
+            ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
+                .await?;
+        check_exists_from_conn(&conn, &name, &anchor)
+    }
 }
 
 pub type AnchorRow = (String, String, Option<String>, String);
@@ -640,7 +692,7 @@ pub async fn list_headings(
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
 
-    let snapshot_id = if let Some(pr_opts) = pr {
+    if let Some(pr_opts) = pr {
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, spec, None)?;
         let _ = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
@@ -653,27 +705,14 @@ pub async fn list_headings(
             pr_opts.force_update,
         )
         .await?;
-        pr_snap
+        Ok(db::queries::list_headings(&conn, pr_snap)?
+            .iter()
+            .map(heading_to_list_entry)
+            .collect())
     } else {
-        let (snap_id, _name) = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
-        snap_id
-    };
-
-    // Get all headings
-    let headings = db::queries::list_headings(&conn, snapshot_id)?;
-
-    // Convert to ListEntry format
-    let entries: Vec<model::ListEntry> = headings
-        .iter()
-        .map(|h| model::ListEntry {
-            anchor: h.anchor.clone(),
-            title: h.title.clone(),
-            depth: h.depth.unwrap_or(0),
-            parent: h.parent_anchor.clone(),
-        })
-        .collect();
-
-    Ok(entries)
+        let (_, name) = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
+        list_headings_from_conn(&conn, &name)
+    }
 }
 
 /// Get cross-references for a section
@@ -3094,5 +3133,121 @@ mod tests {
 
         assert!(!result.matches.is_empty());
         assert_eq!(result.matches[0].canonical_name, "Window.open");
+    }
+
+    pub(crate) fn seed_two_specs() -> Connection {
+        use model::RefKind;
+        let conn = db::open_test_db().unwrap();
+        let html =
+            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org/", "whatwg")
+                .unwrap();
+        let dom = write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
+            .unwrap();
+        let html_snap = write::insert_snapshot(&conn, html, "hash:aaaa", "2026-09-01").unwrap();
+        let dom_snap = write::insert_snapshot(&conn, dom, "hash:bbbb", "2026-09-01").unwrap();
+        write::insert_sections_bulk(
+            &conn,
+            html_snap,
+            &[
+                ParsedSection {
+                    anchor: "browsing".into(),
+                    title: Some("Browsing".into()),
+                    content_text: Some("intro".into()),
+                    section_type: SectionType::Heading,
+                    parent_anchor: None,
+                    prev_anchor: None,
+                    next_anchor: None,
+                    depth: Some(1),
+                },
+                ParsedSection {
+                    anchor: "navigate".into(),
+                    title: Some("Navigate".into()),
+                    content_text: Some("To **navigate** see [tree](https://dom.spec.whatwg.org/#concept-tree) and [w3c](https://www.w3.org/TR/css-grid-1/#grid).".into()),
+                    section_type: SectionType::Algorithm,
+                    parent_anchor: Some("browsing".into()),
+                    prev_anchor: None,
+                    next_anchor: None,
+                    depth: Some(2),
+                },
+            ],
+        )
+        .unwrap();
+        write::insert_sections_bulk(
+            &conn,
+            dom_snap,
+            &[ParsedSection {
+                anchor: "concept-tree".into(),
+                title: Some("Trees".into()),
+                content_text: Some("tree".into()),
+                section_type: SectionType::Heading,
+                parent_anchor: None,
+                prev_anchor: None,
+                next_anchor: None,
+                depth: Some(1),
+            }],
+        )
+        .unwrap();
+        write::insert_refs_bulk(
+            &conn,
+            html_snap,
+            &[ParsedReference {
+                from_anchor: "navigate".into(),
+                to_spec: "DOM".into(),
+                to_anchor: "concept-tree".into(),
+                step_path: None,
+                step_text: None,
+                guard_path: Vec::new(),
+                call_site_id: None,
+                kind: RefKind::Prose,
+            }],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn query_section_from_conn_assembles_navigation_and_refs() {
+        let conn = seed_two_specs();
+        let result = query_section_from_conn(&conn, "HTML", "navigate")
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.spec, "HTML");
+        assert_eq!(result.sha, "hash:aaaa");
+        assert_eq!(result.url, "https://html.spec.whatwg.org//#navigate");
+        assert_eq!(
+            result.navigation.parent.as_ref().unwrap().anchor,
+            "browsing"
+        );
+        assert_eq!(result.outgoing_refs.len(), 1);
+        assert_eq!(result.outgoing_refs[0].spec, "DOM");
+        let incoming = query_section_from_conn(&conn, "DOM", "concept-tree")
+            .unwrap()
+            .unwrap();
+        assert_eq!(incoming.incoming_refs[0].anchor, "navigate");
+    }
+
+    #[test]
+    fn query_section_from_conn_distinguishes_missing_section_from_unindexed_spec() {
+        let conn = seed_two_specs();
+        assert!(query_section_from_conn(&conn, "HTML", "nope")
+            .unwrap()
+            .is_none());
+        let err = query_section_from_conn(&conn, "FETCH", "x").unwrap_err();
+        assert!(err.to_string().contains("not indexed"), "{err}");
+    }
+
+    #[test]
+    fn list_headings_and_exists_from_conn() {
+        let conn = seed_two_specs();
+        let headings = list_headings_from_conn(&conn, "HTML").unwrap();
+        assert!(headings.iter().any(|h| h.anchor == "browsing"));
+        let exists = check_exists_from_conn(&conn, "HTML", "navigate").unwrap();
+        assert!(exists.exists);
+        assert_eq!(exists.section_type.as_deref(), Some("algorithm"));
+        assert!(
+            !check_exists_from_conn(&conn, "HTML", "nope")
+                .unwrap()
+                .exists
+        );
     }
 }
