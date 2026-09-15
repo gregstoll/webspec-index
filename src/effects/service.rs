@@ -650,14 +650,11 @@ pub fn prepared_effect_details_on(
         return Err(unavailable("Prepared effects are unavailable. Run webspec-index effects --all --summary-only after indexing."));
     };
     let subject_key = key(&selector(&summary.subject))?;
-    let mut select = conn.prepare("SELECT witness_json FROM effect_witnesses WHERE analysis_id=?1 AND subject_key=?2 AND effect_id=?3").map_err(failure)?;
     let mut explanations = Vec::new();
     for effect in &summary.effects {
-        let witness: Option<String> = select
-            .query_row((analysis_id, &subject_key, &effect.id), |row| row.get(0))
-            .optional()
-            .map_err(failure)?;
-        let witness = witness.ok_or_else(|| unavailable("Prepared paths are unavailable. Run webspec-index effects --all --summary-only to prepare them."))?;
+        let witness = storage::load_witness(conn, analysis_id, &subject_key, &effect.id)
+            .map_err(failure)?
+            .ok_or_else(|| unavailable("Prepared paths are unavailable. Run webspec-index effects --all --summary-only to prepare them."))?;
         explanations.push(EffectExplanation {
             effect_id: effect.id.clone(),
             witnesses: vec![serde_json::from_str(&witness).map_err(failure)?],

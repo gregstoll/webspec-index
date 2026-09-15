@@ -1,7 +1,12 @@
 //! Snapshot-bound storage shared by all effects consumers.
 use anyhow::Result;
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
+use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 
 pub fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -230,17 +235,26 @@ pub fn publish_run_with_witnesses(
     for (subject, summary) in subjects {
         tx.execute(
             "INSERT INTO effect_subjects VALUES (?1,?2,?3)",
-            (&run.analysis_id, subject, summary),
+            rusqlite::params![&run.analysis_id, subject, encode_payload(summary)],
         )?;
     }
     let mut insert = tx.prepare("INSERT INTO effect_issues VALUES (?1,?2,?3)")?;
     for (id, payload) in issues {
-        insert.execute((&run.analysis_id, id, payload))?;
+        insert.execute(rusqlite::params![
+            &run.analysis_id,
+            id,
+            encode_payload(payload)
+        ])?;
     }
     drop(insert);
     let mut insert = tx.prepare("INSERT INTO effect_witnesses VALUES (?1,?2,?3,?4)")?;
     for (subject, effect, witness) in witnesses {
-        insert.execute((&run.analysis_id, subject, effect, witness))?;
+        insert.execute(rusqlite::params![
+            &run.analysis_id,
+            subject,
+            effect,
+            encode_payload(witness)
+        ])?;
     }
     drop(insert);
     tx.commit()?;
@@ -277,20 +291,26 @@ pub fn load_issues(conn: &Connection, analysis_id: &str, ids: &[String]) -> Resu
     ids.iter()
         .map(|id| {
             select
-                .query_row((analysis_id, id), |row| row.get(0))
+                .query_row((analysis_id, id), |row| {
+                    decode_payload(row.get_ref(0)?)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+                })
                 .map_err(Into::into)
         })
         .collect()
 }
 
 pub fn load_subject(conn: &Connection, analysis_id: &str, subject: &str) -> Result<Option<String>> {
-    Ok(conn
-        .query_row(
-            "SELECT summary_json FROM effect_subjects WHERE analysis_id=?1 AND subject_key=?2",
-            (analysis_id, subject),
-            |row| row.get(0),
-        )
-        .optional()?)
+    conn.query_row(
+        "SELECT summary_json FROM effect_subjects WHERE analysis_id=?1 AND subject_key=?2",
+        (analysis_id, subject),
+        |row| {
+            decode_payload(row.get_ref(0)?)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        },
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 pub fn load_local_matches(conn: &Connection, key: &str) -> Result<Option<String>> {
@@ -309,6 +329,41 @@ pub fn store_local_matches(conn: &Connection, key: &str, payload: &str) -> Resul
         (key, payload),
     )?;
     Ok(())
+}
+
+fn encode_payload(text: &str) -> Vec<u8> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(text.as_bytes())
+        .and_then(|_| encoder.finish())
+        .expect("writing to an in-memory buffer cannot fail")
+}
+
+fn decode_payload(value: ValueRef<'_>) -> Result<String> {
+    match value {
+        ValueRef::Text(bytes) => Ok(String::from_utf8(bytes.to_vec())?),
+        ValueRef::Blob(bytes) => {
+            let mut text = String::new();
+            DeflateDecoder::new(bytes).read_to_string(&mut text)?;
+            Ok(text)
+        }
+        other => anyhow::bail!("unexpected payload type {}", other.data_type()),
+    }
+}
+
+pub fn load_witness(
+    conn: &Connection,
+    analysis_id: &str,
+    subject_key: &str,
+    effect_id: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT witness_json FROM effect_witnesses WHERE analysis_id=?1 AND subject_key=?2 AND effect_id=?3",
+        (analysis_id, subject_key, effect_id),
+        |row| decode_payload(row.get_ref(0)?).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into())),
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -369,6 +424,85 @@ mod tests {
                 .get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn payload_round_trips_through_deflate() {
+        let text = r#"{"hops":[{"from":{"spec":"HTML","anchor":"navigate"}}]}"#;
+        let encoded = encode_payload(text);
+        assert!(encoded.len() < text.len() * 2);
+        let decoded = decode_payload(rusqlite::types::ValueRef::Blob(&encoded)).unwrap();
+        assert_eq!(decoded, text);
+    }
+
+    #[test]
+    fn legacy_text_payload_is_returned_verbatim() {
+        let decoded =
+            decode_payload(rusqlite::types::ValueRef::Text(b"{\"legacy\":true}")).unwrap();
+        assert_eq!(decoded, "{\"legacy\":true}");
+    }
+
+    #[test]
+    fn published_rows_are_blobs_and_load_back_as_text() {
+        let conn = crate::db::open_test_db().unwrap();
+        let run = StoredRun {
+            analysis_id: "a1".into(),
+            generation: generation(&conn).unwrap(),
+            semantic_key: "s".into(),
+            scope_key: "sc".into(),
+            budget_key: "b".into(),
+            reached_fixed_point: true,
+            manifest_json: "{}".into(),
+            artifact_json: "{}".into(),
+        };
+        let ok = publish_run_with_witnesses(
+            &conn,
+            &run,
+            &[("subj".into(), "{\"summary\":1}".into())],
+            &[("iss".into(), "{\"issue\":1}".into())],
+            &[("subj".into(), "eff".into(), "{\"witness\":1}".into())],
+        )
+        .unwrap();
+        assert!(ok);
+        let stored_type: String = conn
+            .query_row(
+                "SELECT typeof(summary_json) FROM effect_subjects WHERE analysis_id='a1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_type, "blob");
+        assert_eq!(
+            load_subject(&conn, "a1", "subj").unwrap().unwrap(),
+            "{\"summary\":1}"
+        );
+        assert_eq!(
+            load_issues(&conn, "a1", &["iss".into()]).unwrap(),
+            vec!["{\"issue\":1}".to_string()]
+        );
+        assert_eq!(
+            load_witness(&conn, "a1", "subj", "eff").unwrap().unwrap(),
+            "{\"witness\":1}"
+        );
+    }
+
+    #[test]
+    fn legacy_text_rows_still_load() {
+        let conn = crate::db::open_test_db().unwrap();
+        conn.execute(
+            "INSERT INTO effect_runs VALUES ('old', 0, 's', 'sc', 'b', 1, '{}', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO effect_subjects(analysis_id, subject_key, summary_json) VALUES ('old', 'k', '{\"legacy\":1}')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            load_subject(&conn, "old", "k").unwrap().unwrap(),
+            "{\"legacy\":1}"
         );
     }
 
