@@ -11,15 +11,19 @@ interface Props {
   spec?: string;
 }
 
-// The FTS snippet function uses <mark>...</mark> markers (trusted, from SQLite FTS).
-// Render via dangerouslySetInnerHTML so <mark> tags highlight matches.
+// The snippet is raw section text (spec markdown, which may contain literal HTML)
+// with <mark>…</mark> inserted around matches by SQLite FTS. Escape everything,
+// then restore only the markers.
+export function snippetHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/&lt;(\/?)mark&gt;/g, '<$1mark>');
+}
+
 function Snippet({ text }: { text: string }) {
-  return (
-    <div
-      class="search-result-snippet"
-      dangerouslySetInnerHTML={{ __html: text }}
-    />
-  );
+  return <div class="search-result-snippet" dangerouslySetInnerHTML={{ __html: snippetHtml(text) }} />;
 }
 
 export function Search({ client, query, spec }: Props) {

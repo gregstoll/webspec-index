@@ -71,7 +71,7 @@ const MOCK_NAVIGATE: QueryResult = {
   title: 'navigate',
   type: 'algorithm',
   content: 'To navigate, given a navigable navigable, a URL url, and other parameters...',
-  content_html: '<p><a href="https://example.com/x">ext</a> <a href="#/DOM/concept-tree">int</a></p><ol><li>Let x be y.</li><li>Return x.</li></ol>',
+  content_html: '<p><a href="https://example.com/x">ext</a> <a href="#/DOM/concept-tree">int</a> <a href="javascript:alert(1)">js</a></p><ol><li>Let x be y.</li><li>Return x.</li></ol>',
   navigation: {
     parent: { anchor: 'navigation', title: 'Navigation' },
     prev: { anchor: 'beginning-navigation', title: 'Beginning navigation' },

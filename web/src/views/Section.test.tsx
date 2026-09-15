@@ -74,6 +74,16 @@ describe('Section', () => {
       expect(int.getAttribute('rel')).toBeNull();
     });
   });
+
+  it('post-render pass: javascript: links lose their href', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'ext' })).toBeTruthy();
+      const js = screen.getByText('js');
+      expect(js.tagName).toBe('A');
+      expect(js.hasAttribute('href')).toBe(false);
+    });
+  });
 });
 
 describe('Section step selection', () => {

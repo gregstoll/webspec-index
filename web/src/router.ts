@@ -37,8 +37,7 @@ export function parseRoute(hash: string): Route {
     return { kind: 'resolve', url: path };
   }
 
-  if (path.startsWith('search')) {
-    // Parse query string from the path portion after "search".
+  if (path === 'search' || path.startsWith('search?')) {
     const qmarkIdx = path.indexOf('?');
     const qs = qmarkIdx === -1 ? '' : path.slice(qmarkIdx + 1);
     const params = new URLSearchParams(qs);

@@ -136,7 +136,11 @@ function ContentBlock({ html, selectedStepPath, onStepSelect }: ContentBlockProp
     if (!el) return;
     for (const a of el.querySelectorAll<HTMLAnchorElement>('a[href]')) {
       const href = a.getAttribute('href') ?? '';
-      if (href.startsWith('#/') || href.startsWith('#')) continue;
+      if (href.startsWith('#')) continue;
+      if (/^\s*javascript:/i.test(href)) {
+        a.removeAttribute('href');
+        continue;
+      }
       if (href.startsWith('http://') || href.startsWith('https://')) {
         a.setAttribute('target', '_blank');
         a.setAttribute('rel', 'noopener');

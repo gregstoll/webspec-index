@@ -22,6 +22,11 @@ describe('parseRoute', () => {
     expect(parseRoute('#/DOM')).toEqual({ kind: 'headings', spec: 'DOM' });
   });
 
+  it('treats a spec whose name starts with "search" as headings, not search', () => {
+    expect(parseRoute('#/searchfoo')).toEqual({ kind: 'headings', spec: 'searchfoo' });
+    expect(parseRoute('#/search')).toEqual({ kind: 'search', q: '', spec: undefined });
+  });
+
   it('returns section for "#/HTML/navigate"', () => {
     expect(parseRoute('#/HTML/navigate')).toEqual({ kind: 'section', spec: 'HTML', anchor: 'navigate' });
   });
