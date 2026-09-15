@@ -5,6 +5,7 @@ pub mod write;
 
 use anyhow::Result;
 use rusqlite::Connection;
+#[cfg(feature = "native")]
 use std::path::PathBuf;
 
 /// Guard steps are stored as a JSON array so that step text containing any
@@ -25,6 +26,7 @@ pub fn decode_guard_path(encoded: Option<&str>) -> Vec<String> {
 
 /// Get the database file path
 /// Tests can override this by setting a different path
+#[cfg(feature = "native")]
 pub fn get_db_path() -> PathBuf {
     if let Ok(test_db) = std::env::var("SPEC_INDEX_TEST_DB") {
         PathBuf::from(test_db)
@@ -40,6 +42,7 @@ pub fn get_db_path() -> PathBuf {
 ///
 /// On first creation (or after `clear-db`), seeds the spec list so that
 /// `webspec-index specs` returns all known specs immediately.
+#[cfg(feature = "native")]
 pub fn open_or_create_db() -> Result<Connection> {
     let db_path = get_db_path();
 
@@ -71,4 +74,22 @@ pub fn open_test_db() -> Result<Connection> {
     schema::initialize_schema(&conn)?;
     schema::run_migrations(&conn)?;
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_memory_db_initializes_schema_without_native_feature() {
+        let conn = open_test_db().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sections'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
 }
