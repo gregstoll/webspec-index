@@ -5,6 +5,7 @@
 
 #[cfg(feature = "native")]
 pub mod analyze;
+pub mod api;
 pub mod db;
 pub mod effects;
 #[cfg(feature = "native")]
@@ -1519,7 +1520,6 @@ fn resolve_call_site_urls(conn: &Connection, paths: &mut [model::Trace]) -> Resu
     Ok(())
 }
 
-#[cfg(test)]
 pub fn find_traces_from_conn(
     conn: &Connection,
     from: (String, String),

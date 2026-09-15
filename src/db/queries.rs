@@ -132,6 +132,33 @@ pub fn get_spec_meta(
     }
 }
 
+/// (name, base_url, provider, sha, commit_date) for a spec snapshot.
+pub type IndexedSpecRow = (String, String, String, String, String);
+
+/// List specs that have at least one non-PR, content-addressed snapshot as
+/// (name, base_url, provider, sha, commit_date).
+pub fn list_indexed_specs(conn: &Connection) -> Result<Vec<IndexedSpecRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT sp.name, sp.base_url, sp.provider, sn.sha, sn.commit_date
+         FROM specs sp
+         JOIN snapshots sn ON sn.spec_id = sp.id
+         WHERE sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+         ORDER BY sp.name",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// List all indexed/discovered specs as (name, base_url, provider).
 pub fn list_specs(conn: &Connection) -> Result<Vec<(String, String, String)>> {
     let mut stmt = conn.prepare(

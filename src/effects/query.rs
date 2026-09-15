@@ -51,13 +51,11 @@ impl QueryWithEffects {
     }
 }
 
-#[cfg(feature = "native")]
 fn empty_status(state: fn(Semantics, Vec<IssueCode>, u64) -> EffectsStatus) -> EffectsStatus {
     state(Semantics::May, Vec::new(), 0)
 }
 
-#[cfg(feature = "native")]
-fn error_status() -> EffectsStatus {
+pub(crate) fn error_status() -> EffectsStatus {
     empty_status(|semantics, issues, omitted| EffectsStatus::Error {
         semantics,
         issues,
