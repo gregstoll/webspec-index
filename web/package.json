@@ -4,8 +4,11 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "prepare:wasm": "node scripts/prepare.mjs wasm",
+    "prepare:db": "node scripts/prepare.mjs db",
+    "dev": "npm run prepare:wasm && vite",
+    "build": "npm run prepare:wasm && tsc --noEmit && vite build",
+    "build:mock": "VITE_BACKEND=mock tsc --noEmit && VITE_BACKEND=mock vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
