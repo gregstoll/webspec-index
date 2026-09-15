@@ -1,0 +1,141 @@
+/* Design tokens: light theme defaults, dark overrides via prefers-color-scheme.
+   --theme-* are also patched by the manual toggle (data-theme attribute on <html>). */
+
+:root,
+[data-theme="light"] {
+  /* Surface */
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-border: #d0d5dd;
+  --color-border-subtle: #e8ebef;
+
+  /* Text */
+  --color-text: #111318;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #6b7280;
+  --color-link: #1d4ed8;
+  --color-link-visited: #5b21b6;
+
+  /* Accent */
+  --color-accent: #1d4ed8;
+  --color-accent-hover: #1e40af;
+  --color-accent-subtle: #dbeafe;
+
+  /* Status */
+  --color-error: #b91c1c;
+  --color-error-subtle: #fee2e2;
+  --color-success: #15803d;
+
+  /* Syntax / type badges */
+  --color-badge-algorithm: #7c3aed;
+  --color-badge-algorithm-bg: #ede9fe;
+  --color-badge-heading: #1d4ed8;
+  --color-badge-heading-bg: #dbeafe;
+  --color-badge-definition: #0369a1;
+  --color-badge-definition-bg: #e0f2fe;
+  --color-badge-idl: #065f46;
+  --color-badge-idl-bg: #d1fae5;
+  --color-badge-prose: #374151;
+  --color-badge-prose-bg: #f3f4f6;
+
+  /* Spacing scale (4-pt grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  /* Radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 3px var(--color-accent-subtle), 0 0 0 1px var(--color-accent);
+
+  /* Monospace */
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Content column */
+  --content-width: 72ch;
+  --layout-max: 90rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #0f1117;
+    --color-surface: #1a1d27;
+    --color-border: #2e3344;
+    --color-border-subtle: #232636;
+
+    --color-text: #e8eaf0;
+    --color-text-secondary: #9ba3b4;
+    --color-text-muted: #6b7280;
+    --color-link: #60a5fa;
+    --color-link-visited: #a78bfa;
+
+    --color-accent: #3b82f6;
+    --color-accent-hover: #60a5fa;
+    --color-accent-subtle: #1e3a5f;
+
+    --color-error: #f87171;
+    --color-error-subtle: #450a0a;
+    --color-success: #4ade80;
+
+    --color-badge-algorithm: #a78bfa;
+    --color-badge-algorithm-bg: #2d1f4e;
+    --color-badge-heading: #60a5fa;
+    --color-badge-heading-bg: #1e3a5f;
+    --color-badge-definition: #38bdf8;
+    --color-badge-definition-bg: #0c2a3f;
+    --color-badge-idl: #34d399;
+    --color-badge-idl-bg: #052e16;
+    --color-badge-prose: #9ba3b4;
+    --color-badge-prose-bg: #1f2937;
+  }
+}
+
+[data-theme="dark"] {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d27;
+  --color-border: #2e3344;
+  --color-border-subtle: #232636;
+
+  --color-text: #e8eaf0;
+  --color-text-secondary: #9ba3b4;
+  --color-text-muted: #6b7280;
+  --color-link: #60a5fa;
+  --color-link-visited: #a78bfa;
+
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-subtle: #1e3a5f;
+
+  --color-error: #f87171;
+  --color-error-subtle: #450a0a;
+  --color-success: #4ade80;
+
+  --color-badge-algorithm: #a78bfa;
+  --color-badge-algorithm-bg: #2d1f4e;
+  --color-badge-heading: #60a5fa;
+  --color-badge-heading-bg: #1e3a5f;
+  --color-badge-definition: #38bdf8;
+  --color-badge-definition-bg: #0c2a3f;
+  --color-badge-idl: #34d399;
+  --color-badge-idl-bg: #052e16;
+  --color-badge-prose: #9ba3b4;
+  --color-badge-prose-bg: #1f2937;
+}
