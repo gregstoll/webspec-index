@@ -12,6 +12,7 @@ pub mod effects;
 pub mod export;
 #[cfg(feature = "native")]
 pub mod fetch;
+pub mod flow;
 pub mod format;
 pub mod ietf;
 #[cfg(feature = "native")]
@@ -1770,6 +1771,22 @@ pub async fn graph_section(
     )
 }
 
+/// Extract the control-flow graph of an algorithm section.
+///
+/// Ensures the spec is indexed (fetching if needed), then delegates to
+/// `flow::flow_from_conn`.  Returns `Ok(None)` when the section is not an
+/// algorithm or has no ordered-list steps.
+#[cfg(feature = "native")]
+pub async fn flow_section(spec_anchor: &str) -> Result<Option<model::FlowResult>> {
+    let (spec_name, anchor, base_url_hint) = parse_spec_anchor(spec_anchor)?;
+    let conn = db::open_or_create_db()?;
+    let registry = spec_registry::SpecRegistry::new();
+    let (_snapshot_id, spec_name) =
+        ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
+            .await?;
+    flow::flow_from_conn(&conn, &spec_name, &anchor)
+}
+
 /// Query dedicated WebIDL definitions.
 ///
 /// `query` supports:
@@ -3266,7 +3283,19 @@ mod tests {
                 ParsedSection {
                     anchor: "navigate".into(),
                     title: Some("Navigate".into()),
-                    content_text: Some("To **navigate** see [tree](https://dom.spec.whatwg.org/#concept-tree) and [w3c](https://www.w3.org/TR/css-grid-1/#grid).".into()),
+                    content_text: Some(
+                        concat!(
+                        "To **navigate** see [tree](https://dom.spec.whatwg.org/#concept-tree)",
+                        " and [w3c](https://www.w3.org/TR/css-grid-1/#grid):\n\n",
+                        "1. If the target is invalid:\n",
+                        "   1. Set result to null.\n",
+                        "   2. Return result.\n",
+                        "2. Otherwise:\n",
+                        "   1. Fetch the [tree](https://dom.spec.whatwg.org/#concept-tree) node.\n",
+                        "3. Return result.\n",
+                    )
+                        .into(),
+                    ),
                     section_type: SectionType::Algorithm,
                     parent_anchor: Some("browsing".into()),
                     prev_anchor: None,
@@ -3296,16 +3325,28 @@ mod tests {
         write::insert_refs_bulk(
             &conn,
             html_snap,
-            &[ParsedReference {
-                from_anchor: "navigate".into(),
-                to_spec: "DOM".into(),
-                to_anchor: "concept-tree".into(),
-                step_path: None,
-                step_text: None,
-                guard_path: Vec::new(),
-                call_site_id: None,
-                kind: RefKind::Prose,
-            }],
+            &[
+                ParsedReference {
+                    from_anchor: "navigate".into(),
+                    to_spec: "DOM".into(),
+                    to_anchor: "concept-tree".into(),
+                    step_path: None,
+                    step_text: None,
+                    guard_path: Vec::new(),
+                    call_site_id: None,
+                    kind: RefKind::Prose,
+                },
+                ParsedReference {
+                    from_anchor: "navigate".into(),
+                    to_spec: "DOM".into(),
+                    to_anchor: "concept-tree".into(),
+                    step_path: Some("2.1".into()),
+                    step_text: Some("Fetch the tree node.".into()),
+                    guard_path: Vec::new(),
+                    call_site_id: None,
+                    kind: RefKind::Step,
+                },
+            ],
         )
         .unwrap();
         conn

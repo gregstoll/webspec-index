@@ -1,0 +1,41 @@
+{
+  "nodes": 65,
+  "edges": 68,
+  "issues": [
+    "otherwise_without_if"
+  ],
+  "head_nodes": [
+    {
+      "id": "1",
+      "kind": "step"
+    },
+    {
+      "id": "2",
+      "kind": "step"
+    },
+    {
+      "id": "3",
+      "kind": "step"
+    },
+    {
+      "id": "4",
+      "kind": "step"
+    },
+    {
+      "id": "5",
+      "kind": "branch"
+    },
+    {
+      "id": "5.1",
+      "kind": "step"
+    }
+  ],
+  "head_edge_kinds": [
+    "next",
+    "next",
+    "next",
+    "next",
+    "then",
+    "next"
+  ]
+}

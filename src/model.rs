@@ -513,3 +513,76 @@ pub struct IdlEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idl_text: Option<String>,
 }
+
+// ─── Flow extraction types ────────────────────────────────────────────────────
+
+/// Control-flow graph of one algorithm section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowResult {
+    pub spec: String,
+    pub anchor: String,
+    pub nodes: Vec<FlowNode>,
+    pub edges: Vec<FlowEdge>,
+    pub issues: Vec<FlowIssue>,
+}
+
+/// One step (or synthesised node) in a control-flow graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowNode {
+    /// Dotted step path, e.g. `"5.2"`, or `"DOM#concept-tree"` for external call targets.
+    pub id: String,
+    pub kind: FlowNodeKind,
+    /// Plain text of the step, at most 120 chars (truncated with `…`).
+    pub text: String,
+    /// Algorithm invocations made from this step.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub calls: Vec<FlowCall>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowNodeKind {
+    Step,
+    Branch,
+    Loop,
+    Parallel,
+    Terminal,
+    External,
+}
+
+/// A cross-section algorithm invocation attached to a step.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowCall {
+    pub spec: String,
+    pub anchor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowEdge {
+    pub from: String,
+    pub to: String,
+    pub kind: FlowEdgeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowEdgeKind {
+    Next,
+    Then,
+    Else,
+    Loop,
+    Jump,
+    Unknown,
+    Call,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowIssue {
+    pub step: String,
+    pub code: String,
+    pub message: String,
+}

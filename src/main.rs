@@ -68,6 +68,12 @@ enum AnalyzeFormat {
     Searchfox,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+enum FlowOutputFormat {
+    Json,
+    Mermaid,
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum EffectsModeArg {
     Auto,
@@ -459,6 +465,29 @@ enum Command {
         graph_format: GraphOutputFormat,
     },
 
+    /// Extract the control-flow graph of an algorithm section
+    #[command(
+        long_about = "Extract the control-flow graph of an algorithm section.\n\n\
+        Parses the stored markdown steps and outgoing refs to produce a graph of\n\
+        nodes (steps, branches, loops, terminals) and edges (next, then, else, loop,\n\
+        jump, call).  Use --flow-format mermaid to get a Mermaid flowchart you can\n\
+        paste into documentation or a diagram tool.\n\n\
+        Examples:\n  \
+        webspec-index flow HTML#navigate\n  \
+        webspec-index flow HTML#navigate --flow-format mermaid"
+    )]
+    Flow {
+        /// Section identifier: SPEC#anchor or full URL
+        spec_anchor: String,
+
+        #[arg(
+            long,
+            default_value = "json",
+            help = "Flow output format: json or mermaid"
+        )]
+        flow_format: FlowOutputFormat,
+    },
+
     /// Query dedicated WebIDL definitions
     #[command(long_about = "Query structured WebIDL definitions.\n\n\
         Supports exact anchors and canonical names:\n  \
@@ -696,6 +725,7 @@ export-web --out DIR [--providers a,b] [--chunk-size N] [--max-size N] — write
 specs — list indexed/discovered spec names+URLs
 lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
+flow <SPEC#anchor|URL> [--flow-format json|mermaid]
 idl <Q|SPEC#anchor|URL> [-s SPEC] [-l N(20)] [--pr N] [--format json|markdown]
 SPEC#anchor examples: HTML#navigate, DOM#concept-tree, CSS-GRID#grid-container
 Full URL also works: https://html.spec.whatwg.org/#navigate
@@ -947,6 +977,27 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
                 GraphOutputFormat::Dot => {
                     print!("{}", format::graph_dot(&result));
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+
+        Command::Flow {
+            spec_anchor,
+            flow_format,
+        } => {
+            match webspec_index::flow_section(&spec_anchor).await? {
+                Some(result) => match flow_format {
+                    FlowOutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                    FlowOutputFormat::Mermaid => {
+                        print!("{}", format::flow_mermaid(&result));
+                    }
+                },
+                None => {
+                    eprintln!("no algorithm steps in {spec_anchor}");
+                    return Ok(ExitCode::FAILURE);
                 }
             }
             Ok(ExitCode::SUCCESS)

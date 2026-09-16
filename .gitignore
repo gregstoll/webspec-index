@@ -27,3 +27,4 @@ crates/webspec-index-wasm/target/
 crates/webspec-index-wasm/e2e/node_modules/
 crates/webspec-index-wasm/e2e/site/
 web/e2e/.artifacts/
+.superpowers/

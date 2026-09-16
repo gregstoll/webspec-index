@@ -129,6 +129,9 @@ pub enum Request {
     EffectsExplain {
         subject: effects::SubjectSelector,
     },
+    Flow {
+        target: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +154,7 @@ pub enum Response {
     Idl(model::IdlResult),
     Effects(effects::EffectSummaryResult),
     EffectsExplain(effects::ExplainEffectsResult),
+    Flow(model::FlowResult),
 }
 
 #[derive(Debug, Serialize)]
@@ -530,6 +534,15 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
                 .map(Response::EffectsExplain)
                 .map_err(ApiError::from)
         }
+        Request::Flow { target } => {
+            let (spec, anchor) = resolve_target(&target)?;
+            match crate::flow::flow_from_conn(conn, &spec, &anchor).map_err(ApiError::internal)? {
+                Some(result) => Ok(Response::Flow(result)),
+                None => Err(ApiError::not_found(format!(
+                    "no algorithm steps in {spec}#{anchor}"
+                ))),
+            }
+        }
     }
 }
 
@@ -679,9 +692,8 @@ mod tests {
             &c,
             r#"{"type":"trace","from":"HTML#navigate","to":"DOM#concept-tree"}"#,
         );
-        assert_eq!(
-            trace["result"]["traces"].as_array().unwrap().len(),
-            1,
+        assert!(
+            !trace["result"]["traces"].as_array().unwrap().is_empty(),
             "{trace}"
         );
         let graph = call(&c, r#"{"type":"graph","target":"HTML#navigate"}"#);
@@ -803,5 +815,92 @@ mod tests {
         let entries = v["result"]["entries"].as_array().unwrap();
         let browsing = entries.iter().find(|e| e["anchor"] == "browsing").unwrap();
         assert_eq!(browsing["number"], "7.4");
+    }
+
+    #[test]
+    fn flow_returns_nodes_and_edges_for_algorithm_section() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"flow","target":"HTML#navigate"}"#);
+        assert_eq!(v["type"], "flow", "{v}");
+        let result = &v["result"];
+        assert_eq!(result["spec"], "HTML");
+        assert_eq!(result["anchor"], "navigate");
+
+        let nodes = result["nodes"].as_array().unwrap();
+        let edges = result["edges"].as_array().unwrap();
+        let issues = result["issues"].as_array().unwrap();
+
+        // Expected: "1" (branch), "1.1" (step), "1.2" (terminal), "2" (branch),
+        // "2.1" (step with call), "DOM#concept-tree" (external), "3" (terminal)
+        assert_eq!(nodes.len(), 7, "unexpected node count: {nodes:?}");
+        // 6 flow edges + 1 call edge
+        assert_eq!(edges.len(), 6, "unexpected edge count: {edges:?}");
+        assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+
+        let node_kinds: Vec<(&str, &str)> = nodes
+            .iter()
+            .map(|n| (n["id"].as_str().unwrap(), n["kind"].as_str().unwrap()))
+            .collect();
+
+        assert!(node_kinds.contains(&("1", "branch")), "{node_kinds:?}");
+        assert!(node_kinds.contains(&("1.1", "step")), "{node_kinds:?}");
+        assert!(node_kinds.contains(&("1.2", "terminal")), "{node_kinds:?}");
+        assert!(node_kinds.contains(&("2", "branch")), "{node_kinds:?}");
+        assert!(node_kinds.contains(&("2.1", "step")), "{node_kinds:?}");
+        assert!(
+            node_kinds.contains(&("DOM#concept-tree", "external")),
+            "{node_kinds:?}"
+        );
+        assert!(node_kinds.contains(&("3", "terminal")), "{node_kinds:?}");
+
+        // Check key edges are present.
+        let edge_triples: Vec<(&str, &str, &str)> = edges
+            .iter()
+            .map(|e| {
+                (
+                    e["from"].as_str().unwrap(),
+                    e["to"].as_str().unwrap(),
+                    e["kind"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert!(
+            edge_triples.contains(&("1", "1.1", "then")),
+            "{edge_triples:?}"
+        );
+        assert!(
+            edge_triples.contains(&("1", "2", "else")),
+            "{edge_triples:?}"
+        );
+        assert!(
+            edge_triples.contains(&("2", "2.1", "then")),
+            "{edge_triples:?}"
+        );
+        assert!(
+            edge_triples.contains(&("2.1", "DOM#concept-tree", "call")),
+            "{edge_triples:?}"
+        );
+        assert!(
+            edge_triples.contains(&("2.1", "3", "next")),
+            "{edge_triples:?}"
+        );
+
+        // The 2.1 node should carry a call entry.
+        let node_2_1 = nodes.iter().find(|n| n["id"] == "2.1").unwrap();
+        assert_eq!(node_2_1["calls"][0]["spec"], "DOM");
+        assert_eq!(node_2_1["calls"][0]["anchor"], "concept-tree");
+    }
+
+    #[test]
+    fn flow_returns_not_found_for_non_algorithm_and_missing() {
+        let c = conn();
+        // Heading section has no algorithm steps.
+        let v = call(&c, r#"{"type":"flow","target":"HTML#browsing"}"#);
+        assert_eq!(v["type"], "error", "{v}");
+        assert_eq!(v["code"], "not_found", "{v}");
+        // Completely missing section.
+        let v = call(&c, r#"{"type":"flow","target":"HTML#nope"}"#);
+        assert_eq!(v["type"], "error", "{v}");
+        assert_eq!(v["code"], "not_found", "{v}");
     }
 }

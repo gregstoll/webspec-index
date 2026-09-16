@@ -7,6 +7,7 @@ Query WHATWG, W3C, and TC39 web specifications from the command line.
 - **Full-text search** across HTML, DOM, URL, CSS, ECMAScript, and 70+ other specifications
 - **Cross-reference tracking** — see incoming/outgoing references between spec sections
 - **Graph traversal** — build cross-reference graphs with JSON, Mermaid, or Graphviz DOT output
+- **Control-flow extraction** — `flow` command produces a flowchart of algorithm steps (branches, loops, terminals) with Mermaid export
 - **PR previews** — query spec sections as modified by an open WHATWG or TC39 proposal PR, with section-level diffs
 - **Auto URL indexing for whitelisted domains** — query non-hardcoded specs by URL
 - **Fast SQLite indexing** with FTS5 for instant queries

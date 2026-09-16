@@ -2,8 +2,9 @@
 
 use crate::effects::{Catalog, QueryWithEffects};
 use crate::model::{
-    AnchorsResult, ExistsResult, GraphResult, IdlResult, ListEntry, PrDiffResult, QueryResult,
-    RefEntry, RefsResult, SearchResult, TraceDetail, TraceHop, TraceResult,
+    AnchorsResult, ExistsResult, FlowEdgeKind, FlowNodeKind, FlowResult, GraphResult, IdlResult,
+    ListEntry, PrDiffResult, QueryResult, RefEntry, RefsResult, SearchResult, TraceDetail,
+    TraceHop, TraceResult,
 };
 
 #[cfg(test)]
@@ -490,6 +491,71 @@ pub fn graph(result: &GraphResult) -> String {
 
 fn escape_mermaid_label(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Render a `FlowResult` as a Mermaid `flowchart TD`.
+///
+/// Node shapes by kind:
+/// - `branch`   → `{diamond}`
+/// - `terminal` → `([capsule])`
+/// - `external` → `[[double-rect]]`
+/// - everything else → `[rectangle]`
+///
+/// Edge kinds:
+/// - `unknown` → dotted `-.->`
+/// - all others → solid `-->` with the kind as an optional label
+pub fn flow_mermaid(result: &FlowResult) -> String {
+    let mut out = String::from("flowchart TD\n");
+    let mut id_map = std::collections::HashMap::new();
+
+    // Assign short ids and render node shapes.
+    for (idx, node) in result.nodes.iter().enumerate() {
+        let mid = format!("n{idx}");
+        id_map.insert(node.id.clone(), mid.clone());
+        let label = escape_mermaid_label(&node.text);
+        let shape = match node.kind {
+            FlowNodeKind::Branch => format!("{mid}{{\"{label}\"}}"),
+            FlowNodeKind::Terminal => format!("{mid}([\"{label}\"])"),
+            FlowNodeKind::External => format!("{mid}{{\"{label}\"}}"),
+            _ => format!("{mid}[\"{label}\"]"),
+        };
+        out.push_str(&format!("  {shape}\n"));
+    }
+
+    // Render edges.
+    for edge in &result.edges {
+        let Some(from) = id_map.get(&edge.from) else {
+            continue;
+        };
+        let Some(to) = id_map.get(&edge.to) else {
+            continue;
+        };
+        match edge.kind {
+            FlowEdgeKind::Unknown => {
+                out.push_str(&format!("  {from} -.-> {to}\n"));
+            }
+            FlowEdgeKind::Call => {
+                out.push_str(&format!("  {from} -->|call| {to}\n"));
+            }
+            FlowEdgeKind::Then => {
+                out.push_str(&format!("  {from} -->|then| {to}\n"));
+            }
+            FlowEdgeKind::Else => {
+                out.push_str(&format!("  {from} -->|else| {to}\n"));
+            }
+            FlowEdgeKind::Loop => {
+                out.push_str(&format!("  {from} -->|loop| {to}\n"));
+            }
+            FlowEdgeKind::Jump => {
+                out.push_str(&format!("  {from} -->|jump| {to}\n"));
+            }
+            FlowEdgeKind::Next => {
+                out.push_str(&format!("  {from} --> {to}\n"));
+            }
+        }
+    }
+
+    out
 }
 
 fn escape_dot_label(s: &str) -> String {

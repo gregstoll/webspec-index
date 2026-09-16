@@ -1,0 +1,39 @@
+{
+  "nodes": 31,
+  "edges": 36,
+  "issues": [],
+  "head_nodes": [
+    {
+      "id": "1",
+      "kind": "step"
+    },
+    {
+      "id": "2",
+      "kind": "step"
+    },
+    {
+      "id": "3",
+      "kind": "branch"
+    },
+    {
+      "id": "4",
+      "kind": "branch"
+    },
+    {
+      "id": "4.1",
+      "kind": "step"
+    },
+    {
+      "id": "4.2",
+      "kind": "step"
+    }
+  ],
+  "head_edge_kinds": [
+    "next",
+    "next",
+    "then",
+    "then",
+    "next",
+    "next"
+  ]
+}
