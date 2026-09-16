@@ -324,6 +324,40 @@ fn read_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<RefEdge> {
     })
 }
 
+/// Return outgoing step-refs from a section whose targets are indexed
+/// `algorithm` sections.  Executes one SQL query joining refs → specs →
+/// snapshots → sections; DISTINCT handles specs with multiple hash snapshots.
+pub fn get_outgoing_algorithm_calls(
+    conn: &Connection,
+    snapshot_id: i64,
+    from_anchor: &str,
+) -> Result<Vec<RefEdge>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT r.to_spec, r.to_anchor,
+                r.step_path, r.step_text, r.guard_path, r.call_site_id, r.kind
+         FROM refs r
+         JOIN specs target_sp ON r.to_spec = target_sp.name
+         JOIN snapshots target_sn
+              ON target_sn.spec_id = target_sp.id
+              AND target_sn.pr_number IS NULL
+              AND target_sn.sha LIKE 'hash:%'
+         JOIN sections target_sec
+              ON target_sec.snapshot_id = target_sn.id
+              AND target_sec.anchor = r.to_anchor
+              AND target_sec.section_type = 'algorithm'
+         WHERE r.snapshot_id = ?1
+           AND r.from_anchor = ?2
+           AND r.kind = 'step'
+           AND r.step_path IS NOT NULL",
+    )?;
+
+    let edges = stmt
+        .query_map((snapshot_id, from_anchor), read_edge)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(edges)
+}
+
 /// Get outgoing references from a section, with call-site detail.
 /// `kind` restricts to one reference kind; None returns every reference,
 /// including legacy rows indexed before kinds existed.

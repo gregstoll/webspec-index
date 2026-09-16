@@ -690,26 +690,11 @@ pub fn flow_from_conn(
         None => return Ok(None),
     };
 
-    // Fetch outgoing step-refs (those with a step_path are algorithm invocations).
-    // Only keep calls whose target is an indexed section of type `algorithm`.
-    let ref_edges =
-        db::queries::get_outgoing_edges(conn, snapshot_id, anchor, Some(model::RefKind::Step))?;
+    // Fetch outgoing step-refs whose targets are indexed algorithm sections.
+    // One SQL query (refs ⋈ specs ⋈ snapshots ⋈ sections) replaces N per-ref lookups.
+    let ref_edges = db::queries::get_outgoing_algorithm_calls(conn, snapshot_id, anchor)?;
     let calls: Vec<model::RefEntry> = ref_edges
         .into_iter()
-        .filter(|e| e.step_path.is_some())
-        .filter(|e| {
-            // Look up the target's snapshot and section to confirm it is an algorithm.
-            db::queries::get_snapshot(conn, &e.spec)
-                .ok()
-                .flatten()
-                .and_then(|target_snap| {
-                    db::queries::get_section(conn, target_snap, &e.anchor)
-                        .ok()
-                        .flatten()
-                })
-                .map(|s| s.section_type == model::SectionType::Algorithm)
-                .unwrap_or(false)
-        })
         .map(|e| model::RefEntry {
             spec: e.spec,
             anchor: e.anchor,
