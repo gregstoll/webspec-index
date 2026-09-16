@@ -129,12 +129,14 @@ pub fn input_fingerprint(options: &EffectsOptions) -> Result<String, RequestErro
     let catalog = default_catalog(&options.rule_paths)?;
     let tx = conn.unchecked_transaction().map_err(failure)?;
     let generation = storage::generation(&tx).map_err(failure)?;
+    // A stored graph and a missing one must fingerprint differently: an LSP that
+    // cached an unavailable result has to notice when the graph gets built.
     match storage::load_graph_meta(&tx).map_err(failure)? {
-        Some(meta) => Ok(format!("{}:{}", meta.semantic_key, meta.generation)),
+        Some(meta) => Ok(format!("{}:{}:graph", meta.semantic_key, meta.generation)),
         None => {
             let m = manifest(&tx, &catalog, AnalysisScope::All, options)?;
             let sk = graph_semantic_key(&m, generation)?;
-            Ok(format!("{sk}:{generation}"))
+            Ok(format!("{sk}:{generation}:none"))
         }
     }
 }

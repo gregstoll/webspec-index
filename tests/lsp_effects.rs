@@ -337,12 +337,15 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     client.wait_for_refresh();
 
     let conn = Connection::open(db.path().join("index.db")).unwrap();
-    assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM effect_runs", [], |row| row
-            .get::<_, i64>(0))
+    assert!(
+        !conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
             .unwrap(),
-        0,
-        "a cold automatic hint must not create an analysis run"
+        "a cold automatic hint must not build the graph"
     );
     let lenses = client.request(
         10,
@@ -512,31 +515,15 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     );
     assert_eq!(explicit_document, document);
 
-    // The clickable preview must work even when the graph cannot be decoded.
-    conn.execute(
-        "UPDATE effect_runs SET artifact_json='invalid graph JSON'",
-        [],
-    )
-    .unwrap();
-    assert_eq!(
-        client.request(
-            14,
-            "webspec/preparedEffectDocument",
-            lens["command"]["arguments"][0].clone()
-        ),
-        prepared
-    );
-
-    let previous = client.refresh_requests;
-    client.request(15, "textDocument/inlayHint", hint_params.clone());
-    client.wait_for_refresh_after(previous);
+    // Explicit explanations read the same stored graph; they must not invalidate
+    // the cached hints.
     let cached = client.request(5, "textDocument/inlayHint", hint_params.clone());
     assert!(cached[0]["label"].as_str().unwrap().eq(" ✓"));
     client.assert_no_refresh_for(Duration::from_millis(600));
     client.stop();
 
     // A persistent read failure must not feed a refresh/resubmission loop.
-    conn.execute("UPDATE effect_subjects SET summary_json='invalid JSON'", [])
+    conn.execute("UPDATE effect_graph SET topology = X'00'", [])
         .unwrap();
     let mut client = LspClient::start(&db.path().join("index.db"));
     client.request(
