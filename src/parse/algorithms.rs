@@ -272,11 +272,21 @@ fn flush_content_html(
         return;
     }
 
+    // Every line after the first belongs to this step, so it needs list-continuation
+    // indentation: block content such as property tables and notes would otherwise
+    // land at column zero and terminate the list.
     if *first_chunk {
-        result.push_str(&md);
+        let mut lines = md.lines();
+        if let Some(first) = lines.next() {
+            result.push_str(first);
+        }
+        let rest: Vec<&str> = lines.collect();
+        if !rest.is_empty() {
+            result.push('\n');
+            result.push_str(&indent_lines(&rest.join("\n"), indent + 1));
+        }
         *first_chunk = false;
     } else {
-        // Continuation content after a nested list needs indentation
         result.push_str("\n\n");
         let indented = indent_lines(&md, indent + 1);
         result.push_str(&indented);
@@ -553,6 +563,55 @@ mod tests {
             step3_index > note_index,
             "Step 3 should appear after the note"
         );
+    }
+
+    #[test]
+    fn block_content_inside_a_nested_step_keeps_list_indentation() {
+        let html = r#"
+            <ol>
+                <li><p>In parallel, run these steps:</p>
+                    <ol>
+                        <li>
+                            <p>Let <var>documentState</var> be a new document state with</p>
+
+                            <dl class="props"><dt>resource</dt><dd><var>documentResource</var></dd></dl>
+
+                            <p class="note">The name can get cleared later.</p>
+                        </li>
+                        <li><p>If <var>url</var> is null, return.</p></li>
+                    </ol>
+                </li>
+            </ol>
+        "#;
+
+        let fragment = Html::parse_fragment(html);
+        let selector = Selector::parse("ol").unwrap();
+        let ol = fragment.select(&selector).next().unwrap();
+
+        let result = render_algorithm_ol(&ol, &test_converter());
+        let lines: Vec<&str> = result.lines().collect();
+
+        let table = lines
+            .iter()
+            .find(|l| l.contains("| resource |"))
+            .expect("table row present");
+        let note = lines
+            .iter()
+            .find(|l| l.contains("> **Note:**"))
+            .expect("note present");
+        let step2 = lines
+            .iter()
+            .find(|l| l.contains("2. If *url* is null"))
+            .expect("second step present");
+        assert!(
+            table.starts_with("        |"),
+            "table must stay inside step 1: {result}"
+        );
+        assert!(
+            note.starts_with("        >"),
+            "note must stay inside step 1: {result}"
+        );
+        assert!(step2.starts_with("    2. "), "{result}");
     }
 
     #[test]
