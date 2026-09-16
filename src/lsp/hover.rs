@@ -43,6 +43,7 @@ mod tests {
             anchor: "navigate".to_string(),
             url: "https://html.spec.whatwg.org/#navigate".to_string(),
             title: title.map(|s| s.to_string()),
+            number: None,
             section_type: section_type.to_string(),
             content: content.map(|s| s.to_string()),
             navigation: Navigation {

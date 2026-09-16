@@ -47,6 +47,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             prev_anchor   TEXT,
             next_anchor   TEXT,
             depth         INTEGER,
+            number        TEXT,
             UNIQUE(snapshot_id, anchor)
         );
 
@@ -180,6 +181,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "refs", "guard_path", "TEXT")?;
     ensure_column(conn, "refs", "call_site_id", "TEXT")?;
     ensure_column(conn, "refs", "kind", "TEXT")?;
+    ensure_column(conn, "sections", "number", "TEXT")?;
     super::effects::initialize(conn)?;
     Ok(())
 }

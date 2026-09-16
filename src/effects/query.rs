@@ -177,6 +177,7 @@ mod tests {
             anchor: "algorithm".into(),
             url: "https://example.test/#algorithm".into(),
             title: None,
+            number: None,
             section_type: "Algorithm".into(),
             content: Some("Do the thing.".into()),
             navigation: Navigation {

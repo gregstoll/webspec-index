@@ -775,4 +775,33 @@ mod tests {
             serde_json::to_string(&ApiErrorCode::InvalidRequest).unwrap()
         );
     }
+
+    #[test]
+    fn query_result_carries_number_for_heading() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"query","target":"HTML#browsing"}"#);
+        assert_eq!(v["type"], "query", "{v}");
+        assert_eq!(v["result"]["number"], "7.4");
+    }
+
+    #[test]
+    fn query_result_number_absent_for_algorithm() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"query","target":"HTML#navigate"}"#);
+        assert_eq!(v["type"], "query", "{v}");
+        assert!(
+            v["result"].get("number").is_none(),
+            "algorithm has no number: {v}"
+        );
+    }
+
+    #[test]
+    fn list_entries_carry_number() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"list","spec":"HTML"}"#);
+        assert_eq!(v["type"], "list", "{v}");
+        let entries = v["result"]["entries"].as_array().unwrap();
+        let browsing = entries.iter().find(|e| e["anchor"] == "browsing").unwrap();
+        assert_eq!(browsing["number"], "7.4");
+    }
 }

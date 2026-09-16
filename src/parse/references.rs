@@ -309,6 +309,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             },
             ParsedSection {
                 anchor: "section2".to_string(),
@@ -319,6 +320,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             },
         ];
 
@@ -348,6 +350,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -373,6 +376,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -398,6 +402,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         // SpecRegistry already includes WhatwgProvider
@@ -428,6 +433,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -457,6 +463,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             },
             ParsedSection {
                 anchor: "child".to_string(),
@@ -467,6 +474,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(3),
+                number: None,
             },
         ];
 
@@ -501,6 +509,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: None,
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -558,6 +567,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "navigation-resource".to_string(),
@@ -568,6 +578,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "navigation-response".to_string(),
@@ -578,6 +589,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
         ];
 
@@ -613,6 +625,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -643,6 +656,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -670,6 +684,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
 
         let registry = SpecRegistry::new();
@@ -689,6 +704,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: None,
+            number: None,
         }
     }
 

@@ -245,7 +245,7 @@ pub fn get_section(
     anchor: &str,
 ) -> Result<Option<ParsedSection>> {
     let result = conn.query_row(
-        "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth
+        "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number
          FROM sections
          WHERE snapshot_id = ?1 AND anchor = ?2",
         (snapshot_id, anchor),
@@ -260,6 +260,7 @@ pub fn get_section(
                 prev_anchor: row.get(5)?,
                 next_anchor: row.get(6)?,
                 depth: row.get(7)?,
+                number: row.get(8)?,
             })
         },
     );
@@ -271,21 +272,24 @@ pub fn get_section(
     }
 }
 
+/// (anchor, title, number) for a child section.
+pub type ChildEntry = (String, Option<String>, Option<String>);
+
 /// Get child sections (sections with this as parent)
 pub fn get_children(
     conn: &Connection,
     snapshot_id: i64,
     parent_anchor: &str,
-) -> Result<Vec<(String, Option<String>)>> {
+) -> Result<Vec<ChildEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT anchor, title FROM sections
+        "SELECT anchor, title, number FROM sections
          WHERE snapshot_id = ?1 AND parent_anchor = ?2
          ORDER BY rowid",
     )?;
 
     let children = stmt
         .query_map((snapshot_id, parent_anchor), |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -486,7 +490,7 @@ pub fn find_anchors(
 /// List all headings in a spec
 pub fn list_headings(conn: &Connection, snapshot_id: i64) -> Result<Vec<ParsedSection>> {
     let mut stmt = conn.prepare(
-        "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth
+        "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number
          FROM sections
          WHERE snapshot_id = ?1 AND section_type = 'heading'
          ORDER BY rowid",
@@ -512,6 +516,7 @@ pub fn list_headings(conn: &Connection, snapshot_id: i64) -> Result<Vec<ParsedSe
                 prev_anchor: row.get(5)?,
                 next_anchor: row.get(6)?,
                 depth: row.get(7)?,
+                number: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -638,6 +643,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: Some("details".to_string()),
                 depth: Some(2),
+                number: None,
             },
             ParsedSection {
                 anchor: "details".to_string(),
@@ -648,6 +654,7 @@ mod tests {
                 prev_anchor: Some("intro".to_string()),
                 next_anchor: None,
                 depth: Some(3),
+                number: None,
             },
         ];
 
@@ -941,6 +948,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
                 ParsedSection {
                     anchor: "sec-b".into(),
@@ -951,6 +959,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
             ],
         )
@@ -979,6 +988,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
                 ParsedSection {
                     anchor: "sec-d".into(),
@@ -989,6 +999,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
             ],
         )
@@ -1031,6 +1042,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
                 ParsedSection {
                     anchor: "sec-b".into(),
@@ -1041,6 +1053,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
             ],
         )
@@ -1069,6 +1082,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
                 ParsedSection {
                     anchor: "sec-b".into(),
@@ -1079,6 +1093,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
             ],
         )

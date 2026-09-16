@@ -190,6 +190,11 @@ pub fn list(entries: &[ListEntry]) -> String {
             String::new()
         };
 
+        let number_prefix = entry
+            .number
+            .as_deref()
+            .map_or(String::new(), |n| format!("{} ", n));
+
         md.push_str(&format!(
             "{}- `{}`{}\n",
             indent,
@@ -197,7 +202,7 @@ pub fn list(entries: &[ListEntry]) -> String {
             entry
                 .title
                 .as_deref()
-                .map_or(String::new(), |t| format!(" — {}", t)),
+                .map_or(String::new(), |t| format!(" — {}{}", number_prefix, t)),
         ));
     }
 
@@ -676,6 +681,7 @@ mod tests {
             anchor: "test-section".to_string(),
             url: String::new(),
             title: None,
+            number: None,
             content: None,
             section_type: "Heading".to_string(),
             navigation: Navigation {
@@ -703,12 +709,14 @@ mod tests {
             anchor: "navigate".to_string(),
             url: String::new(),
             title: Some("navigate".to_string()),
+            number: None,
             content: Some("To **navigate** a [navigable](#foo)".to_string()),
             section_type: "Algorithm".to_string(),
             navigation: Navigation {
                 parent: Some(NavEntry {
                     anchor: "section-7".to_string(),
                     title: None,
+                    number: None,
                 }),
                 prev: None,
                 next: None,
@@ -733,6 +741,7 @@ mod tests {
             anchor: "foo".to_string(),
             url: String::new(),
             title: None,
+            number: None,
             content: None,
             section_type: "Definition".to_string(),
             navigation: Navigation {
@@ -743,10 +752,12 @@ mod tests {
                     NavEntry {
                         anchor: "child1".to_string(),
                         title: Some("First Child".to_string()),
+                        number: None,
                     },
                     NavEntry {
                         anchor: "child2".to_string(),
                         title: None,
+                        number: None,
                     },
                 ],
             },
@@ -842,12 +853,14 @@ mod tests {
                 title: Some("Introduction".to_string()),
                 depth: 2,
                 parent: None,
+                number: None,
             },
             ListEntry {
                 anchor: "algorithms".to_string(),
                 title: Some("Algorithms".to_string()),
                 depth: 3,
                 parent: Some("intro".to_string()),
+                number: None,
             },
         ];
 

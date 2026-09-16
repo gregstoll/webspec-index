@@ -56,6 +56,9 @@ pub struct ParsedSection {
     pub prev_anchor: Option<String>,
     pub next_anchor: Option<String>,
     pub depth: Option<u8>, // 2-6 for headings
+    /// Section number extracted from span.secno / span.secnum, e.g. "7.4.2".
+    /// Only set for heading and algorithm (emu-clause) sections; None otherwise.
+    pub number: Option<String>,
 }
 
 /// Where in a section a cross-reference occurs. Only `Step` references are
@@ -160,6 +163,8 @@ pub struct QueryResult {
     pub anchor: String,
     pub url: String,
     pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
     #[serde(rename = "type")]
     pub section_type: String,
     pub content: Option<String>,
@@ -180,6 +185,8 @@ pub struct Navigation {
 pub struct NavEntry {
     pub anchor: String,
     pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -267,6 +274,8 @@ pub struct ListEntry {
     pub depth: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
 }
 
 /// JSON output for spec_urls command

@@ -84,6 +84,31 @@ fn extract_heading_title(element: &scraper::ElementRef) -> Option<String> {
     }
 }
 
+/// Extract the section number from a heading element.
+/// Returns the text of the first `span.secno` (Bikeshed/Wattsi) or `span.secnum` (ecmarkup),
+/// trimmed and with a trailing `.` removed.
+/// Examples: "4.7.1." → "4.7.1", "7.1.17" → "7.1.17", "§ 4.7.1." → "§ 4.7.1".
+pub(crate) fn extract_heading_number(element: &scraper::ElementRef) -> Option<String> {
+    for child in element.children() {
+        if let Some(elem) = scraper::ElementRef::wrap(child) {
+            let classes: Vec<_> = elem.value().classes().collect();
+            if classes.contains(&"secno") || classes.contains(&"secnum") {
+                let text = elem.text().collect::<String>();
+                let text = text.trim();
+                if text.is_empty() {
+                    return None;
+                }
+                let text = text.strip_suffix('.').unwrap_or(text).trim().to_string();
+                if text.is_empty() {
+                    return None;
+                }
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
 /// Get the depth (2-6) from a heading tag name
 fn heading_depth(tag: &str) -> Option<u8> {
     match tag {
@@ -107,6 +132,7 @@ pub fn parse_heading_element(
     };
 
     let title = extract_heading_title(element);
+    let number = extract_heading_number(element);
     let depth = heading_depth(element.value().name())
         .ok_or_else(|| anyhow::anyhow!("Invalid heading tag: {}", element.value().name()))?;
 
@@ -122,6 +148,7 @@ pub fn parse_heading_element(
         prev_anchor: None,
         next_anchor: None,
         depth: Some(depth),
+        number,
     }))
 }
 
@@ -188,6 +215,7 @@ pub fn parse_dfn_element(
         prev_anchor: None,
         next_anchor: None,
         depth: None,
+        number: None,
     }))
 }
 
@@ -432,6 +460,7 @@ pub fn parse_anchor_element(
         prev_anchor: None,
         next_anchor: None,
         depth: None,
+        number: None,
     }))
 }
 
@@ -453,13 +482,14 @@ pub fn parse_emu_clause_element(
         .filter_map(scraper::ElementRef::wrap)
         .find(|c| c.value().name() == "h1");
 
-    let (title, depth) = match h1 {
+    let (title, depth, number) = match h1 {
         Some(h1_elem) => {
             let title = extract_heading_title(&h1_elem);
             let depth = extract_secnum_depth(&h1_elem);
-            (title, depth)
+            let number = extract_heading_number(&h1_elem);
+            (title, depth, number)
         }
-        None => (None, None),
+        None => (None, None, None),
     };
 
     // Classify: if the emu-clause has a type attribute, it's an algorithm-like operation
@@ -480,6 +510,7 @@ pub fn parse_emu_clause_element(
         prev_anchor: None,
         next_anchor: None,
         depth,
+        number,
     }))
 }
 
@@ -523,6 +554,7 @@ pub fn parse_emu_production_element(
         prev_anchor: None,
         next_anchor: None,
         depth: None,
+        number: None,
     }))
 }
 
@@ -789,6 +821,7 @@ pub fn collect_idl(html: &str) -> Result<Vec<ParsedSection>> {
             prev_anchor: None,   // Will be computed in tree building
             next_anchor: None,   // Will be computed in tree building
             depth: None,         // IDL types don't have depth
+            number: None,
         });
     }
 
@@ -825,6 +858,7 @@ pub fn collect_algorithms(html: &str) -> Result<Vec<ParsedSection>> {
             prev_anchor: None,   // Will be computed in tree building
             next_anchor: None,   // Will be computed in tree building
             depth: None,         // Algorithms don't have depth
+            number: None,
         });
     }
 
@@ -871,6 +905,7 @@ pub fn collect_definitions(html: &str) -> Result<Vec<ParsedSection>> {
             prev_anchor: None,   // Will be computed in tree building
             next_anchor: None,   // Will be computed in tree building
             depth: None,         // Definitions don't have depth
+            number: None,
         });
     }
 
@@ -2164,5 +2199,73 @@ mod tests {
             line_count,
             content
         );
+    }
+
+    #[test]
+    fn extract_heading_number_bikeshed_secno() {
+        // Bikeshed/Wattsi span.secno with trailing dot
+        let html = r#"<h3 id="trees"><span class="secno">4.7.1. </span>Trees</h3>"#;
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("h3").unwrap();
+        let elem = document.select(&selector).next().unwrap();
+        assert_eq!(
+            extract_heading_number(&elem),
+            Some("4.7.1".to_string()),
+            "trailing dot and space should be stripped"
+        );
+    }
+
+    #[test]
+    fn extract_heading_number_ecmarkup_secnum() {
+        // ecmarkup span.secnum without trailing dot
+        let html = r#"<h1><span class="secnum">7.1.17</span>ToNumber</h1>"#;
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("h1").unwrap();
+        let elem = document.select(&selector).next().unwrap();
+        assert_eq!(
+            extract_heading_number(&elem),
+            Some("7.1.17".to_string()),
+            "number without trailing dot should survive unchanged"
+        );
+    }
+
+    #[test]
+    fn extract_heading_number_absent() {
+        // No secno/secnum span: returns None
+        let html = r#"<h2 id="intro">Introduction</h2>"#;
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("h2").unwrap();
+        let elem = document.select(&selector).next().unwrap();
+        assert_eq!(extract_heading_number(&elem), None);
+    }
+
+    #[test]
+    fn parse_heading_element_carries_number() {
+        // A heading with a secno should have its number extracted.
+        let html = r#"<h2 id="browsing"><span class="secno">7.4. </span>Browsing the web</h2>"#;
+        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("h2[id]").unwrap();
+        let elem = document.select(&selector).next().unwrap();
+        let section = parse_heading_element(&elem, &converter).unwrap().unwrap();
+        assert_eq!(section.number, Some("7.4".to_string()));
+        assert_eq!(section.title, Some("Browsing the web".to_string()));
+    }
+
+    #[test]
+    fn parse_emu_clause_element_carries_number() {
+        // An emu-clause with a secnum in its h1 should have its number extracted.
+        let html = r#"<emu-clause id="sec-tostringnumber" type="abstract operation">
+          <h1><span class="secnum">7.1.17</span>ToString(<var>argument</var>)</h1>
+          <p>Converts argument to a String value.</p>
+        </emu-clause>"#;
+        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let document = Html::parse_document(html);
+        let selector = Selector::parse("emu-clause[id]").unwrap();
+        let elem = document.select(&selector).next().unwrap();
+        let section = parse_emu_clause_element(&elem, &converter)
+            .unwrap()
+            .unwrap();
+        assert_eq!(section.number, Some("7.1.17".to_string()));
     }
 }

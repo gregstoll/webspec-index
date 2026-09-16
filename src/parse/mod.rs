@@ -144,6 +144,7 @@ fn parse_ietf_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec<Pa
             prev_anchor: None,
             next_anchor: None,
             depth: Some(depth),
+            number: None,
         });
     }
 

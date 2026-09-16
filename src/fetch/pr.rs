@@ -390,6 +390,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
         )
         .unwrap();
@@ -448,6 +449,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
         )
         .unwrap();
@@ -520,6 +522,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
             references: vec![],
             idl_definitions: vec![ParsedIdlDefinition {
@@ -541,6 +544,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
             references: vec![ParsedReference::prose("sec-b", "DOM", "concept-tree")],
             idl_definitions: vec![idl_b()],
@@ -558,6 +562,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
             references: vec![ParsedReference::prose("sec-b", "DOM", "concept-tree")],
             idl_definitions: vec![idl_b()],

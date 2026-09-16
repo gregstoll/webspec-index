@@ -178,9 +178,10 @@ fn assemble_query_result(
 
     let children = db::queries::get_children(conn, snapshot_id, &section.anchor)?
         .iter()
-        .map(|(child_anchor, title)| model::NavEntry {
+        .map(|(child_anchor, title, number)| model::NavEntry {
             anchor: child_anchor.clone(),
             title: title.clone(),
+            number: number.clone(),
         })
         .collect();
 
@@ -191,6 +192,7 @@ fn assemble_query_result(
                 .map(|s| model::NavEntry {
                     anchor: s.anchor,
                     title: s.title,
+                    number: s.number,
                 })
         }),
         prev: section.prev_anchor.as_ref().and_then(|p| {
@@ -199,6 +201,7 @@ fn assemble_query_result(
                 .map(|s| model::NavEntry {
                     anchor: s.anchor,
                     title: s.title,
+                    number: s.number,
                 })
         }),
         next: section.next_anchor.as_ref().and_then(|n| {
@@ -207,6 +210,7 @@ fn assemble_query_result(
                 .map(|s| model::NavEntry {
                     anchor: s.anchor,
                     title: s.title,
+                    number: s.number,
                 })
         }),
         children,
@@ -237,6 +241,7 @@ fn assemble_query_result(
         anchor: section.anchor,
         url,
         title: section.title,
+        number: section.number,
         section_type: section.section_type.as_str().to_string(),
         content: section.content_text,
         navigation,
@@ -269,6 +274,7 @@ fn heading_to_list_entry(h: &model::ParsedSection) -> model::ListEntry {
         title: h.title.clone(),
         depth: h.depth.unwrap_or(0),
         parent: h.parent_anchor.clone(),
+        number: h.number.clone(),
     }
 }
 
@@ -2502,6 +2508,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "dom-window-navigation".to_string(),
@@ -2512,6 +2519,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "dom-worker-navigation".to_string(),
@@ -2522,6 +2530,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "some-consumer".to_string(),
@@ -2532,6 +2541,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "dom-window-navigation-helper".to_string(),
@@ -2542,6 +2552,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
         ];
         write::insert_sections_bulk(&conn, html_snapshot, &html_sections).unwrap();
@@ -2555,6 +2566,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: None,
+            number: None,
         }];
         write::insert_sections_bulk(&conn, dom_snapshot, &dom_sections).unwrap();
 
@@ -2568,6 +2580,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
             ParsedSection {
                 anchor: "concept-relevant-global".to_string(),
@@ -2578,6 +2591,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: None,
+                number: None,
             },
         ];
         write::insert_sections_bulk(&conn, url_snapshot, &url_sections).unwrap();
@@ -3247,6 +3261,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(1),
+                    number: Some("7.4".into()),
                 },
                 ParsedSection {
                     anchor: "navigate".into(),
@@ -3257,6 +3272,7 @@ mod tests {
                     prev_anchor: None,
                     next_anchor: None,
                     depth: Some(2),
+                    number: None,
                 },
             ],
         )
@@ -3273,6 +3289,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(1),
+                number: Some("1.1".into()),
             }],
         )
         .unwrap();

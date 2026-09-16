@@ -111,8 +111,8 @@ pub fn insert_sections_bulk(
         {
             let mut stmt = tx.prepare(
             "INSERT OR IGNORE INTO sections
-             (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
 
             for section in sections {
@@ -126,6 +126,7 @@ pub fn insert_sections_bulk(
                     &section.prev_anchor,
                     &section.next_anchor,
                     section.depth,
+                    &section.number,
                 ))?;
             }
         }
@@ -415,6 +416,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             },
             ParsedSection {
                 anchor: "details".to_string(),
@@ -425,6 +427,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(3),
+                number: None,
             },
         ];
 
@@ -462,6 +465,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         };
 
         let target = insert_snapshot(&conn, spec_id, "sha-a", "2026-01-01T00:00:00Z").unwrap();
@@ -625,6 +629,7 @@ mod tests {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }];
         insert_sections_bulk(&conn, snapshot_id, &sections).unwrap();
 
@@ -698,6 +703,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
         )
         .unwrap();
@@ -725,6 +731,7 @@ mod tests {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             }],
         )
         .unwrap();

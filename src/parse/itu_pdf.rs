@@ -87,6 +87,7 @@ pub fn parse_itu_pdf(bytes: &[u8]) -> Result<Vec<ParsedSection>> {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(entry.level.min(255) as u8),
+            number: None,
         });
     }
 

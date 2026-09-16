@@ -41,6 +41,7 @@ fn main() {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(2),
+                number: None,
             },
             ParsedSection {
                 anchor: "navigate".into(),
@@ -56,6 +57,7 @@ fn main() {
                 prev_anchor: None,
                 next_anchor: None,
                 depth: Some(3),
+                number: None,
             },
         ],
     )
@@ -73,6 +75,7 @@ fn main() {
             prev_anchor: None,
             next_anchor: None,
             depth: Some(2),
+            number: None,
         }],
     )
     .expect("insert DOM sections");
