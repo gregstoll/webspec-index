@@ -46,12 +46,16 @@ fn main() {
             ParsedSection {
                 anchor: "navigate".into(),
                 title: Some("Navigate".into()),
-                content_text: Some(
-                    "To **navigate** a [navigable](https://html.spec.whatwg.org#navigable) \
-                     to a [tree](https://dom.spec.whatwg.org/#concept-tree):\n\n\
-                     1. Let x be y.\n2. Return."
-                        .into(),
-                ),
+                content_text: Some(concat!(
+                    "To **navigate** a [navigable](https://html.spec.whatwg.org#navigable)",
+                    " to a [tree](https://dom.spec.whatwg.org/#concept-tree):\n\n",
+                    "1. If the navigable is null:\n",
+                    "   1. Set result to null.\n",
+                    "   2. Return null.\n",
+                    "2. Otherwise:\n",
+                    "   1. Fetch the [concept tree](https://dom.spec.whatwg.org/#concept-tree) node.\n",
+                    "3. Return result.\n",
+                ).into()),
                 section_type: SectionType::Algorithm,
                 parent_anchor: Some("browsing".into()),
                 prev_anchor: None,
@@ -69,8 +73,8 @@ fn main() {
         &[ParsedSection {
             anchor: "concept-tree".into(),
             title: Some("Trees".into()),
-            content_text: None,
-            section_type: SectionType::Heading,
+            content_text: Some("1. Walk the tree.\n2. Return result.\n".into()),
+            section_type: SectionType::Algorithm,
             parent_anchor: None,
             prev_anchor: None,
             next_anchor: None,
@@ -87,8 +91,8 @@ fn main() {
             from_anchor: "navigate".into(),
             to_spec: "DOM".into(),
             to_anchor: "concept-tree".into(),
-            step_path: Some("1".into()),
-            step_text: Some("Let x be y.".into()),
+            step_path: Some("2.1".into()),
+            step_text: Some("Fetch the concept tree node.".into()),
             guard_path: vec![],
             call_site_id: None,
             kind: RefKind::Step,
