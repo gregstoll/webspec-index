@@ -573,3 +573,52 @@ code, pre, .mono {
 .effects-issue code {
   font-size: inherit;
 }
+
+/* Collapsible reference lists */
+.refs-section > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.refs-section > summary::-webkit-details-marker {
+  display: none;
+}
+.refs-section > summary h3 {
+  display: inline-block;
+  margin: 0;
+}
+.refs-section > summary h3::before {
+  content: '▸ ';
+  color: var(--color-text-muted);
+}
+.refs-section[open] > summary h3::before {
+  content: '▾ ';
+}
+
+/* Callout boxes for notes, examples, warnings and issues */
+.section-content blockquote[class^='markdown-alert-'] {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid var(--alert-color, var(--color-border));
+  background: color-mix(in srgb, var(--alert-color, var(--color-border)) 8%, transparent);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-style: normal;
+}
+.section-content blockquote[class^='markdown-alert-'] > p:first-child {
+  margin-top: 0;
+}
+.section-content blockquote[class^='markdown-alert-'] > p:last-child {
+  margin-bottom: 0;
+}
+.section-content blockquote.markdown-alert-note {
+  --alert-color: #2f6fdb;
+}
+.section-content blockquote.markdown-alert-tip {
+  --alert-color: #2e9a5b;
+}
+.section-content blockquote.markdown-alert-warning {
+  --alert-color: #d9922b;
+}
+.section-content blockquote.markdown-alert-important {
+  --alert-color: #c94a4a;
+}

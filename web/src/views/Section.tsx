@@ -209,13 +209,15 @@ function RefSection({ heading, refs }: RefSectionProps) {
   }
 
   return (
-    <div class="refs-section">
-      <h3>
-        {heading}{' '}
-        <span style={{ color: 'var(--color-text-muted)', fontWeight: 400, fontSize: 'var(--text-base)' }}>
-          ({refs.length})
-        </span>
-      </h3>
+    <details class="refs-section" open={refs.length <= 8}>
+      <summary>
+        <h3>
+          {heading}{' '}
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 400, fontSize: 'var(--text-base)' }}>
+            ({refs.length})
+          </span>
+        </h3>
+      </summary>
       {Array.from(bySpec.entries()).map(([spec, group]) => (
         <div key={spec} class="refs-group">
           <div class="refs-group-header">{spec}</div>
@@ -231,6 +233,6 @@ function RefSection({ heading, refs }: RefSectionProps) {
           </ul>
         </div>
       ))}
-    </div>
+    </details>
   );
 }
