@@ -113,7 +113,7 @@ async function run() {
     await assertText(page, '.error-banner', 'not part of this index');
     console.log('ok  error banner: "not part of this index"');
 
-    // 8. Effects panel header on section view (fixture has effect_runs but no per-section results)
+    // 8. Effects panel header on section view (fixture carries a stored effects graph built from HTML#navigate)
     await page.goto(`${base}/#/HTML/navigate`);
     await page.waitForSelector('.effects-panel-title', { timeout: 10000 });
     const effectsTitle = await page.$eval('.effects-panel-title', (el) => el.textContent ?? '');
