@@ -2011,8 +2011,10 @@ impl<'g> Analysis<'g> {
                         .is_none_or(|id| node.subject.body_id.as_ref() == Some(id))
                     && (selector.step_id.is_some()
                         || selector.step_path.is_some()
-                        || selector.body_id.is_some()
-                        || node.subject.step_id.is_none() && node.subject.body_id.is_none())
+                        || (selector.body_id.is_some() && node.subject.step_id.is_none())
+                        || (selector.body_id.is_none()
+                            && node.subject.step_id.is_none()
+                            && node.subject.body_id.is_none()))
             })
             .collect();
         match candidates.as_slice() {
@@ -2662,8 +2664,10 @@ impl AnalysisArtifact {
                         .is_none_or(|id| node.subject.body_id.as_ref() == Some(id))
                     && (selector.step_id.is_some()
                         || selector.step_path.is_some()
-                        || selector.body_id.is_some()
-                        || node.subject.step_id.is_none() && node.subject.body_id.is_none())
+                        || (selector.body_id.is_some() && node.subject.step_id.is_none())
+                        || (selector.body_id.is_none()
+                            && node.subject.step_id.is_none()
+                            && node.subject.body_id.is_none()))
             })
             .collect();
         match candidates.as_slice() {
@@ -4655,5 +4659,70 @@ rules:
         let a = analyze_graph(&graph, scope.clone(), DiscoveryBudgets::default()).unwrap();
         let b = analyze_graph(&back, scope, DiscoveryBudgets::default()).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn body_id_selector_resolves_to_body_not_its_steps() {
+        use crate::effects::graph::ExecutionNode;
+        let subj = |anchor: &str, body_id: Option<&str>, step_id: Option<&str>| Subject {
+            spec: "S".into(),
+            anchor: anchor.into(),
+            snapshot_sha: "sha".into(),
+            step_id: step_id.map(Into::into),
+            step_path: step_id.map(|_| vec![1]),
+            body_id: body_id.map(Into::into),
+        };
+        let node = |id: &str, s: Subject, is_body: bool| ExecutionNode {
+            id: id.into(),
+            subject: s,
+            source_order: 0,
+            is_body,
+            definition_only: false,
+        };
+        let body_a = node("bA", subj("algo", Some("bA"), None), true);
+        let step_a1 = node("sA1", subj("algo", Some("bA"), Some("st1")), false);
+        let body_b = node("bB", subj("algo", Some("bB"), None), true);
+
+        let artifact = AnalysisArtifact {
+            engine_version: 1,
+            environment: "web".into(),
+            catalog_digest: String::new(),
+            scope: AnalysisScope::All,
+            reached_fixed_point: true,
+            counts: AnalysisCounts {
+                bodies: 2,
+                relationships: 0,
+                states: 0,
+            },
+            processed_subjects: vec![
+                body_a.subject.clone(),
+                step_a1.subject.clone(),
+                body_b.subject.clone(),
+            ],
+            unprocessed_subjects: vec![],
+            nodes: vec![body_a, step_a1, body_b],
+            relationships: vec![],
+            occurrences: vec![],
+            states: vec![],
+            issues: vec![],
+            subject_issue_ids: Default::default(),
+            effect_categories: Default::default(),
+            defined_body_ids: Default::default(),
+            sites: Default::default(),
+        };
+        let sel_body_a = SubjectSelector {
+            spec: "S".into(),
+            anchor: "algo".into(),
+            step_path: None,
+            step_id: None,
+            body_id: Some("bA".into()),
+        };
+        let resolved = artifact.resolve_selector(&sel_body_a);
+        assert!(
+            resolved.is_ok(),
+            "body_id selector must resolve to body node, not be ambiguous: {:?}",
+            resolved.err()
+        );
+        assert_eq!(resolved.unwrap(), "bA");
     }
 }

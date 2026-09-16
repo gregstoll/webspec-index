@@ -397,22 +397,18 @@ pub fn build_and_store_graph(
                 )
             })
             .collect();
+        let algorithm_roots: std::collections::HashSet<(String, String)> = graph
+            .nodes
+            .values()
+            .filter(|n| n.is_body && n.subject.body_id.is_none())
+            .map(|n| (n.subject.spec.clone(), n.subject.anchor.clone()))
+            .collect();
         let mut missing = BTreeSet::new();
         for source in &sources {
             for algorithm in source.structure.iter().flat_map(|s| &s.algorithms) {
-                let node_id = format!("anchor:{}#{}", source.spec, algorithm.source.section_anchor);
-                let is_root = graph
-                    .nodes
-                    .get(&node_id)
-                    .is_some_and(|n| n.is_body && n.subject.body_id.is_none())
-                    || graph.nodes.values().any(|n| {
-                        n.is_body
-                            && n.subject.body_id.is_none()
-                            && !n.id.starts_with("anchor:")
-                            && n.subject.spec == source.spec
-                            && n.subject.anchor == algorithm.source.section_anchor
-                    });
-                if !is_root {
+                if !algorithm_roots
+                    .contains(&(source.spec.clone(), algorithm.source.section_anchor.clone()))
+                {
                     continue;
                 }
                 for target in algorithm

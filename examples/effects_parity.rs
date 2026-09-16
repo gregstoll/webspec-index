@@ -52,6 +52,17 @@ fn normalize(value: &mut Value) {
             *id = Value::String(String::new());
         }
     }
+    if let Some(bodies) = value.get_mut("defined_bodies") {
+        if let Some(arr) = bodies.as_array_mut() {
+            for body in arr {
+                if let Some(status) = body.get_mut("effects_status") {
+                    if let Some(id) = status.get_mut("analysis_id") {
+                        *id = Value::String(String::new());
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn first_differing_lines(golden: &str, new: &str, max_lines: usize) -> String {
