@@ -52,12 +52,17 @@ export function stepEffects(
       const effect = byId.get(explanation.effect_id);
       if (!effect) continue;
       for (const witness of explanation.witnesses) {
-        const first = witness.hops[0];
-        if (!first) continue;
-        // The hop's `from` names the subject algorithm as a whole; the call site
-        // carries the step where the invocation happens.
-        const origin = first.site.subject.step_path ? first.site.subject : first.from;
-        if (origin.step_path && isHere(origin)) add(origin.step_path, effect, 'path');
+        // Hops that stay inside the subject algorithm model "continue these steps"
+        // continuations; the step where control actually leaves the algorithm is the
+        // call site of the last hop whose site is still in this section.
+        let origin: { spec: string; anchor: string; step_path?: number[] } | undefined;
+        for (const hop of witness.hops) {
+          const site = hop.site.subject;
+          if (isHere(site) && site.step_path) origin = site;
+          else if (isHere(hop.from) && hop.from.step_path && !origin) origin = hop.from;
+          if (!isHere(hop.to)) break;
+        }
+        if (origin?.step_path) add(origin.step_path, effect, 'path');
       }
     }
   }

@@ -702,3 +702,5 @@ code, pre, .mono {
 .flow-view { margin-bottom: var(--space-4); }
 .flow-issues { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-2); }
 .flow-issues summary { cursor: pointer; }
+
+.flow-view .diagram-container { min-height: 70vh; }

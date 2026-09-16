@@ -62,6 +62,20 @@ describe('stepEffects', () => {
     expect(map.get('24.5')?.[0].via).toBe('path');
   });
 
+  it('attributes a path to the step where control leaves the algorithm, not to a continuation hop', () => {
+    const s = summary([effect('deep', { spec: 'FETCH', anchor: 'fetch', url: 'u' })]);
+    const continuation = witnessFrom([8]);
+    continuation.hops[0].to = { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'x', step_path: [8] };
+    const leave = witnessFrom([24, 1]);
+    const witness = { ...continuation, hops: [continuation.hops[0], leave.hops[0]] } as Witness;
+    const explain = {
+      schema_version: 1,
+      subject: { ...here, snapshot_sha: 'x' },
+      explanations: [{ effect_id: 'deep', witnesses: [witness], witnesses_truncated: false }],
+    } as unknown as ExplainEffectsResult;
+    expect([...stepEffects(s, explain, here).keys()]).toEqual(['24.1']);
+  });
+
   it('lists direct effects before path effects on the same step', () => {
     const s = summary([
       effect('a', { spec: 'FETCH', anchor: 'fetch', url: 'u' }),
