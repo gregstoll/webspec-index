@@ -284,7 +284,7 @@ fn pr_diff(spec: &str, pr: i64, force_update: bool) -> PyResult<PrDiffResult> {
 #[pyfunction]
 #[pyo3(signature = (spec=None, force=false))]
 fn update(spec: Option<&str>, force: bool) -> PyResult<Vec<UpdateEntry>> {
-    let r = run(webspec_index::update_specs(spec, force))?;
+    let r = run(webspec_index::update_specs(spec, force, false, &[]))?;
     Ok(r.into_iter()
         .map(|(spec, snapshot_id)| UpdateEntry {
             spec,

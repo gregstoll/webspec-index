@@ -70,15 +70,10 @@ def test_summary_and_explanation_round_trip_through_native_module(effects_db):
 
 
 def test_recompute_returns_versioned_json_compatible_result(effects_db):
-    result = wsi.recompute_effects(
-        {
-            "schema_version": 1,
-            "scope": {"kind": "subject", "subject": request()["subject"]},
-        }
-    )
+    result = wsi.recompute_effects({"schema_version": 1})
     assert result["schema_version"] == 1
-    assert result["analysis_id"].startswith("an_")
-    assert result["processed_subjects"]
+    assert result["body_count"] >= 1
+    assert result["issue_count"] == len(result["issues"])
     assert json.loads(json.dumps(result)) == result
 
 

@@ -34,7 +34,6 @@ class EffectsOptions(TypedDict, total=False):
     mode: Literal["auto", "cached", "off"]
     rule_paths: list[str]
     environment: str
-    analysis_id: str
     budgets: DiscoveryBudgets
 
 
@@ -68,7 +67,6 @@ class ExplainEffectsRequest(EffectsRequest, total=False):
 
 class _RecomputeRequestBase(TypedDict):
     schema_version: Literal[1]
-    scope: dict[str, Any]
 
 
 class RecomputeEffectsRequest(_RecomputeRequestBase, total=False):
@@ -135,11 +133,8 @@ class ExplainEffectsResult(EffectSummaryResult):
 
 class RecomputeEffectsResult(TypedDict):
     schema_version: Literal[1]
-    analysis_id: str
     input_manifest: dict[str, Any]
-    processed_subjects: list[Subject]
-    unprocessed_subjects: list[Subject]
     body_count: int
     relationship_count: int
-    state_count: int
     issues: list[dict[str, Any]]
+    issue_count: int
