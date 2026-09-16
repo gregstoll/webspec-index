@@ -75,8 +75,8 @@ webspec-index effects "HTML#navigate" --effect-id ef_0123456789abcdef --limit 5
 webspec-index effects "HTML#navigate" --summary-only --recompute
 
 # Refresh the indexed corpus once, after all requested specs have been indexed
-# Local pattern-matching runs in parallel (default: all cores).
-# Override thread count with WEBSPEC_EFFECTS_THREADS=N.
+# Pattern-matching for specs missing from the local-match cache runs in parallel
+# (default: all cores; override with WEBSPEC_EFFECTS_THREADS=N).
 webspec-index effects --all --summary-only
 
 # Export a chunked read-only database for the web UI
