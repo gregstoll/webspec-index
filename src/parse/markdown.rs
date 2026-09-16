@@ -140,6 +140,23 @@ pub fn build_converter(base_url: &str) -> HtmlToMarkdown {
             }
             Some(handlers.walk_children(element.node))
         })
+        // <pre>: fenced code block of the plain text. Specs mark up IDL and examples
+        // with links and highlighting spans inside <pre>; inline markdown there would
+        // collapse the line structure the block exists to preserve.
+        .add_handler(vec!["pre"], |_handlers: &dyn Handlers, element: Element| {
+            let mut lang = "";
+            for attr in element.attrs.iter() {
+                if *attr.name.local == *"class" && has_class(&attr.value, "idl") {
+                    lang = "webidl";
+                }
+            }
+            let text = extract_text_recursive(element.node);
+            let text = text.trim_matches('\n');
+            if text.trim().is_empty() {
+                return Some("".into());
+            }
+            Some(format!("\n\n```{lang}\n{text}\n```\n\n").into())
+        })
         // <dl>: convert definition lists with class="props" to markdown tables
         .add_handler(vec!["dl"], |handlers: &dyn Handlers, element: Element| {
             let mut is_props = false;
@@ -470,6 +487,26 @@ mod tests {
             md,
             "To **navigate** a [navigable](https://html.spec.whatwg.org#navigable) using *url*:"
         );
+    }
+
+    #[test]
+    fn pre_blocks_become_fenced_code_with_plain_text() {
+        let md = html_to_markdown(
+            r##"<p>The interface:</p><pre class="idl">[<a href="#Exposed">Exposed</a>=Window]
+interface <dfn id="node"><code>Node</code></dfn> : <a href="#et">EventTarget</a> {
+  const <a href="#us">unsigned short</a> ELEMENT_NODE = 1;
+};</pre><p>After.</p>"##,
+            "https://example.com",
+        );
+        assert_eq!(
+            md,
+            "The interface:\n\n```webidl\n[Exposed=Window]\ninterface Node : EventTarget {\n  const unsigned short ELEMENT_NODE = 1;\n};\n```\n\nAfter."
+        );
+        let md = html_to_markdown(
+            "<pre><code>let x = 1;\nif (x) {}</code></pre>",
+            "https://example.com",
+        );
+        assert_eq!(md, "```\nlet x = 1;\nif (x) {}\n```");
     }
 
     #[test]
