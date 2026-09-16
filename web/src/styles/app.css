@@ -704,3 +704,34 @@ code, pre, .mono {
 .flow-issues summary { cursor: pointer; }
 
 .flow-view .diagram-container { min-height: 70vh; }
+
+/* Section page: content on the left, details (effects) pinned on the right */
+.section-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
+  gap: var(--space-8);
+  align-items: start;
+}
+.section-main {
+  min-width: 0;
+  max-width: var(--content-width);
+}
+.section-aside {
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100vh - var(--space-8));
+  overflow: auto;
+  min-width: 0;
+}
+.section-aside .effects-panel {
+  margin-top: 0;
+}
+@media (max-width: 64rem) {
+  .section-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .section-aside {
+    position: static;
+    max-height: none;
+  }
+}

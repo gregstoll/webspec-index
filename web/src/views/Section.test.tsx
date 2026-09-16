@@ -90,6 +90,22 @@ describe('Section', () => {
     });
   });
 
+  it('clicking an inline effect badge selects its step and opens that effect in the side panel', async () => {
+    window.location.hash = '#/HTML/navigate';
+    const { container } = render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    const badge = await waitFor(() => {
+      const el = container.querySelector<HTMLButtonElement>('li[data-step-path="2"] .step-effect');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(badge);
+    expect(window.location.hash).toBe('#/HTML/navigate?step=2');
+    await waitFor(() => {
+      const item = container.querySelector('aside.section-aside #effect-effect-2');
+      expect(item?.textContent).toContain('Hide paths');
+    });
+  });
+
   it('post-render pass: javascript: links lose their href', async () => {
     render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
     await waitFor(() => {

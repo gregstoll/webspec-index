@@ -58,6 +58,7 @@ function writeSectionView(v: SectionView): void {
 
 export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const [stepFx, setStepFx] = useState<StepEffects | undefined>(undefined);
+  const [focusEffectId, setFocusEffectId] = useState<string | undefined>(undefined);
   const [graphOn, setGraphOn] = useState(readGraphPref);
   const [sectionView, setSectionView] = useState<SectionView>(readSectionView);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
@@ -96,7 +97,8 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const nav = result.navigation;
 
   return (
-    <div class="page content-column">
+    <div class="page section-layout">
+    <div class="section-main">
       <div class="section-meta">
         <span class={`badge badge-${result.type}`}>{result.type}</span>
         <a href={`#/${result.spec}`} class="mono">{result.spec}</a>
@@ -199,6 +201,7 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
           html={result.content_html}
           selectedStepPath={selectedStepPath}
           onStepSelect={handleStepSelect}
+          onEffectFocus={setFocusEffectId}
           stepEffects={stepFx}
         />
       ) : result.content ? (
@@ -224,15 +227,19 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
       )}
       <RefSection heading="Outgoing references" refs={result.outgoing_refs} />
       <RefSection heading="Incoming references" refs={result.incoming_refs} />
+    </div>
 
+    <aside class="section-aside" aria-label="Details">
       <EffectsPanel
         client={client}
         spec={result.spec}
         anchor={result.anchor}
         selectedStepPath={selectedStepPath}
+        focusEffectId={focusEffectId}
         onClearStep={() => handleStepSelect(undefined)}
         onStepEffects={setStepFx}
       />
+    </aside>
     </div>
   );
 }
@@ -241,6 +248,7 @@ interface ContentBlockProps {
   html: string;
   selectedStepPath?: number[];
   onStepSelect: (path: number[] | undefined) => void;
+  onEffectFocus?: (effectId: string) => void;
   stepEffects?: StepEffects;
 }
 
@@ -261,6 +269,7 @@ function renderInlineEffects(root: HTMLElement, stepEffects: StepEffects | undef
       const badge = document.createElement('button');
       badge.type = 'button';
       badge.className = `step-effect step-effect-${via}`;
+      badge.dataset.effectId = effect.id;
       badge.textContent = effectLabel(effect);
       badge.title = via === 'direct' ? 'Effect of this step' : 'Effect reached through a call in this step';
       row.appendChild(badge);
@@ -278,7 +287,7 @@ function renderInlineEffects(root: HTMLElement, stepEffects: StepEffects | undef
   }
 }
 
-function ContentBlock({ html, selectedStepPath, onStepSelect, stepEffects }: ContentBlockProps) {
+function ContentBlock({ html, selectedStepPath, onStepSelect, onEffectFocus, stepEffects }: ContentBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -314,13 +323,19 @@ function ContentBlock({ html, selectedStepPath, onStepSelect, stepEffects }: Con
       if (!li || !li.dataset.stepPath) return;
       const pathStr = li.dataset.stepPath;
       const path = pathStr.split('.').map(Number);
+      if (btn.classList.contains('step-effect')) {
+        // A badge always selects its step and brings that effect into view.
+        onStepSelect(path);
+        if (btn.dataset.effectId && onEffectFocus) onEffectFocus(btn.dataset.effectId);
+        return;
+      }
       onStepSelect(
         selectedStepPath && selectedStepPath.join('.') === pathStr ? undefined : path,
       );
     }
     el.addEventListener('click', handleClick);
     return () => el.removeEventListener('click', handleClick);
-  }, [html, selectedStepPath, onStepSelect]);
+  }, [html, selectedStepPath, onStepSelect, onEffectFocus]);
 
   useEffect(() => {
     const el = ref.current;

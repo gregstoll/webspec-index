@@ -16,6 +16,8 @@ interface Props {
   onClearStep?: () => void;
   /** Receives the per-step attribution of the whole section's effects as data arrives. */
   onStepEffects?: (effects: StepEffects) => void;
+  /** Effect to open and scroll to, set when an inline badge is clicked. */
+  focusEffectId?: string;
 }
 
 type ExplainCache =
@@ -24,7 +26,7 @@ type ExplainCache =
   | { kind: 'ok'; value: ExplainEffectsResult }
   | { kind: 'error'; message: string };
 
-export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearStep, onStepEffects }: Props) {
+export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearStep, onStepEffects, focusEffectId }: Props) {
   const stepPathKey = selectedStepPath ? selectedStepPath.join(',') : '';
   const subject: SubjectSelector = selectedStepPath
     ? { spec, anchor, step_path: selectedStepPath }
@@ -92,6 +94,13 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
   function handleShowPaths(effectId: string) {
     setExpandedEffectId(expandedEffectId === effectId ? null : effectId);
   }
+
+  useEffect(() => {
+    if (!focusEffectId || effectsState.kind !== 'ok') return;
+    setOpen(true);
+    setExpandedEffectId(focusEffectId);
+    document.getElementById(`effect-${focusEffectId}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [focusEffectId, effectsState.kind]);
 
   // Memoised so the Diagram keeps the same graph object between renders and does
   // not re-layout while the panel re-renders for unrelated state.
@@ -167,7 +176,7 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
         {effects.length > 0 ? (
           <ul class="effects-list">
             {effects.map((effect) => (
-              <li key={effect.id} class="effects-item">
+              <li key={effect.id} id={`effect-${effect.id}`} class="effects-item">
                 <div class="effects-item-header">
                   <span class="effects-label">{effectLabel(effect)}</span>
                   <div class="effects-badges">
