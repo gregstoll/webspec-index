@@ -6,8 +6,18 @@ export interface StatusDescription {
   tone: 'ok' | 'warn' | 'muted';
 }
 
+// What each analysis gap means for the reader, in the order the engine reports them.
+const ISSUE_TEXT: Record<string, string> = {
+  missing_spec: 'some called specs are not indexed',
+  missing_anchor: 'some links point at anchors that were not found',
+  unsupported_structure: 'some called algorithms have no parseable steps',
+  unresolved_invocation: 'some links could not be resolved to an algorithm',
+  unresolved_body_binding: 'some "run these steps" bodies could not be bound',
+  unsupported_preview: 'PR previews are not analysed',
+};
+
 function humaniseCode(code: IssueCode): string {
-  return code.replace(/_/g, ' ');
+  return ISSUE_TEXT[code] ?? code.replace(/_/g, ' ');
 }
 
 function omittedSuffix(omitted: number): string | undefined {
@@ -27,7 +37,11 @@ export function describeStatus(status: EffectsStatus): StatusDescription {
       }
       const parts = status.issues.map(humaniseCode);
       if (omitted) parts.push(omitted);
-      return { headline: 'Partial analysis', tone: 'warn', detail: buildDetail(parts) };
+      return {
+        headline: 'Partial analysis',
+        tone: 'warn',
+        detail: buildDetail(parts.length > 0 ? [`effects listed here are a lower bound: ${parts.join('; ')}`] : []),
+      };
     }
     case 'pending':
       return { headline: 'Analysis not prepared yet', tone: 'muted' };

@@ -24,8 +24,9 @@ describe('describeStatus', () => {
     const result = describeStatus(baseReady('partial', { issues: ['unresolved_invocation', 'missing_spec'] }));
     expect(result.tone).toBe('warn');
     expect(result.headline).toBe('Partial analysis');
-    expect(result.detail).toContain('unresolved invocation');
-    expect(result.detail).toContain('missing spec');
+    expect(result.detail).toContain('lower bound');
+    expect(result.detail).toContain('some links could not be resolved to an algorithm');
+    expect(result.detail).toContain('some called specs are not indexed');
   });
 
   it('pending → muted, "Analysis not prepared yet"', () => {
@@ -57,7 +58,7 @@ describe('describeStatus', () => {
 
   it('omitted > 0 on partial appends to detail alongside issue codes', () => {
     const result = describeStatus(baseReady('partial', { issues: ['missing_anchor'], omitted: 2 }));
-    expect(result.detail).toContain('missing anchor');
+    expect(result.detail).toContain('anchors that were not found');
     expect(result.detail).toContain('2 effects omitted');
   });
 });
