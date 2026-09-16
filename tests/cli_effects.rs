@@ -9,10 +9,10 @@ fn cli(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn effects_all_requires_summary_only_without_accessing_the_network() {
-    let output = cli(&["effects", "--all"]);
+fn effects_all_conflicts_with_a_subject_without_opening_the_index() {
+    let output = cli(&["effects", "--all", "HTML#navigate"]);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--summary-only"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used with"));
 }
 
 #[test]
