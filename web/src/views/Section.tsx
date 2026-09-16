@@ -59,8 +59,26 @@ function writeSectionView(v: SectionView): void {
 export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const [stepFx, setStepFx] = useState<StepEffects | undefined>(undefined);
   const [focusEffectId, setFocusEffectId] = useState<string | undefined>(undefined);
+  const asideRef = useRef<HTMLElement>(null);
+  const [stepCardTop, setStepCardTop] = useState(0);
+  const stepKey = selectedStepPath?.join('.');
   const [graphOn, setGraphOn] = useState(readGraphPref);
   const [sectionView, setSectionView] = useState<SectionView>(readSectionView);
+
+  // Place the step's details card level with the step in the text column.
+  useEffect(() => {
+    const aside = asideRef.current;
+    if (!aside || !stepKey) return;
+    function place() {
+      const li = document.querySelector<HTMLLIElement>(`.section-main li[data-step-path="${stepKey}"]`);
+      if (!li || !aside) return;
+      const top = li.getBoundingClientRect().top - aside.getBoundingClientRect().top;
+      setStepCardTop(Math.max(0, Math.round(top)));
+    }
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [stepKey, stepFx, sectionView]);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
     { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
@@ -229,16 +247,28 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
       <RefSection heading="Incoming references" refs={result.incoming_refs} />
     </div>
 
-    <aside class="section-aside" aria-label="Details">
-      <EffectsPanel
-        client={client}
-        spec={result.spec}
-        anchor={result.anchor}
-        selectedStepPath={selectedStepPath}
-        focusEffectId={focusEffectId}
-        onClearStep={() => handleStepSelect(undefined)}
-        onStepEffects={setStepFx}
-      />
+    <aside class="section-aside" aria-label="Details" ref={asideRef}>
+      <div class="section-aside-summary" hidden={selectedStepPath !== undefined}>
+        <EffectsPanel
+          client={client}
+          spec={result.spec}
+          anchor={result.anchor}
+          compact
+          onStepEffects={setStepFx}
+        />
+      </div>
+      {selectedStepPath && (
+        <div class="section-step-card" style={{ top: `${stepCardTop}px` }}>
+          <EffectsPanel
+            client={client}
+            spec={result.spec}
+            anchor={result.anchor}
+            selectedStepPath={selectedStepPath}
+            focusEffectId={focusEffectId}
+            onClearStep={() => handleStepSelect(undefined)}
+          />
+        </div>
+      )}
     </aside>
     </div>
   );

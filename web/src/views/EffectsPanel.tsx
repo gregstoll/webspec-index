@@ -18,6 +18,8 @@ interface Props {
   onStepEffects?: (effects: StepEffects) => void;
   /** Effect to open and scroll to, set when an inline badge is clicked. */
   focusEffectId?: string;
+  /** Summary only: counts and issues, no effect list. Used while no step is selected. */
+  compact?: boolean;
 }
 
 type ExplainCache =
@@ -26,7 +28,16 @@ type ExplainCache =
   | { kind: 'ok'; value: ExplainEffectsResult }
   | { kind: 'error'; message: string };
 
-export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearStep, onStepEffects, focusEffectId }: Props) {
+export function EffectsPanel({
+  client,
+  spec,
+  anchor,
+  selectedStepPath,
+  onClearStep,
+  onStepEffects,
+  focusEffectId,
+  compact = false,
+}: Props) {
   const stepPathKey = selectedStepPath ? selectedStepPath.join(',') : '';
   const subject: SubjectSelector = selectedStepPath
     ? { spec, anchor, step_path: selectedStepPath }
@@ -170,6 +181,21 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
     if (effectsState.kind !== 'ok') return null;
 
     const { effects, issues } = effectsState.value.result;
+
+    if (compact) {
+      const explain = explainCache.kind === 'ok' ? explainCache.value : null;
+      const steps = stepEffects(effectsState.value.result, explain, { spec, anchor }).size;
+      return (
+        <>
+          <p class="effects-summary">
+            {effects.length} effect{effects.length === 1 ? '' : 's'}
+            {steps > 0 ? ` from ${steps} step${steps === 1 ? '' : 's'}` : ''}.
+            {effects.length > 0 && ' Select a step to see its effects here.'}
+          </p>
+          {issues.length > 0 && <IssueSummary issues={issues} />}
+        </>
+      );
+    }
 
     return (
       <>

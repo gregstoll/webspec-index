@@ -769,3 +769,30 @@ code, pre, .mono {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* Details column: a compact summary while nothing is selected, or one card level with the selected step */
+.section-aside {
+  align-self: stretch;
+  position: relative;
+  max-height: none;
+  overflow: visible;
+}
+.section-aside-summary {
+  position: sticky;
+  top: var(--space-4);
+}
+.section-aside-summary[hidden] {
+  display: none;
+}
+.section-step-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+@media (max-width: 64rem) {
+  .section-step-card {
+    position: static;
+  }
+}
+
+.effects-summary { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0; }

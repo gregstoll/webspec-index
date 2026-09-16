@@ -90,9 +90,17 @@ describe('Section', () => {
     });
   });
 
+  it('shows only a summary in the side column while no step is selected', async () => {
+    const { container } = render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(container.querySelector('aside .effects-summary')?.textContent).toContain('2 effects from 2 steps');
+    });
+    expect(container.querySelector('aside .effects-item')).toBeNull();
+  });
+
   it('clicking an inline effect badge selects its step and opens that effect in the side panel', async () => {
     window.location.hash = '#/HTML/navigate';
-    const { container } = render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    const { container, rerender } = render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
     const badge = await waitFor(() => {
       const el = container.querySelector<HTMLButtonElement>('li[data-step-path="2"] .step-effect');
       expect(el).toBeTruthy();
@@ -100,6 +108,7 @@ describe('Section', () => {
     });
     fireEvent.click(badge);
     expect(window.location.hash).toBe('#/HTML/navigate?step=2');
+    rerender(<Section client={new MockClient()} spec="HTML" anchor="navigate" selectedStepPath={[2]} />);
     await waitFor(() => {
       const item = container.querySelector('aside.section-aside #effect-effect-2');
       expect(item?.textContent).toContain('Hide paths');
