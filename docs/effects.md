@@ -7,7 +7,7 @@ webspec-index query "HTML#navigate"
 webspec-index effects "HTML#navigate" --compact --format markdown
 webspec-index effects "HTML#navigate" --kind event.fire
 webspec-index effects "HTML#navigate" --step 8
-webspec-index effects "HTML#navigate" --summary-only --recompute
+webspec-index effects "HTML#navigate" --summary-only
 ```
 
 Queries include up to 12 groups, with omitted-group counts and coverage. `effects --compact` emits that same short preview without the specification content or witness traces. `effects --summary-only` lists all detected effects without traces; plain `effects` includes bounded traces. `--format markdown` selects the grouped human-readable rendering; the CLI default remains JSON. `effects` returns the full selected groups and bounded witnesses. Execution alternatives are `inline`, `separate`, and `unknown`, relative to the selected algorithm or step. A scheduling operation itself can run inline while its callback runs separately. Multiple occurrences with the same kind and parameters share a compact group; the detailed API retains their source sites.

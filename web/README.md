@@ -12,7 +12,7 @@ Static Preact app that browses the webspec-index database of WHATWG, W3C, and TC
 
 # 2. Put a database export into public/db/. A real one, a few specs for a quick loop:
 webspec-index export-web --out web/public/db --specs HTML,DOM,FETCH,URL,INFRA
-# or every WHATWG/W3C/TC39 spec (needs `webspec-index effects --all --summary-only` first):
+# or every WHATWG/W3C/TC39 spec (the index must hold the effects graph; `update` builds it):
 webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39
 
 # 3. Start the dev server

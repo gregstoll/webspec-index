@@ -72,12 +72,13 @@ webspec-index query "HTML#navigate" --effects off  # original JSON shape
 webspec-index effects "HTML#navigate"
 webspec-index effects "HTML#navigate" --step 20 --kind event.fire
 webspec-index effects "HTML#navigate" --effect-id ef_0123456789abcdef --limit 5
-webspec-index effects "HTML#navigate" --summary-only --recompute
+webspec-index effects "HTML#navigate" --summary-only
 
-# Refresh the indexed corpus once, after all requested specs have been indexed
+# Rebuild the effects graph for the indexed corpus. `update` and `reparse` do this
+# themselves; per-subject results are computed from the graph at query time.
 # Pattern-matching for specs missing from the local-match cache runs in parallel
 # (default: all cores; override with WEBSPEC_EFFECTS_THREADS=N).
-webspec-index effects --all --summary-only
+webspec-index effects --all
 
 # Export a chunked read-only database for the web UI
 webspec-index export-web --out DIR                      # all providers
@@ -181,7 +182,7 @@ Set up the site locally in three steps (after building the native binary):
 
 ```bash
 ./crates/webspec-index-wasm/build.sh
-webspec-index effects --all --summary-only
+webspec-index effects --all
 webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39
 cd web && npm ci && npm run dev
 ```
