@@ -516,10 +516,14 @@ enum Command {
     #[command(long_about = "Update indexed specifications to latest versions.\n\n\
         Without --spec, updates all currently indexed specs. Uses a 24h\n\
         freshness window unless --force is given.\n\n\
+        --force re-parses every spec but reads from the on-disk HTML cache\n\
+        when available, avoiding network round-trips for unchanged specs.\n\
+        --refetch bypasses the HTML cache and re-downloads everything.\n\n\
         Examples:\n  \
         webspec-index update\n  \
         webspec-index update --spec HTML\n  \
         webspec-index update --force\n  \
+        webspec-index update --force --refetch\n  \
         webspec-index update --providers whatwg,w3c,tc39")]
     Update {
         #[arg(long, short, help = "Update only this spec")]
@@ -530,6 +534,12 @@ enum Command {
 
         #[arg(
             long,
+            help = "Bypass the on-disk HTML cache and re-download all specs (requires --force)"
+        )]
+        refetch: bool,
+
+        #[arg(
+            long,
             value_delimiter = ',',
             help = "Update only specs from these providers (comma-separated: whatwg,w3c,tc39)"
         )]
@@ -537,6 +547,32 @@ enum Command {
 
         #[command(flatten)]
         effect_options: UpdateEffectsArgs,
+    },
+
+    /// Re-parse indexed specs from the on-disk HTML cache without network access
+    #[command(
+        long_about = "Re-parse indexed specifications from the on-disk HTML cache.\n\n\
+        Reads the cached HTML for each spec and re-runs the parser, writing\n\
+        fresh sections, references, and IDL definitions to the database. No\n\
+        network access is performed. Specs without a cached HTML file are\n\
+        reported and skipped.\n\n\
+        Use this after a parser change to rebuild the index without waiting\n\
+        for a full re-download of all specs.\n\n\
+        Examples:\n  \
+        webspec-index reparse\n  \
+        webspec-index reparse --spec HTML\n  \
+        webspec-index reparse --providers whatwg,w3c"
+    )]
+    Reparse {
+        #[arg(long, short, help = "Re-parse only this spec")]
+        spec: Option<String>,
+
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Re-parse only specs from these providers (comma-separated: whatwg,w3c,tc39)"
+        )]
+        providers: Vec<String>,
     },
 
     /// Inspect possible effects of a specification algorithm or step
@@ -691,6 +727,12 @@ enum Command {
             help = "Providers to include"
         )]
         providers: Vec<String>,
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Export only these specs by name, comma-separated (e.g. html,dom,fetch); empty = all"
+        )]
+        specs: Vec<String>,
         #[arg(long, default_value = "52428800", help = "Chunk size in bytes")]
         chunk_size: u64,
         #[arg(
@@ -718,10 +760,11 @@ list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
 trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-d verbose(default)|edges|compact] [--format json|markdown]
 effects [<SPEC#anchor|URL> | --all --summary-only] [--step N.N|--step-id ID|--body-id ID] [--compact|--summary-only] [--kind KIND] [--category CATEGORY] [--rule ID] [--effect-id ID] [--occurrence-id ID] [--recompute] [--analysis-id ID] [--rules PATH] [--environment NAME]
-update [-s SPEC] [-f force] [--providers a,b] [--effects auto|off] [--rules PATH] [--environment NAME]
+update [-s SPEC] [-f force] [--refetch] [--providers a,b] [--effects auto|off] [--rules PATH] [--environment NAME]
+reparse [-s SPEC] [--providers a,b] — re-parse from on-disk HTML cache, no network
 clear-db [-y skip confirm]
 clear-pr [--all | -s SPEC [--pr N]] — list or remove cached PR data
-export-web --out DIR [--providers a,b] [--chunk-size N] [--max-size N] — write chunked read-only DB for the web UI
+export-web --out DIR [--providers a,b] [--specs HTML,DOM] [--chunk-size N] [--max-size N] — write chunked read-only DB for the web UI
 specs — list indexed/discovered spec names+URLs
 lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
@@ -1023,10 +1066,12 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Update {
             spec,
             force,
+            refetch,
             providers,
             effect_options,
         } => {
-            let results = webspec_index::update_specs(spec.as_deref(), force, &providers).await?;
+            let results =
+                webspec_index::update_specs(spec.as_deref(), force, refetch, &providers).await?;
             if effect_options.effects == UpdateEffectsMode::Auto {
                 webspec_index::effects::recompute_effects(
                     &webspec_index::effects::RecomputeEffectsRequest {
@@ -1040,6 +1085,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     },
                 )?;
             }
+            let output: Vec<model::UpdateEntry> = results
+                .into_iter()
+                .map(|(name, snapshot_id)| model::UpdateEntry {
+                    spec: name,
+                    updated: snapshot_id.is_some(),
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(ExitCode::SUCCESS)
+        }
+
+        Command::Reparse { spec, providers } => {
+            let results = webspec_index::reparse_specs(spec.as_deref(), &providers).await?;
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
                 .map(|(name, snapshot_id)| model::UpdateEntry {
@@ -1268,11 +1326,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::ExportWeb {
             out,
             providers,
+            specs,
             chunk_size,
             max_size,
         } => {
             let options = webspec_index::export::ExportOptions {
                 providers,
+                specs,
                 chunk_size,
                 max_total_bytes: max_size,
                 ..Default::default()

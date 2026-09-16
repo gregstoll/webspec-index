@@ -2074,6 +2074,7 @@ pub fn clear_pr_data(
 pub async fn update_specs(
     spec: Option<&str>,
     force: bool,
+    refetch: bool,
     providers: &[String],
 ) -> Result<Vec<(String, Option<i64>)>> {
     let conn = db::open_or_create_db()?;
@@ -2086,13 +2087,14 @@ pub async fn update_specs(
         let (canonical_name, base_url, provider) =
             resolve_spec_metadata(&conn, &registry, spec_name, None)?;
         let snapshot_id =
-            fetch::update_if_needed(&conn, &canonical_name, &base_url, &provider, force).await?;
+            fetch::update_if_needed(&conn, &canonical_name, &base_url, &provider, force, refetch)
+                .await?;
         results.push((canonical_name, snapshot_id));
     } else {
         // Update all indexed/discovered specs, optionally filtered by provider.
         let specs = db::queries::list_specs(&conn)?;
         let filtered = filter_specs_by_provider(specs, providers);
-        let all_results = fetch::update_all_specs(&conn, &filtered, force).await;
+        let all_results = fetch::update_all_specs(&conn, &filtered, force, refetch).await;
 
         for (spec_name, result) in all_results {
             match result {
@@ -2188,6 +2190,19 @@ mod filter_tests {
 
 /// Clear the database (remove all indexed data)
 ///
+/// Re-parse indexed specs from the on-disk HTML cache without network access.
+///
+/// This is the implementation of the `reparse` subcommand. Specs without a
+/// cached HTML file are reported to stderr and skipped.
+#[cfg(feature = "native")]
+pub async fn reparse_specs(
+    spec: Option<&str>,
+    providers: &[String],
+) -> Result<Vec<(String, Option<i64>)>> {
+    let conn = db::open_or_create_db()?;
+    fetch::reparse_specs(&conn, spec, providers).await
+}
+
 /// # Returns
 /// Path to the deleted database file
 #[cfg(feature = "native")]
