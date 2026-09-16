@@ -1826,6 +1826,15 @@ impl<'g> Analysis<'g> {
     }
 
     fn propagate(&mut self) {
+        let occurrences_by_site: HashMap<&str, Vec<&LocalOccurrence>> = {
+            let mut map: HashMap<&str, Vec<&LocalOccurrence>> = HashMap::new();
+            for occ in self.graph.occurrences.values() {
+                for evidence in &occ.evidence {
+                    map.entry(evidence.site.id.as_str()).or_default().push(occ);
+                }
+            }
+            map
+        };
         let occurrences: Vec<_> = self
             .graph
             .occurrences
@@ -1878,7 +1887,7 @@ impl<'g> Analysis<'g> {
                 .cloned()
                 .collect();
             for edge in incoming {
-                if self.same_site_specializes_intrinsic(&edge, &child) {
+                if self.same_site_specializes_intrinsic(&edge, &child, &occurrences_by_site) {
                     continue;
                 }
                 let key = StateKey {
@@ -1970,14 +1979,22 @@ impl<'g> Analysis<'g> {
         }
     }
 
-    fn same_site_specializes_intrinsic(&self, edge: &ExecutionEdge, child: &StateKey) -> bool {
+    fn same_site_specializes_intrinsic(
+        &self,
+        edge: &ExecutionEdge,
+        child: &StateKey,
+        occurrences_by_site: &HashMap<&str, Vec<&LocalOccurrence>>,
+    ) -> bool {
         let Some(origin) = self.graph.occurrences.get(&child.occurrence_id) else {
             return false;
         };
         if origin.subject_id != edge.to {
             return false;
         }
-        self.graph.occurrences.values().any(|local| {
+        let candidates = occurrences_by_site
+            .get(edge.site_id.as_str())
+            .map_or(&[] as &[&LocalOccurrence], Vec::as_slice);
+        candidates.iter().any(|local| {
             let shares_rule = local.evidence.iter().any(|left| {
                 origin
                     .evidence
@@ -1986,10 +2003,6 @@ impl<'g> Analysis<'g> {
             });
             local.subject_id == edge.from
                 && local.kind == child.kind
-                && local
-                    .evidence
-                    .iter()
-                    .any(|evidence| evidence.site.id == edge.site_id)
                 && shares_rule
                 && (local.params == child.params || params_dominate(&local.params, &child.params))
         })
@@ -2206,14 +2219,39 @@ impl AnalysisArtifact {
             );
         }
         let handles = self.run_effect_handles();
-        let processed: BTreeSet<_> = self
+        type SubjectKey<'a> = (
+            &'a str,
+            &'a str,
+            &'a str,
+            Option<&'a str>,
+            Option<&'a [u32]>,
+            Option<&'a str>,
+        );
+        let processed: HashSet<SubjectKey<'_>> = self
             .processed_subjects
             .iter()
-            .map(|subject| digest_serializable(subject).expect("serializable subject"))
+            .map(|s| {
+                (
+                    s.spec.as_str(),
+                    s.anchor.as_str(),
+                    s.snapshot_sha.as_str(),
+                    s.step_id.as_deref(),
+                    s.step_path.as_deref(),
+                    s.body_id.as_deref(),
+                )
+            })
             .collect();
         let mut summaries: BTreeMap<String, ArtifactSummaryRecord> = BTreeMap::new();
         for node in self.nodes.iter().filter(|node| {
-            processed.contains(&digest_serializable(&node.subject).expect("serializable subject"))
+            let s = &node.subject;
+            processed.contains(&(
+                s.spec.as_str(),
+                s.anchor.as_str(),
+                s.snapshot_sha.as_str(),
+                s.step_id.as_deref(),
+                s.step_path.as_deref(),
+                s.body_id.as_deref(),
+            ))
         }) {
             let mut effects = Vec::new();
             for ((kind, params), group) in grouped.remove(&node.id).unwrap_or_default() {
