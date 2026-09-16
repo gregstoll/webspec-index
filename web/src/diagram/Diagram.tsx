@@ -351,12 +351,13 @@ export function Diagram({
   layoutOpts,
 }: DiagramProps) {
   const uid = useId();
-  const svgRef = useRef<SVGSVGElement>(null);
+  const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
+  const svgRef = useCallback((el: SVGSVGElement | null) => setSvgEl(el), []);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [copyFeedback, setCopyFeedback] = useState('');
   const [hotId, setHotId] = useState<string | null>(null);
 
-  const { transform, fit, top, zoomBy } = useViewport(svgRef);
+  const { transform, fit, top, zoomBy } = useViewport(svgEl);
 
   // Apply the initial view only on the first layout for this Diagram instance
   // and when rankdir changes.

@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef, useEffect } from 'preact/hooks';
-import type { RefObject } from 'preact';
 import type { Layout } from './layout';
 
 export interface Transform {
@@ -30,7 +29,15 @@ export interface Viewport {
 
 /**
  * Manages pan/zoom transform for a diagram SVG element and wires pointer
- * events to the element referenced by `containerRef`.
+ * events to `el` when it is non-null.
+ *
+ * Pass the SVG element (or null) directly. Use a callback ref in the caller
+ * so that the hook re-runs its effect when the element mounts or unmounts:
+ *
+ *   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
+ *   const { transform, ... } = useViewport(svgEl);
+ *   // ...
+ *   <svg ref={(el) => setSvgEl(el)} ...>
  *
  * - Primary-button drag pans the canvas.
  * - Wheel zooms around the cursor, k clamped to [0.2, 4].
@@ -39,7 +46,7 @@ export interface Viewport {
  * - Active pointers are tracked in a Map keyed by pointerId; a pointer is
  *   removed on pointerup or pointercancel.
  */
-export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
+export function useViewport(el: SVGSVGElement | null): Viewport {
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
 
   // Ref mirror so event handlers always read the latest transform.
@@ -56,7 +63,6 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
 
   const fit = useCallback(
     (layout: Layout) => {
-      const el = containerRef.current;
       let cw = 800;
       let ch = 600;
       if (el) {
@@ -75,7 +81,7 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
       const y = (ch - layout.height * k) / 2;
       setTransform({ x, y, k });
     },
-    [containerRef]
+    [el]
   );
 
   const top = useCallback((layout: Layout) => {
@@ -110,7 +116,6 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
   }, []);
 
   useEffect(() => {
-    const el: SVGSVGElement | null = containerRef.current;
     if (el == null) return;
     const svg: SVGSVGElement = el;
 
@@ -203,7 +208,7 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
       svg.removeEventListener('pointercancel', onPointerUp);
       svg.removeEventListener('wheel', onWheel);
     };
-  }, [containerRef]);
+  }, [el]);
 
   return { transform, fit, top, zoomBy, reset };
 }

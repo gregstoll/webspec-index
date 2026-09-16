@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/preact';
-import { useRef } from 'preact/hooks';
 import { useViewport } from './useViewport';
 import type { Layout } from './layout';
 
@@ -32,19 +31,14 @@ function makeLayout(w = 400, h = 300): Layout {
 
 describe('useViewport', () => {
   it('starts with identity transform', () => {
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(makeMockSvg());
-      return useViewport(ref);
-    });
+    const svg = makeMockSvg();
+    const { result } = renderHook(() => useViewport(svg));
     expect(result.current.transform).toEqual({ x: 0, y: 0, k: 1 });
   });
 
   it('fit() sets a non-identity transform', () => {
     const svg = makeMockSvg(800, 600);
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(svg);
-      return useViewport(ref);
-    });
+    const { result } = renderHook(() => useViewport(svg));
 
     act(() => {
       result.current.fit(makeLayout(400, 300));
@@ -57,10 +51,8 @@ describe('useViewport', () => {
   });
 
   it('zoomBy() multiplies the scale factor', () => {
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(makeMockSvg());
-      return useViewport(ref);
-    });
+    const svg = makeMockSvg();
+    const { result } = renderHook(() => useViewport(svg));
 
     act(() => {
       result.current.zoomBy(2);
@@ -70,10 +62,8 @@ describe('useViewport', () => {
   });
 
   it('zoomBy() clamps scale to [0.2, 4]', () => {
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(makeMockSvg());
-      return useViewport(ref);
-    });
+    const svg = makeMockSvg();
+    const { result } = renderHook(() => useViewport(svg));
 
     act(() => {
       result.current.zoomBy(100);
@@ -87,10 +77,8 @@ describe('useViewport', () => {
   });
 
   it('reset() returns to identity transform', () => {
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(makeMockSvg());
-      return useViewport(ref);
-    });
+    const svg = makeMockSvg();
+    const { result } = renderHook(() => useViewport(svg));
 
     act(() => {
       result.current.zoomBy(2);
@@ -105,10 +93,7 @@ describe('useViewport', () => {
     const svg = makeMockSvg(800, 600);
     document.body.appendChild(svg);
 
-    const { result } = renderHook(() => {
-      const ref = useRef<SVGSVGElement>(svg);
-      return useViewport(ref);
-    });
+    const { result } = renderHook(() => useViewport(svg));
 
     // getBoundingClientRect returns left=0, top=0 so client coords == container coords.
     // Place two pointers: p1 fixed at (300,300), p2 starts at (500,300).
