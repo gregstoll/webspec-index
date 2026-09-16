@@ -1493,18 +1493,24 @@ impl<'a> GraphBuilder<'a> {
     }
 
     fn mark_opaque_anchors(&mut self) {
+        let with_occurrences: std::collections::HashSet<&str> = self
+            .occurrences
+            .values()
+            .map(|o| o.subject_id.as_str())
+            .collect();
+        let implements_sources: std::collections::HashSet<&str> = self
+            .edges
+            .values()
+            .filter(|e| e.relation == Relationship::Implements)
+            .map(|e| e.from.as_str())
+            .collect();
         let opaque: Vec<_> = self
             .nodes
             .values()
             .filter(|node| node.id.starts_with("anchor:"))
             .filter(|node| {
-                !self
-                    .occurrences
-                    .values()
-                    .any(|occurrence| occurrence.subject_id == node.id)
-                    && !self.edges.values().any(|edge| {
-                        edge.from == node.id && edge.relation == Relationship::Implements
-                    })
+                !with_occurrences.contains(node.id.as_str())
+                    && !implements_sources.contains(node.id.as_str())
             })
             .map(|node| node.id.clone())
             .collect();
