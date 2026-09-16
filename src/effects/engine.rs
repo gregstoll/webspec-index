@@ -4,7 +4,7 @@
 //! It performs no I/O and carries no cache or run-publication policy.
 
 use crate::effects::catalog::{Anchor, Catalog, EmitValue};
-use crate::effects::graph::{ExecutionEdge, ExecutionNode};
+use crate::effects::graph::{site_key, ExecutionEdge, ExecutionNode, SiteStore};
 use crate::effects::matcher::{
     continuation_modes, intrinsic_rules, match_operation_with_issues, match_segment, MatchedEffect,
 };
@@ -144,6 +144,7 @@ impl<'a> WitnessGraph<'a> {
     fn witness(
         &self,
         artifact: &AnalysisArtifact,
+        sites: &dyn SiteStore,
         root: usize,
         next: &[Option<(usize, usize)>],
     ) -> Option<Witness> {
@@ -167,12 +168,25 @@ impl<'a> WitnessGraph<'a> {
         let mut state = root;
         while let Some((child, edge)) = next[state] {
             let edge = &artifact.relationships[edge];
+            let site = sites.site(&edge.site_key)?;
+            let context = edge
+                .context
+                .iter()
+                .filter_map(|c| {
+                    let s = sites.site(&c.site_key)?;
+                    Some(ContextItem {
+                        kind: c.kind,
+                        text: s.step_text.clone().unwrap_or_default(),
+                        site: s,
+                    })
+                })
+                .collect();
             witness.hops.push(WitnessHop {
                 from: self.nodes.get(edge.from.as_str())?.subject.clone(),
                 to: self.nodes.get(edge.to.as_str())?.subject.clone(),
                 relation: edge.relation,
-                site: edge.site.clone(),
-                context: edge.context.clone(),
+                site: site.clone(),
+                context,
                 boundary: edge.boundary.clone(),
             });
             if edge.context_truncated
@@ -184,7 +198,7 @@ impl<'a> WitnessGraph<'a> {
                 witness.issues.push(Issue {
                     code: IssueCode::ContextTruncated,
                     message: "witness context was truncated to its display budget".into(),
-                    site: Some(edge.site.clone()),
+                    site: Some(site),
                 });
             }
             state = child;
@@ -207,10 +221,11 @@ pub struct AnalysisArtifact {
     pub relationships: Vec<ExecutionEdge>,
     pub occurrences: Vec<LocalOccurrence>,
     states: Vec<PropagatedState>,
-    pub issues: Vec<Issue>,
+    pub issues: Vec<GraphIssue>,
     pub subject_issue_ids: BTreeMap<String, Vec<IssueId>>,
     pub effect_categories: BTreeMap<String, String>,
     pub defined_body_ids: BTreeMap<String, Vec<String>>,
+    pub sites: BTreeMap<String, SourceSite>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,10 +303,11 @@ struct Builder<'a> {
     /// Built once by [`Self::build_edge_indices`] after all edges are added.
     edges_by_target: HashMap<String, Vec<String>>,
     occurrences: BTreeMap<String, LocalOccurrence>,
-    issue_catalog: Vec<Issue>,
+    issue_catalog: Vec<GraphIssue>,
     issue_ids: BTreeMap<String, IssueId>,
     issues: BTreeMap<String, Vec<IssueId>>,
     definitions: BTreeMap<String, Vec<String>>,
+    sites: BTreeMap<String, SourceSite>,
     states: BTreeMap<StateKey, PropagatedState>,
     selected: BTreeSet<String>,
     active_relationships: BTreeSet<String>,
@@ -315,6 +331,7 @@ impl<'a> Builder<'a> {
             issue_ids: BTreeMap::new(),
             issues: BTreeMap::new(),
             definitions: BTreeMap::new(),
+            sites: BTreeMap::new(),
             states: BTreeMap::new(),
             selected: BTreeSet::new(),
             active_relationships: BTreeSet::new(),
@@ -1096,16 +1113,18 @@ impl<'a> Builder<'a> {
         let updates: Vec<_> = self
             .edges
             .values()
-            .filter(|edge| {
-                edge.site.subject.spec == algorithm.source.spec
-                    && edge.site.subject.anchor == algorithm.source.section_anchor
-                    && edge.site.subject.snapshot_sha == algorithm.source.snapshot_sha
-            })
-            .map(|edge| {
-                let mut context = Vec::new();
+            .filter_map(|edge| {
+                let site = self.sites.get(&edge.site_key)?;
+                if site.subject.spec != algorithm.source.spec
+                    || site.subject.anchor != algorithm.source.section_anchor
+                    || site.subject.snapshot_sha != algorithm.source.snapshot_sha
+                {
+                    return None;
+                }
+                let mut context: Vec<(ContextKind, SourceSite)> = Vec::new();
                 let mut context_truncated = false;
                 let mut step_chain = Vec::new();
-                if let Some(step_id) = &edge.site.subject.step_id {
+                if let Some(step_id) = &site.subject.step_id {
                     let mut current = Some(step_id.as_str());
                     while let Some(id) = current {
                         step_chain.push(id.to_owned());
@@ -1118,17 +1137,13 @@ impl<'a> Builder<'a> {
                     step_chain.reverse();
                     let ancestors: BTreeSet<_> = step_chain.iter().cloned().collect();
 
-                    // The parent step carries ordinary `if`/loop prose when the
-                    // parser has no explicit branch container. Keep that source
-                    // context from the outside in.
                     for parent_id in step_chain.iter().take(step_chain.len().saturating_sub(1)) {
                         if let Some(segment) = first_step_segment(algorithm, parent_id) {
                             let (text, clipped) = truncate_context_excerpt(&segment.text);
                             context_truncated |= clipped;
-                            context.push(ContextItem {
-                                kind: ContextKind::Enclosing,
-                                text: text.clone(),
-                                site: source_site(
+                            context.push((
+                                ContextKind::Enclosing,
+                                source_site(
                                     algorithm,
                                     &segment.source,
                                     Some(parent_id),
@@ -1137,24 +1152,23 @@ impl<'a> Builder<'a> {
                                     None,
                                     Some(text),
                                 ),
-                            });
+                            ));
                         }
                     }
                     for branch in &algorithm.branches {
                         let contains = branch.items.iter().any(|item| match item {
                             crate::parse::steps::StepItem::ChildStep(id) => ancestors.contains(id),
                             crate::parse::steps::StepItem::Segment(id) => {
-                                edge.site.segment_id.as_ref() == Some(id)
+                                site.segment_id.as_ref() == Some(id)
                             }
                             _ => false,
                         });
                         if contains {
                             let (text, clipped) = truncate_context_excerpt(&branch.label);
                             context_truncated |= clipped;
-                            context.push(ContextItem {
-                                kind: ContextKind::Branch,
-                                text: text.clone(),
-                                site: source_site(
+                            context.push((
+                                ContextKind::Branch,
+                                source_site(
                                     algorithm,
                                     &branch.source,
                                     Some(&branch.parent_step_id),
@@ -1167,7 +1181,7 @@ impl<'a> Builder<'a> {
                                     None,
                                     Some(text),
                                 ),
-                            });
+                            ));
                         }
                     }
                 }
@@ -1189,10 +1203,9 @@ impl<'a> Builder<'a> {
                         );
                         let (text, clipped) = truncate_context_excerpt(&binding_text);
                         context_truncated |= clipped;
-                        context.push(ContextItem {
-                            kind: ContextKind::Binding,
-                            text: text.clone(),
-                            site: source_site(
+                        context.push((
+                            ContextKind::Binding,
+                            source_site(
                                 algorithm,
                                 &binding.source,
                                 Some(&binding.step_id),
@@ -1201,13 +1214,13 @@ impl<'a> Builder<'a> {
                                 None,
                                 Some(text),
                             ),
-                        });
+                        ));
                     }
                 }
                 for step_id in step_chain.iter().rev() {
                     if context
                         .iter()
-                        .filter(|item| item.kind == ContextKind::PrecedingExit)
+                        .filter(|(kind, _)| *kind == ContextKind::PrecedingExit)
                         .count()
                         == 2
                     {
@@ -1218,10 +1231,9 @@ impl<'a> Builder<'a> {
                     };
                     let (text, clipped) = truncate_context_excerpt(&exit.text);
                     context_truncated |= clipped;
-                    context.push(ContextItem {
-                        kind: ContextKind::PrecedingExit,
-                        text: text.clone(),
-                        site: source_site(
+                    context.push((
+                        ContextKind::PrecedingExit,
+                        source_site(
                             algorithm,
                             &exit.source,
                             exit.owner_step_id.as_deref(),
@@ -1230,16 +1242,23 @@ impl<'a> Builder<'a> {
                             None,
                             Some(text),
                         ),
-                    });
+                    ));
                 }
                 context_truncated |= context.len() > 8;
                 context.truncate(8);
-                (edge.id.clone(), context, context_truncated)
+                Some((edge.id.clone(), context, context_truncated))
             })
             .collect();
-        for (id, context, context_truncated) in updates {
+        for (id, context_sites, context_truncated) in updates {
+            let refs: Vec<ContextRef> = context_sites
+                .into_iter()
+                .map(|(kind, site)| {
+                    let sk = self.intern_site(site);
+                    ContextRef { kind, site_key: sk }
+                })
+                .collect();
             if let Some(edge) = self.edges.get_mut(&id) {
-                edge.context = context;
+                edge.context = refs;
                 edge.context_truncated = context_truncated;
             }
         }
@@ -1524,7 +1543,7 @@ impl<'a> Builder<'a> {
                     }
                     continue;
                 }
-                let containment = edge.relation == Relationship::Invoke && edge.site.id == edge.to;
+                let containment = edge.relation == Relationship::Invoke && edge.site_id == edge.to;
                 if !containment && self.states.len() as u64 >= self.input.budgets.max_states {
                     self.fixed = false;
                     self.add_issue(
@@ -1602,7 +1621,7 @@ impl<'a> Builder<'a> {
                 && local
                     .evidence
                     .iter()
-                    .any(|evidence| evidence.site.id == edge.site.id)
+                    .any(|evidence| evidence.site.id == edge.site_id)
                 && shares_rule
                 && (local.params == child.params || params_dominate(&local.params, &child.params))
         })
@@ -1625,6 +1644,28 @@ impl<'a> Builder<'a> {
             .iter()
             .filter(|id| self.nodes.get(*id).is_some_and(|node| node.is_body))
             .count() as u64;
+        let active_edges: Vec<ExecutionEdge> = self
+            .edges
+            .into_values()
+            .filter(|edge| self.active_relationships.contains(&edge.id))
+            .collect();
+        let mut referenced_keys: BTreeSet<String> = BTreeSet::new();
+        for edge in &active_edges {
+            referenced_keys.insert(edge.site_key.clone());
+            for ctx in &edge.context {
+                referenced_keys.insert(ctx.site_key.clone());
+            }
+        }
+        for issue in &self.issue_catalog {
+            if let Some(sk) = &issue.site_key {
+                referenced_keys.insert(sk.clone());
+            }
+        }
+        let sites: BTreeMap<String, SourceSite> = self
+            .sites
+            .into_iter()
+            .filter(|(k, _)| referenced_keys.contains(k))
+            .collect();
         AnalysisArtifact {
             engine_version: ANALYSIS_ENGINE_VERSION,
             environment: self.input.environment.to_owned(),
@@ -1639,11 +1680,7 @@ impl<'a> Builder<'a> {
             processed_subjects,
             unprocessed_subjects,
             nodes: self.nodes.into_values().collect(),
-            relationships: self
-                .edges
-                .into_values()
-                .filter(|edge| self.active_relationships.contains(&edge.id))
-                .collect(),
+            relationships: active_edges,
             occurrences: self.occurrences.into_values().collect(),
             states: self.states.into_values().collect(),
             issues: self.issue_catalog,
@@ -1656,7 +1693,14 @@ impl<'a> Builder<'a> {
                 .map(|(kind, definition)| (kind.clone(), definition.category.clone()))
                 .collect(),
             defined_body_ids: self.definitions,
+            sites,
         }
+    }
+
+    fn intern_site(&mut self, site: SourceSite) -> String {
+        let key = site_key(&site);
+        self.sites.entry(key.clone()).or_insert(site);
+        key
     }
 
     fn add_edge(
@@ -1672,14 +1716,17 @@ impl<'a> Builder<'a> {
         if !self.nodes.contains_key(from) || !self.nodes.contains_key(to) {
             return;
         }
-        let id = format!("rel_{}", &digest_serializable(&json!({"from": from, "to": to, "relation": relation, "site": site.id, "execution": execution})).expect("JSON digest")[..20]);
+        let site_id = site.id.clone();
+        let id = format!("rel_{}", &digest_serializable(&json!({"from": from, "to": to, "relation": relation, "site": site_id, "execution": execution})).expect("JSON digest")[..20]);
+        let sk = self.intern_site(site);
         self.edges.entry(id.clone()).or_insert(ExecutionEdge {
             id,
             from: from.to_owned(),
             to: to.to_owned(),
             relation,
             execution,
-            site,
+            site_key: sk,
+            site_id,
             context: Vec::new(),
             context_truncated: false,
             boundary,
@@ -1695,10 +1742,11 @@ impl<'a> Builder<'a> {
         message: impl Into<String>,
         site: Option<SourceSite>,
     ) {
-        let issue = Issue {
+        let sk = site.map(|s| self.intern_site(s));
+        let issue = GraphIssue {
             code,
             message: message.into(),
-            site,
+            site_key: sk,
         };
         let digest = digest_serializable(&issue).expect("serializable issue");
         let issue_id = if let Some(issue_id) = self.issue_ids.get(&digest).copied() {
@@ -1890,11 +1938,11 @@ impl<'a> Builder<'a> {
 }
 
 impl AnalysisArtifact {
-    pub fn issue(&self, id: IssueId) -> Option<&Issue> {
+    pub fn issue(&self, id: IssueId) -> Option<&GraphIssue> {
         self.issues.get(id as usize)
     }
 
-    pub fn issue_catalog(&self) -> impl ExactSizeIterator<Item = (IssueId, &Issue)> {
+    pub fn issue_catalog(&self) -> impl ExactSizeIterator<Item = (IssueId, &GraphIssue)> {
         self.issues
             .iter()
             .enumerate()
@@ -2029,10 +2077,11 @@ impl AnalysisArtifact {
     pub fn summaries(
         &self,
         filter: Option<&EffectFilter>,
+        sites: &dyn SiteStore,
     ) -> Result<Vec<ArtifactSummary>, RequestError> {
         self.summary_records(filter)?
             .into_iter()
-            .map(|record| self.materialize_record(record))
+            .map(|record| self.materialize_record(record, sites))
             .collect()
     }
 
@@ -2040,6 +2089,7 @@ impl AnalysisArtifact {
         &self,
         selector: &SubjectSelector,
         filter: Option<&EffectFilter>,
+        sites: &dyn SiteStore,
     ) -> Result<ArtifactSummary, RequestError> {
         selector.validate()?;
         let node_id = self.resolve_selector(selector)?;
@@ -2051,7 +2101,7 @@ impl AnalysisArtifact {
                     .find(|node| node.id == node_id)
                     .is_some_and(|node| node.subject == record.subject)
             })
-            .map(|record| self.materialize_record(record))
+            .map(|record| self.materialize_record(record, sites))
             .transpose()?
             .ok_or_else(|| {
                 request_error(
@@ -2065,9 +2115,9 @@ impl AnalysisArtifact {
         if issue_ids
             .iter()
             .filter_map(|id| self.issue(*id))
-            .any(|issue| {
+            .any(|graph_issue| {
                 !matches!(
-                    issue.code,
+                    graph_issue.code,
                     IssueCode::WitnessBudget | IssueCode::ContextTruncated
                 )
             })
@@ -2081,8 +2131,9 @@ impl AnalysisArtifact {
     fn materialize_record(
         &self,
         record: ArtifactSummaryRecord,
+        sites: &dyn SiteStore,
     ) -> Result<ArtifactSummary, RequestError> {
-        let issues = self.materialize_issues(&record.issue_ids)?;
+        let issues = self.materialize_issues(&record.issue_ids, sites)?;
         let defined_bodies = record
             .defined_bodies
             .into_iter()
@@ -2090,7 +2141,7 @@ impl AnalysisArtifact {
                 Ok(ArtifactDefinedBody {
                     subject: body.subject,
                     effects: body.effects,
-                    issues: self.materialize_issues(&body.issue_ids)?,
+                    issues: self.materialize_issues(&body.issue_ids, sites)?,
                 })
             })
             .collect::<Result<_, RequestError>>()?;
@@ -2103,15 +2154,24 @@ impl AnalysisArtifact {
         })
     }
 
-    fn materialize_issues(&self, issue_ids: &[IssueId]) -> Result<Vec<Issue>, RequestError> {
+    pub fn materialize_issues(
+        &self,
+        issue_ids: &[IssueId],
+        sites: &dyn SiteStore,
+    ) -> Result<Vec<Issue>, RequestError> {
         issue_ids
             .iter()
             .map(|id| {
-                self.issue(*id).cloned().ok_or_else(|| {
+                let graph_issue = self.issue(*id).ok_or_else(|| {
                     request_error(
                         RequestErrorCode::AnalysisUnavailable,
                         format!("analysis artifact references missing issue {id}"),
                     )
+                })?;
+                Ok(Issue {
+                    code: graph_issue.code,
+                    message: graph_issue.message.clone(),
+                    site: graph_issue.site_key.as_ref().and_then(|sk| sites.site(sk)),
                 })
             })
             .collect()
@@ -2121,6 +2181,7 @@ impl AnalysisArtifact {
     /// backward BFS. Each propagated state is visited once, including cycles.
     pub(crate) fn prepare_witnesses(
         &self,
+        sites: &dyn SiteStore,
         mut emit: impl FnMut(&Subject, &str, Witness) -> Result<(), RequestError>,
     ) -> Result<(), RequestError> {
         let graph = WitnessGraph::new(self);
@@ -2151,7 +2212,7 @@ impl AnalysisArtifact {
             let effect = effect_digest(&state.key.kind, &state.key.params)
                 .expect("serializable effect identity");
             if emitted.insert((&state.key.subject_id, effect.clone())) {
-                if let Some(witness) = graph.witness(self, i, &next) {
+                if let Some(witness) = graph.witness(self, sites, i, &next) {
                     emit(
                         &graph.nodes[state.key.subject_id.as_str()].subject,
                         &handles[&effect],
@@ -2175,9 +2236,10 @@ impl AnalysisArtifact {
         selector: &SubjectSelector,
         filter: Option<&EffectFilter>,
         options: &ExplanationOptions,
+        sites: &dyn SiteStore,
     ) -> Result<ArtifactExplanation, RequestError> {
         options.validate()?;
-        let summary = self.summary(selector, filter)?;
+        let summary = self.summary(selector, filter, sites)?;
         let node_id = self.resolve_selector(selector)?;
         let graph = WitnessGraph::new(self);
         let group_by_effect: BTreeMap<_, _> = summary
@@ -2254,7 +2316,7 @@ impl AnalysisArtifact {
                 remaining -= 1;
                 spent = true;
                 if root_groups[state] == Some(group) {
-                    if let Some(witness) = graph.witness(self, state, &next) {
+                    if let Some(witness) = graph.witness(self, sites, state, &next) {
                         witnesses[group].push(witness);
                     }
                     if witnesses[group].len()
@@ -2806,7 +2868,12 @@ mod tests {
             <dfn id="source">task source</dfn>. <dfn id="window">active window</dfn>.</p>"##;
         let artifact = artifact_from_html("root", "generic", DiscoveryBudgets::default(), html);
         let result = artifact
-            .explain(&selector("root"), None, &ExplanationOptions::default())
+            .explain(
+                &selector("root"),
+                None,
+                &ExplanationOptions::default(),
+                &artifact.sites,
+            )
             .unwrap();
         let effect = result
             .summary
@@ -2853,7 +2920,12 @@ mod tests {
             let artifact =
                 artifact_from_html("root", "generic", DiscoveryBudgets::default(), &html);
             let result = artifact
-                .explain(&selector("root"), None, &ExplanationOptions::default())
+                .explain(
+                    &selector("root"),
+                    None,
+                    &ExplanationOptions::default(),
+                    &artifact.sites,
+                )
                 .unwrap();
             let effect = result
                 .summary
@@ -2986,6 +3058,7 @@ mod tests {
                     max_states: artifact.states.len() as u64,
                     limit: 1,
                 },
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(explained.explanations[0].witnesses.len(), 1);
@@ -3012,7 +3085,12 @@ mod tests {
         );
         let artifact = artifact_from_html("level-0", "generic", DiscoveryBudgets::default(), &html);
         let result = artifact
-            .explain(&selector("level-0"), None, &ExplanationOptions::default())
+            .explain(
+                &selector("level-0"),
+                None,
+                &ExplanationOptions::default(),
+                &artifact.sites,
+            )
             .unwrap();
         let effect = result
             .summary
@@ -3060,7 +3138,9 @@ mod tests {
           <li><a href="#fire">Fire an event</a> named <code>"WASSUP"</code>.</li></ol>
         </div><p><dfn id="fire">fire an event</dfn>.</p>"##;
         let artifact = artifact_from_html("root", "generic", DiscoveryBudgets::default(), html);
-        let summary = artifact.summary(&selector("root"), None).unwrap();
+        let summary = artifact
+            .summary(&selector("root"), None, &artifact.sites)
+            .unwrap();
         let effect = summary
             .effects
             .iter()
@@ -3200,6 +3280,7 @@ mod tests {
                     max_states: 5,
                     limit: 2,
                 },
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(explanation.explanations.len(), 2);
@@ -3244,6 +3325,7 @@ mod tests {
                     max_states: 100,
                     limit: 1,
                 },
+                &artifact.sites,
             )
             .unwrap();
         let witness = &explanation.explanations[0].witnesses[0];
@@ -3253,7 +3335,7 @@ mod tests {
         assert!(explanation.explanations[0].issues.is_empty());
         let mut prepared = Vec::new();
         artifact
-            .prepare_witnesses(|subject, _, witness| {
+            .prepare_witnesses(&artifact.sites, |subject, _, witness| {
                 if subject.anchor == "ranked"
                     && subject.step_id.is_none()
                     && subject.body_id.is_none()
@@ -3284,6 +3366,7 @@ mod tests {
                     max_states: 100,
                     limit: 1,
                 },
+                &artifact.sites,
             )
             .unwrap();
         assert!(explanation.explanations[0].witnesses.is_empty());
@@ -3330,7 +3413,9 @@ rules:
             html,
             catalog,
         );
-        let summary = artifact.summary(&selector("ambiguous"), None).unwrap();
+        let summary = artifact
+            .summary(&selector("ambiguous"), None, &artifact.sites)
+            .unwrap();
         assert!(summary.effects.is_empty());
         assert_eq!(summary.coverage, Coverage::Partial);
         assert!(summary
@@ -3346,7 +3431,9 @@ rules:
     #[test]
     fn operation_scoped_captures_keep_two_direct_occurrences_distinct() {
         let artifact = artifact("direct");
-        let result = artifact.summary(&selector("direct"), None).unwrap();
+        let result = artifact
+            .summary(&selector("direct"), None, &artifact.sites)
+            .unwrap();
         assert_eq!(
             result
                 .effects
@@ -3383,12 +3470,19 @@ rules:
     #[test]
     fn variable_capture_keeps_generic_effect_and_original_expression() {
         let artifact = artifact("variable");
-        let result = artifact.summary(&selector("variable"), None).unwrap();
+        let result = artifact
+            .summary(&selector("variable"), None, &artifact.sites)
+            .unwrap();
         assert_eq!(result.effects.len(), 1);
         assert_eq!(result.effects[0].params["name"], None);
         assert_eq!(result.coverage, Coverage::Partial);
         let explanation = artifact
-            .explain(&selector("variable"), None, &ExplanationOptions::default())
+            .explain(
+                &selector("variable"),
+                None,
+                &ExplanationOptions::default(),
+                &artifact.sites,
+            )
             .unwrap();
         assert_eq!(
             explanation.explanations[0].witnesses[0].terminal_evidence[0]
@@ -3402,7 +3496,9 @@ rules:
     #[test]
     fn anchorless_text_rules_match_segments_once_per_regex_occurrence() {
         let text_artifact = artifact("text-only");
-        let result = text_artifact.summary(&selector("text-only"), None).unwrap();
+        let result = text_artifact
+            .summary(&selector("text-only"), None, &text_artifact.sites)
+            .unwrap();
         assert_eq!(result.effects.len(), 1);
         assert_eq!(result.effects[0].kind, "script.opportunity");
         assert_eq!(result.effects[0].execution, vec![Execution::Inline]);
@@ -3422,7 +3518,9 @@ rules:
         );
 
         let other = artifact("text-other");
-        let other_result = other.summary(&selector("text-other"), None).unwrap();
+        let other_result = other
+            .summary(&selector("text-other"), None, &other.sites)
+            .unwrap();
         assert!(other_result.effects.is_empty());
         assert!(!other
             .occurrences
@@ -3441,6 +3539,7 @@ rules:
                     ..selector("text-definition")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert!(definition.effects.is_empty());
@@ -3458,6 +3557,7 @@ rules:
                     ..selector("text-definition")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert!(invocation.effects.iter().any(|effect| {
@@ -3476,6 +3576,7 @@ rules:
                     ..EffectFilter::default()
                 }),
                 &ExplanationOptions::default(),
+                &artifact.sites,
             )
             .unwrap();
         let witness = &explanation.explanations[0].witnesses[0];
@@ -3493,7 +3594,7 @@ rules:
     fn clipped_witness_context_is_bounded_and_reports_an_issue_only_on_the_witness() {
         let clipped_artifact = artifact("clipped-context");
         let summary = clipped_artifact
-            .summary(&selector("clipped-context"), None)
+            .summary(&selector("clipped-context"), None, &clipped_artifact.sites)
             .unwrap();
         assert_eq!(summary.coverage, Coverage::Complete);
         assert!(!summary
@@ -3509,6 +3610,7 @@ rules:
                     ..EffectFilter::default()
                 }),
                 &ExplanationOptions::default(),
+                &clipped_artifact.sites,
             )
             .unwrap();
         let witness = &explanation.explanations[0].witnesses[0];
@@ -3525,7 +3627,8 @@ rules:
             .iter()
             .any(|issue| issue.code == IssueCode::ContextTruncated));
 
-        let deep = artifact("item-clipped-context")
+        let deep_artifact = artifact("item-clipped-context");
+        let deep = deep_artifact
             .explain(
                 &selector("item-clipped-context"),
                 Some(&EffectFilter {
@@ -3533,6 +3636,7 @@ rules:
                     ..EffectFilter::default()
                 }),
                 &ExplanationOptions::default(),
+                &deep_artifact.sites,
             )
             .unwrap();
         let deep_witness = &deep.explanations[0].witnesses[0];
@@ -3558,6 +3662,7 @@ rules:
                     ..selector("caller-r")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert!(definition.effects.is_empty());
@@ -3575,6 +3680,7 @@ rules:
                     ..selector("caller-r")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert!(invocation.effects.iter().any(|effect| {
@@ -3585,7 +3691,9 @@ rules:
     #[test]
     fn same_segment_queue_has_distinct_operation_and_body_scope() {
         let artifact = artifact("same-segment");
-        let root = artifact.summary(&selector("same-segment"), None).unwrap();
+        let root = artifact
+            .summary(&selector("same-segment"), None, &artifact.sites)
+            .unwrap();
         assert!(root.effects.iter().any(|effect| {
             effect.kind == "scheduling.enqueue" && effect.execution == vec![Execution::Inline]
         }));
@@ -3611,6 +3719,7 @@ rules:
                     body_id: body.subject.body_id.clone(),
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(body_result.effects.len(), 1);
@@ -3681,7 +3790,7 @@ rules:
         })
         .unwrap();
         let root = artifact
-            .summary(&selector("conditional-remainder"), None)
+            .summary(&selector("conditional-remainder"), None, &artifact.sites)
             .unwrap();
         let event = root
             .effects
@@ -3699,6 +3808,7 @@ rules:
                     ..selector("conditional-remainder")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(
@@ -3717,6 +3827,7 @@ rules:
                     ..selector("conditional-remainder")
                 },
                 None,
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(step_two.effects[0].execution, vec![Execution::Inline]);
@@ -3725,7 +3836,7 @@ rules:
     #[test]
     fn call_site_bodies_do_not_pollute_other_callers_or_primitive() {
         let r = artifact("caller-r");
-        let r_summary = r.summary(&selector("caller-r"), None).unwrap();
+        let r_summary = r.summary(&selector("caller-r"), None, &r.sites).unwrap();
         assert!(r_summary
             .effects
             .iter()
@@ -3737,7 +3848,7 @@ rules:
         ));
 
         let s = artifact("caller-s");
-        let s_summary = s.summary(&selector("caller-s"), None).unwrap();
+        let s_summary = s.summary(&selector("caller-s"), None, &s.sites).unwrap();
         assert!(s_summary
             .effects
             .iter()
@@ -3748,7 +3859,9 @@ rules:
         ));
 
         let queue = artifact("queue");
-        let queue_summary = queue.summary(&selector("queue"), None).unwrap();
+        let queue_summary = queue
+            .summary(&selector("queue"), None, &queue.sites)
+            .unwrap();
         assert_eq!(queue_summary.effects.len(), 1);
         assert_eq!(queue_summary.effects[0].kind, "scheduling.enqueue");
     }
@@ -3757,7 +3870,9 @@ rules:
     fn occurrence_aware_propagation_converges_on_cycles_and_explanation_is_bounded() {
         let artifact = artifact("cycle-r");
         assert!(artifact.reached_fixed_point);
-        let result = artifact.summary(&selector("cycle-r"), None).unwrap();
+        let result = artifact
+            .summary(&selector("cycle-r"), None, &artifact.sites)
+            .unwrap();
         assert_eq!(result.effects.len(), 1);
         assert_eq!(
             result.effects[0].params["name"],
@@ -3772,6 +3887,7 @@ rules:
                     max_states: 20,
                     limit: 1,
                 },
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(explanation.explanations.len(), 1);
@@ -3782,7 +3898,9 @@ rules:
     #[test]
     fn unknown_body_timing_is_candidate_partial_and_call_site_local() {
         let artifact = artifact("unknown-timing");
-        let result = artifact.summary(&selector("unknown-timing"), None).unwrap();
+        let result = artifact
+            .summary(&selector("unknown-timing"), None, &artifact.sites)
+            .unwrap();
         let event = result
             .effects
             .iter()
@@ -3800,7 +3918,9 @@ rules:
     #[test]
     fn opaque_indexed_anchor_is_partial_instead_of_confidently_empty() {
         let artifact = artifact("consume");
-        let result = artifact.summary(&selector("consume"), None).unwrap();
+        let result = artifact
+            .summary(&selector("consume"), None, &artifact.sites)
+            .unwrap();
         assert!(result.effects.is_empty());
         assert_eq!(result.coverage, Coverage::Partial);
         assert!(result
@@ -3862,9 +3982,11 @@ rules:
         assert_eq!(roundtripped, artifact);
         assert_eq!(
             roundtripped
-                .summary(&selector("unknown-timing"), None)
+                .summary(&selector("unknown-timing"), None, &roundtripped.sites)
                 .unwrap(),
-            artifact.summary(&selector("unknown-timing"), None).unwrap()
+            artifact
+                .summary(&selector("unknown-timing"), None, &artifact.sites)
+                .unwrap()
         );
     }
 
@@ -3879,7 +4001,9 @@ rules:
                 max_states: 1,
             },
         );
-        let result = artifact.summary(&selector("direct"), None).unwrap();
+        let result = artifact
+            .summary(&selector("direct"), None, &artifact.sites)
+            .unwrap();
         assert_eq!(result.effects.len(), 2);
         assert_eq!(result.coverage, Coverage::Partial);
         let explanation = artifact
@@ -3891,6 +4015,7 @@ rules:
                     max_states: 1,
                     limit: 1,
                 },
+                &artifact.sites,
             )
             .unwrap();
         assert_eq!(explanation.summary.effects.len(), 2);
@@ -3903,12 +4028,16 @@ rules:
     #[test]
     fn environment_mapping_is_explicit_and_mentions_do_not_propagate() {
         let generic = artifact("host-caller");
-        let generic_result = generic.summary(&selector("host-caller"), None).unwrap();
+        let generic_result = generic
+            .summary(&selector("host-caller"), None, &generic.sites)
+            .unwrap();
         assert!(generic_result.effects.is_empty());
         assert_eq!(generic_result.coverage, Coverage::Partial);
 
         let web = artifact_with("host-caller", "web", DiscoveryBudgets::default());
-        let web_result = web.summary(&selector("host-caller"), None).unwrap();
+        let web_result = web
+            .summary(&selector("host-caller"), None, &web.sites)
+            .unwrap();
         assert!(web_result
             .effects
             .iter()
@@ -3918,6 +4047,7 @@ rules:
                 &selector("host-caller"),
                 None,
                 &ExplanationOptions::default(),
+                &web.sites,
             )
             .unwrap();
         assert!(explanation
@@ -3929,7 +4059,9 @@ rules:
                 .any(|hop| hop.relation == Relationship::Implements))));
 
         let mention = artifact("mention");
-        let mention_result = mention.summary(&selector("mention"), None).unwrap();
+        let mention_result = mention
+            .summary(&selector("mention"), None, &mention.sites)
+            .unwrap();
         assert!(mention_result.effects.is_empty());
         assert_eq!(mention_result.coverage, Coverage::Complete);
         assert!(mention
@@ -3954,7 +4086,7 @@ rules:
         ];
         for (anchor, expected_count) in cases {
             let a = artifact(anchor);
-            let result = a.summary(&selector(anchor), None).unwrap();
+            let result = a.summary(&selector(anchor), None, &a.sites).unwrap();
             assert_eq!(
                 result.effects.len(),
                 expected_count,
@@ -3963,11 +4095,15 @@ rules:
             );
         }
         let direct = artifact("direct");
-        let direct_result = direct.summary(&selector("direct"), None).unwrap();
+        let direct_result = direct
+            .summary(&selector("direct"), None, &direct.sites)
+            .unwrap();
         let mut effect_ids: Vec<_> = direct_result.effects.iter().map(|e| e.id.clone()).collect();
         effect_ids.sort();
         let direct2 = artifact("direct");
-        let direct2_result = direct2.summary(&selector("direct"), None).unwrap();
+        let direct2_result = direct2
+            .summary(&selector("direct"), None, &direct2.sites)
+            .unwrap();
         let mut effect_ids2: Vec<_> = direct2_result
             .effects
             .iter()
@@ -4119,7 +4255,9 @@ rules:
         }
 
         // No unresolved_invocation issues for concept references.
-        let result = artifact.summary(&selector("caller"), None).unwrap();
+        let result = artifact
+            .summary(&selector("caller"), None, &artifact.sites)
+            .unwrap();
         let unresolved: Vec<_> = result
             .issues
             .iter()
@@ -4215,5 +4353,29 @@ rules:
                 edge.relation
             );
         }
+    }
+
+    #[test]
+    fn identical_sites_share_one_key_and_differ_by_step_text() {
+        use crate::effects::graph::site_key;
+        let a = SourceSite {
+            id: "s".into(),
+            subject: Subject {
+                spec: "A".into(),
+                anchor: "x".into(),
+                snapshot_sha: "hash:1".into(),
+                step_id: None,
+                step_path: None,
+                body_id: None,
+            },
+            url: "u".into(),
+            segment_id: None,
+            span: None,
+            step_text: Some("full".into()),
+        };
+        let mut b = a.clone();
+        b.step_text = Some("full\u{2026}".into());
+        assert_eq!(site_key(&a), site_key(&a.clone()));
+        assert_ne!(site_key(&a), site_key(&b));
     }
 }

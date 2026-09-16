@@ -18,7 +18,7 @@ fn main() -> Result<()> {
         body_id: None,
     };
     let started = Instant::now();
-    let result = artifact.explain(&subject, None, &ExplanationOptions::default())?;
+    let result = artifact.explain(&subject, None, &ExplanationOptions::default(), &artifact.sites)?;
     println!(
         "{}",
         serde_json::json!({

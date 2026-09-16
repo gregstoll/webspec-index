@@ -206,6 +206,13 @@ pub enum ContextKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ContextRef {
+    pub kind: ContextKind,
+    pub site_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContextItem {
     pub kind: ContextKind,
     pub text: String,
@@ -262,6 +269,15 @@ pub enum IssueCode {
     UnsupportedPreview,
     WitnessBudget,
     ContextTruncated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphIssue {
+    pub code: IssueCode,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,7 +2,7 @@
 use super::bundled::default_catalog;
 use super::catalog::Catalog;
 use super::engine::{
-    self, AnalysisArtifact, AnalysisInput, ArtifactSummary, IndexedAnchor, SourceSpec,
+    self, AnalysisArtifact, AnalysisInput, ArtifactSummary, IndexedAnchor, IssueId, SourceSpec,
 };
 use super::model::*;
 #[cfg(any(feature = "native", test))]
@@ -665,7 +665,7 @@ fn compute_impl(
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut witnesses = Vec::new();
-        artifact.prepare_witnesses(|subject, effect, witness| {
+        artifact.prepare_witnesses(&artifact.sites, |subject, effect, witness| {
             witnesses.push((
                 key(&selector(subject))?,
                 effect.to_owned(),
@@ -716,7 +716,8 @@ pub fn get_effect_summary_on(
             return Ok(result);
         }
     }
-    let summary = artifact(conn, &run)?.summary(&selected, request.filter.as_ref())?;
+    let a = artifact(conn, &run)?;
+    let summary = a.summary(&selected, request.filter.as_ref(), &a.sites)?;
     Ok(envelope(summary, &run_manifest(&run)?, &run.analysis_id))
 }
 
@@ -787,9 +788,14 @@ pub fn explain_effects(
             .ok_or_else(|| unavailable("analysis was removed"))?;
         let mut selected = request.subject.clone();
         selected.spec = summary.subject.spec.clone();
-        artifact(&conn, &run)?
-            .explain(&selected, request.filter.as_ref(), &request.explanation)?
-            .explanations
+        let a = artifact(&conn, &run)?;
+        a.explain(
+            &selected,
+            request.filter.as_ref(),
+            &request.explanation,
+            &a.sites,
+        )?
+        .explanations
     } else {
         Vec::new()
     };
@@ -818,16 +824,18 @@ pub fn recompute_effects(
     let catalog = default_catalog(&request.options.rule_paths)?;
     let run = compute(&conn, &catalog, scope, &request.options)?;
     let artifact = artifact(&conn, &run)?;
+    let all_issue_ids: Vec<_> = (0..artifact.issues.len() as IssueId).collect();
+    let materialized_issues = artifact.materialize_issues(&all_issue_ids, &artifact.sites)?;
     Ok(RecomputeEffectsResult {
         schema_version: EFFECTS_SCHEMA_VERSION,
         analysis_id: run.analysis_id.clone(),
         input_manifest: run_manifest(&run)?,
-        processed_subjects: artifact.processed_subjects,
-        unprocessed_subjects: artifact.unprocessed_subjects,
+        processed_subjects: artifact.processed_subjects.clone(),
+        unprocessed_subjects: artifact.unprocessed_subjects.clone(),
         body_count: artifact.counts.bodies,
         relationship_count: artifact.counts.relationships,
         state_count: artifact.counts.states,
-        issues: artifact.issues,
+        issues: materialized_issues,
     })
 }
 
