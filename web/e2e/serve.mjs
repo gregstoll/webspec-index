@@ -29,7 +29,9 @@ function resolveFile(root, pathname) {
   }
 }
 
-export function startServer(root) {
+// `dbDir` serves the database chunks for `/db/*` from a directory outside `dist`, so the
+// e2e run can use the small fixture export while `public/db` keeps the real one.
+export function startServer(root, { dbDir } = {}) {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       const pathname = new URL(req.url, 'http://localhost').pathname;
@@ -37,7 +39,9 @@ export function startServer(root) {
 
       const filePath = pathname === '/'
         ? indexPath
-        : resolveFile(root, pathname);
+        : dbDir && pathname.startsWith('/db/')
+          ? resolveFile(dbDir, pathname.slice('/db/'.length))
+          : resolveFile(root, pathname);
 
       if (!filePath) {
         res.writeHead(404);

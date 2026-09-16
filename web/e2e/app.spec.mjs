@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(__dirname, '../dist');
+const dbDir = process.env.E2E_DB_DIR ?? resolve(__dirname, '../../target/fixture-export');
 
 const args = process.argv.slice(2);
 const engineIdx = args.indexOf('--engine');
@@ -42,7 +43,7 @@ async function assertCount(page, selector, expected, timeout = 10000) {
 }
 
 async function run() {
-  const { port, close } = await startServer(distDir);
+  const { port, close } = await startServer(distDir, { dbDir });
   const base = `http://127.0.0.1:${port}`;
   console.log(`server  ${base}  (${engineName})`);
 

@@ -9,6 +9,7 @@
     "dev": "npm run prepare:wasm && vite",
     "build": "npm run prepare:wasm && tsc --noEmit && vite build",
     "build:mock": "VITE_BACKEND=mock tsc --noEmit && VITE_BACKEND=mock vite build",
+    "build:e2e": "WEBSPEC_SKIP_PUBLIC_DB=1 npm run build",
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "node e2e/app.spec.mjs"

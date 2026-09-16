@@ -4,6 +4,12 @@ import preact from '@preact/preset-vite';
 export default defineConfig({
   base: './',
   plugins: [preact()],
+  build: {
+    // public/db holds the database export, which can be over a gigabyte during
+    // development. The e2e build serves the fixture database from its own directory
+    // instead of copying public/ into dist/.
+    copyPublicDir: process.env['WEBSPEC_SKIP_PUBLIC_DB'] !== '1',
+  },
   worker: {
     format: 'es',
     rollupOptions: {

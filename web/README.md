@@ -4,29 +4,36 @@ Static Preact app that browses the webspec-index database of WHATWG, W3C, and TC
 
 ## Running locally
 
-**Three-step setup loop:**
+**Setup loop:**
 
 ```sh
 # 1. Build the wasm package (only needed after Rust changes)
 ./crates/webspec-index-wasm/build.sh
 
-# 2a. Use the fixture export (fast, no full database needed)
-cargo run --example fixture_export -- target/fixture-export
-cd web && npm run prepare:db   # copies target/fixture-export → public/db/
-
-# 2b. Or point at a real export
-cd web && WEBSPEC_EXPORT_DIR=/path/to/export npm run prepare:db
+# 2. Put a database export into public/db/. A real one, a few specs for a quick loop:
+webspec-index export-web --out web/public/db --specs HTML,DOM,FETCH,URL,INFRA
+# or every WHATWG/W3C/TC39 spec (needs `webspec-index effects --all --summary-only` first):
+webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39
 
 # 3. Start the dev server
-npm run dev        # runs prepare:wasm, then Vite on http://localhost:5173
+cd web && npm run dev   # runs prepare:wasm, then Vite on http://localhost:5173
+```
+
+The browser end-to-end test never touches `public/db`: it builds without copying `public/`
+and serves the fixture export from `target/fixture-export` itself.
+
+```sh
+cargo run --example fixture_export -- target/fixture-export
+cd web && npm run build:e2e && npm run e2e     # Firefox; E2E_DB_DIR overrides the fixture dir
 ```
 
 Other commands:
 
 ```sh
-npm test           # vitest unit tests (router + dispatch + WorkerClient + MockClient)
-npm run build      # prepare:wasm + type-check + production build → dist/
+npm test           # vitest unit tests
+npm run build      # prepare:wasm + type-check + production build → dist/ (copies public/db)
 npm run build:mock # build with VITE_BACKEND=mock (no wasm, uses in-memory fixtures)
+npm run prepare:db [DIR]   # copy an export directory into public/db/ (default target/fixture-export)
 ```
 
 ### VITE_BACKEND=mock escape hatch

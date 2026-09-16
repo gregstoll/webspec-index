@@ -234,7 +234,7 @@ jobs:
         run: npm test && npx tsc --noEmit
       - name: Build
         working-directory: web
-        run: npm run prepare:db && npm run build
+        run: npm run build:e2e
       - name: End to end
         working-directory: web
         run: npm run e2e
