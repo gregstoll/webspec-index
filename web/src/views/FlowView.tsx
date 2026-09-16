@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
 import type { FlowResult } from '../api/types';
 import { useRequest } from '../hooks/useRequest';
@@ -13,7 +14,11 @@ interface Props {
   onSelect?: (id: string) => void;
 }
 
+const FLOW_LAYOUT_OPTS = { nodesep: 24, ranksep: 36, labelWidth: 44 } as const;
+
 export function FlowView({ client, spec, anchor, selectedId, onSelect }: Props) {
+  const [callsAsNodes, setCallsAsNodes] = useState(false);
+
   const state = useRequest<{ type: 'flow'; result: FlowResult }>(
     client,
     { type: 'flow', target: `${spec}#${anchor}` },
@@ -26,7 +31,7 @@ export function FlowView({ client, spec, anchor, selectedId, onSelect }: Props) 
   }
 
   const { result } = state.value;
-  const graph = buildFlowGraph(result);
+  const graph = buildFlowGraph(result, { callsAsNodes });
 
   return (
     <div class="flow-view">
@@ -36,7 +41,19 @@ export function FlowView({ client, spec, anchor, selectedId, onSelect }: Props) 
         selectedId={selectedId}
         onSelect={onSelect}
         ariaLabel={`Algorithm flowchart for ${spec}#${anchor}`}
+        initialView="top"
+        layoutOpts={FLOW_LAYOUT_OPTS}
       />
+      <div class="flow-controls">
+        <button
+          type="button"
+          aria-pressed={callsAsNodes}
+          onClick={() => setCallsAsNodes((v) => !v)}
+          class="flow-toggle"
+        >
+          Show calls as nodes
+        </button>
+      </div>
       {result.issues.length > 0 && (
         <details class="flow-issues">
           <summary>{result.issues.length} steps not understood</summary>

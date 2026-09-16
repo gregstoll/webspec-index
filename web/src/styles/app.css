@@ -735,3 +735,37 @@ code, pre, .mono {
     max-height: none;
   }
 }
+
+/* ── Flow view ──────────────────────────────────────────────────────────── */
+
+.flow-controls {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.flow-toggle {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.flow-toggle[aria-pressed="true"] {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.flow-toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.flow-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

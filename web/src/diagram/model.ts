@@ -92,13 +92,13 @@ export function mergeGraphs(a: DiagramGraph, b: DiagramGraph): DiagramGraph {
 }
 
 /**
- * Monospace label size estimate: 8 px per character, wraps at 32 chars.
+ * Monospace label size estimate: 8 px per character, wraps at `labelWidth` chars (default 32).
  * Line height 18 px.
  */
-export function measureLabel(label: string): { width: number; height: number } {
+export function measureLabel(label: string, labelWidth = 32): { width: number; height: number } {
   const LINE_H = 18;
   const CHAR_W = 8;
-  const WRAP = 32;
+  const WRAP = labelWidth;
 
   const words = label.split(' ');
   const lines: string[] = [];

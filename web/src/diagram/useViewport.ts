@@ -22,6 +22,8 @@ function dist(a: { x: number; y: number }, b: { x: number; y: number }): number 
 export interface Viewport {
   transform: Transform;
   fit: (layout: Layout) => void;
+  /** Set scale to 1 and scroll so the topmost node is visible at the top-left with a small margin. */
+  top: (layout: Layout) => void;
   zoomBy: (factor: number, center?: { x: number; y: number }) => void;
   reset: () => void;
 }
@@ -75,6 +77,18 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
     },
     [containerRef]
   );
+
+  const top = useCallback((layout: Layout) => {
+    const MARGIN = 16;
+    if (layout.nodes.length === 0) {
+      setTransform({ x: MARGIN, y: MARGIN, k: 1 });
+      return;
+    }
+    // Find the topmost (smallest top edge) and leftmost node.
+    const minY = Math.min(...layout.nodes.map((n) => n.y - n.height / 2));
+    const minX = Math.min(...layout.nodes.map((n) => n.x - n.width / 2));
+    setTransform({ x: MARGIN - minX, y: MARGIN - minY, k: 1 });
+  }, []);
 
   const zoomBy = useCallback(
     (factor: number, center?: { x: number; y: number }) => {
@@ -191,5 +205,5 @@ export function useViewport(containerRef: RefObject<SVGSVGElement>): Viewport {
     };
   }, [containerRef]);
 
-  return { transform, fit, zoomBy, reset };
+  return { transform, fit, top, zoomBy, reset };
 }

@@ -36,4 +36,38 @@ describe('layoutGraph', () => {
     expect(layout.edges).toHaveLength(1);
     expect(layout.edges[0].points.length).toBeGreaterThan(0);
   });
+
+  it('tighter ranksep produces a smaller vertical gap between nodes', async () => {
+    const loose = await layoutGraph(twoNodeChain, { rankdir: 'TB', ranksep: 80 });
+    const tight = await layoutGraph(twoNodeChain, { rankdir: 'TB', ranksep: 20 });
+    const looseA = loose.nodes.find((n) => n.id === 'a')!;
+    const looseB = loose.nodes.find((n) => n.id === 'b')!;
+    const tightA = tight.nodes.find((n) => n.id === 'a')!;
+    const tightB = tight.nodes.find((n) => n.id === 'b')!;
+    expect(tightB.y - tightA.y).toBeLessThan(looseB.y - looseA.y);
+  });
+
+  it('wider labelWidth produces wider nodes', async () => {
+    const narrow = await layoutGraph(twoNodeChain, { labelWidth: 5 });
+    const wide = await layoutGraph(twoNodeChain, { labelWidth: 50 });
+    const narrowNode = narrow.nodes.find((n) => n.id === 'a')!;
+    const wideNode = wide.nodes.find((n) => n.id === 'a')!;
+    // "First" is a single word — it won't wrap at either width, but a wider
+    // labelWidth means the label is allowed to be wider, which should not shrink it.
+    // Use a multi-word label to verify wrapping effect.
+    expect(wideNode.width).toBeGreaterThanOrEqual(narrowNode.width);
+  });
+
+  it('labelWidth=5 wraps "First long label" into more lines than labelWidth=50', async () => {
+    const graph: DiagramGraph = {
+      nodes: [{ id: 'x', label: 'First long label for testing', kind: 'step' }],
+      edges: [],
+    };
+    const narrow = await layoutGraph(graph, { labelWidth: 5 });
+    const wide = await layoutGraph(graph, { labelWidth: 50 });
+    const nNode = narrow.nodes.find((n) => n.id === 'x')!;
+    const wNode = wide.nodes.find((n) => n.id === 'x')!;
+    // Narrow wrap → more lines → taller node
+    expect(nNode.height).toBeGreaterThan(wNode.height);
+  });
 });

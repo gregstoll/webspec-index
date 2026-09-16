@@ -22,21 +22,35 @@ export interface Layout {
 const PAD_X = 24;
 const PAD_Y = 16;
 
+export interface LayoutOptions {
+  rankdir?: 'TB' | 'LR';
+  nodesep?: number;
+  ranksep?: number;
+  edgesep?: number;
+  labelWidth?: number;
+}
+
 /**
  * Lay out a DiagramGraph using dagre. The dagre module is loaded lazily so
  * Vite emits it as a separate chunk.
  */
 export async function layoutGraph(
   g: DiagramGraph,
-  opts?: { rankdir?: 'TB' | 'LR' }
+  opts?: LayoutOptions
 ): Promise<Layout> {
   const dagre = await import('@dagrejs/dagre');
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: opts?.rankdir ?? 'TB', nodesep: 40, ranksep: 60 });
+  graph.setGraph({
+    rankdir: opts?.rankdir ?? 'TB',
+    nodesep: opts?.nodesep ?? 40,
+    ranksep: opts?.ranksep ?? 60,
+    edgesep: opts?.edgesep ?? 10,
+  });
 
+  const lw = opts?.labelWidth ?? 32;
   for (const node of g.nodes) {
-    const { width, height } = measureLabel(node.label);
+    const { width, height } = measureLabel(node.label, lw);
     graph.setNode(node.id, {
       width: width + PAD_X * 2,
       height: height + PAD_Y * 2,

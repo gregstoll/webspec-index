@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useId, useCallback } from 'preact/hooks';
 import type { DiagramGraph } from './model';
 import { layoutGraph } from './layout';
-import type { Layout, LayoutNode, LayoutEdge } from './layout';
+import type { Layout, LayoutNode, LayoutEdge, LayoutOptions } from './layout';
 import { toMermaid } from './mermaid';
 import { useViewport } from './useViewport';
 import '../styles/diagram.css';
@@ -13,6 +13,13 @@ export interface DiagramProps {
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
   ariaLabel: string;
+  /**
+   * 'fit' (default) scales the diagram to fill the container on first render.
+   * 'top' sets scale=1 and scrolls so the topmost node is visible at top-left.
+   */
+  initialView?: 'fit' | 'top';
+  /** Layout density / label options forwarded to dagre. */
+  layoutOpts?: Omit<LayoutOptions, 'rankdir'>;
 }
 
 // ── Shapes ────────────────────────────────────────────────────────────────────
@@ -109,8 +116,16 @@ function NodeShape({
 
 // ── Label lines ───────────────────────────────────────────────────────────────
 
-function LabelLines({ label, sublabel }: { label: string; sublabel?: string }) {
-  const WRAP = 32;
+function LabelLines({
+  label,
+  sublabel,
+  labelWidth = 32,
+}: {
+  label: string;
+  sublabel?: string;
+  labelWidth?: number;
+}) {
+  const WRAP = labelWidth;
   const LINE_H = 18;
 
   function wrap(text: string): string[] {
@@ -170,8 +185,6 @@ function EdgePath({
   markerId: string;
   hot: boolean;
 }) {
-  const dashed = edge.kind === 'call' || edge.kind === 'unknown';
-  const dotted = edge.kind === 'reference';
   const cls = [
     'diagram-edge',
     `diagram-edge--${edge.kind}`,
@@ -191,15 +204,36 @@ function EdgePath({
           )
           .join(' ');
 
-  return (
+  const path = (
     <path
       class={cls}
       d={d}
-      stroke-dasharray={dashed ? '6 3' : dotted ? '2 4' : undefined}
       marker-end={`url(#${markerId})`}
       fill="none"
     />
   );
+
+  if (edge.label) {
+    const mid = pts.length >= 2 ? pts[Math.floor(pts.length / 2)] : pts[0];
+    return (
+      <g>
+        {path}
+        {mid && (
+          <text
+            class={`diagram-edge-label diagram-edge-label--${edge.kind}`}
+            x={mid.x}
+            y={mid.y}
+            text-anchor="middle"
+            dominant-baseline="middle"
+          >
+            {edge.label}
+          </text>
+        )}
+      </g>
+    );
+  }
+
+  return path;
 }
 
 // ── Node wrapper ──────────────────────────────────────────────────────────────
@@ -208,6 +242,7 @@ function NodeGroup({
   node,
   selected,
   hot,
+  labelWidth,
   onSelect,
   onExpand,
   onHoverIn,
@@ -216,6 +251,7 @@ function NodeGroup({
   node: LayoutNode;
   selected: boolean;
   hot: boolean;
+  labelWidth?: number;
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
   onHoverIn?: () => void;
@@ -233,7 +269,7 @@ function NodeGroup({
   const inner = (
     <g transform={`translate(${node.x},${node.y})`} class={cls} onMouseEnter={onHoverIn} onMouseLeave={onHoverOut}>
       <NodeShape node={node} selected={selected} />
-      <LabelLines label={node.label} sublabel={node.sublabel} />
+      <LabelLines label={node.label} sublabel={node.sublabel} labelWidth={labelWidth} />
       {onExpand && (
         <g
           class="diagram-expand"
@@ -311,6 +347,8 @@ export function Diagram({
   onSelect,
   onExpand,
   ariaLabel,
+  initialView = 'fit',
+  layoutOpts,
 }: DiagramProps) {
   const uid = useId();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -318,9 +356,10 @@ export function Diagram({
   const [copyFeedback, setCopyFeedback] = useState('');
   const [hotId, setHotId] = useState<string | null>(null);
 
-  const { transform, fit, zoomBy } = useViewport(svgRef);
+  const { transform, fit, top, zoomBy } = useViewport(svgRef);
 
-  // Fit only on the first layout for this Diagram instance and when rankdir changes.
+  // Apply the initial view only on the first layout for this Diagram instance
+  // and when rankdir changes.
   const fittedRef = useRef(false);
   const prevRankdir = useRef(rankdir);
 
@@ -330,16 +369,22 @@ export function Diagram({
       if (!fittedRef.current || rankdirChanged) {
         fittedRef.current = true;
         prevRankdir.current = rankdir;
-        fit(l);
+        if (initialView === 'top') {
+          top(l);
+        } else {
+          fit(l);
+        }
       }
     },
-    [rankdir, fit]
+    [rankdir, initialView, fit, top]
   );
+
+  const labelWidth = layoutOpts?.labelWidth;
 
   useEffect(() => {
     let cancelled = false;
     setLayout(null);
-    layoutGraph(graph, { rankdir }).then((l) => {
+    layoutGraph(graph, { rankdir, ...layoutOpts }).then((l) => {
       if (!cancelled) {
         setLayout(l);
         fitOnce(l);
@@ -348,7 +393,7 @@ export function Diagram({
     return () => {
       cancelled = true;
     };
-  }, [graph, rankdir]);
+  }, [graph, rankdir, layoutOpts]);
 
   // Double-click fits
   function onDblClick() {
@@ -454,6 +499,7 @@ export function Diagram({
                 node={node}
                 selected={node.id === selectedId}
                 hot={isHot}
+                labelWidth={labelWidth}
                 onSelect={onSelect}
                 onExpand={onExpand}
                 onHoverIn={() => setHotId(node.id)}

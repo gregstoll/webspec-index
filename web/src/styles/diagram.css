@@ -150,6 +150,34 @@
   stroke: var(--color-accent);
 }
 
+/* then: solid green — the "happy path" branch */
+.diagram-edge--then {
+  stroke: var(--color-badge-idl);
+}
+
+/* else: dashed red — the alternative branch */
+.diagram-edge--else {
+  stroke: var(--color-error);
+  stroke-dasharray: 6 3;
+}
+
+/* jump: dotted accent — unconditional goto */
+.diagram-edge--jump {
+  stroke: var(--color-badge-algorithm);
+  stroke-dasharray: 2 4;
+}
+
+/* unknown: dotted muted — unresolved control flow */
+.diagram-edge--unknown {
+  stroke: var(--color-text-muted);
+  stroke-dasharray: 2 4;
+}
+
+/* loop: accent — back-edge to loop header */
+.diagram-edge--loop {
+  stroke: var(--color-accent);
+}
+
 .diagram-edge--reference {
   stroke: var(--color-text-muted);
   stroke-dasharray: 2 4;
@@ -160,15 +188,55 @@
   stroke-dasharray: 6 3;
 }
 
-.diagram-edge--unknown {
-  stroke: var(--color-text-muted);
-  stroke-dasharray: 6 3;
+/* ── Edge labels ────────────────────────────────────────────────────────── */
+
+.diagram-edge-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  fill: var(--color-text-muted);
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke;
+  stroke: var(--color-bg);
+  stroke-width: 3px;
+}
+
+.diagram-edge-label--then {
+  fill: var(--color-badge-idl);
+}
+
+.diagram-edge-label--else {
+  fill: var(--color-error);
+}
+
+.diagram-edge-label--jump {
+  fill: var(--color-badge-algorithm);
 }
 
 /* ── Arrow markers ──────────────────────────────────────────────────────── */
 
 .diagram-arrow {
   fill: var(--color-border);
+}
+
+.diagram-arrow--then {
+  fill: var(--color-badge-idl);
+}
+
+.diagram-arrow--else {
+  fill: var(--color-error);
+}
+
+.diagram-arrow--jump {
+  fill: var(--color-badge-algorithm);
+}
+
+.diagram-arrow--loop {
+  fill: var(--color-accent);
+}
+
+.diagram-arrow--unknown {
+  fill: var(--color-text-muted);
 }
 
 .diagram-arrow--reference {
