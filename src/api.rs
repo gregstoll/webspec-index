@@ -247,7 +247,7 @@ struct ErrorEnvelope {
 
 fn resolve_target(target: &str) -> Result<(String, String), ApiError> {
     crate::parse_spec_anchor(target)
-        .map(|(spec, anchor, _)| (spec, anchor))
+        .map(|(spec, anchor, _)| (canonical_spec_name(&spec), anchor))
         .map_err(|e| ApiError::invalid(e.to_string()))
 }
 
@@ -599,6 +599,16 @@ mod tests {
         assert_eq!(a["result"]["anchor"], "navigate");
         assert_eq!(a["result"]["anchor"], b["result"]["anchor"]);
         assert!(a["result"].get("effects").is_none());
+    }
+
+    #[test]
+    fn spec_names_in_targets_are_case_insensitive() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"query","target":"html#navigate"}"#);
+        assert_eq!(v["type"], "query", "{v}");
+        assert_eq!(v["result"]["spec"], "HTML");
+        let v = call(&c, r#"{"type":"exists","target":"Html#navigate"}"#);
+        assert_eq!(v["result"]["exists"], true, "{v}");
     }
 
     #[test]

@@ -13,7 +13,7 @@ export function routeForQuery(input: string): Route {
   }
   if (/^[A-Za-z0-9._-]+#.+$/.test(q)) {
     const hashIdx = q.indexOf('#');
-    return { kind: 'section', spec: q.slice(0, hashIdx), anchor: q.slice(hashIdx + 1) };
+    return { kind: 'section', spec: q.slice(0, hashIdx).toUpperCase(), anchor: q.slice(hashIdx + 1) };
   }
   return { kind: 'search', q };
 }

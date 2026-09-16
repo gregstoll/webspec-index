@@ -17,6 +17,11 @@ describe('routeForQuery', () => {
     });
   });
 
+  it('upper-cases the spec name but keeps the anchor as typed', () => {
+    expect(routeForQuery('html#navigate')).toEqual({ kind: 'section', spec: 'HTML', anchor: 'navigate' });
+    expect(routeForQuery('dom#Node')).toEqual({ kind: 'section', spec: 'DOM', anchor: 'Node' });
+  });
+
   it('returns resolve for an http URL', () => {
     expect(routeForQuery('http://example.com/spec#foo')).toEqual({
       kind: 'resolve',
