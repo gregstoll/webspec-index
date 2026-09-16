@@ -622,3 +622,26 @@ code, pre, .mono {
 .section-content blockquote.markdown-alert-important {
   --alert-color: #c94a4a;
 }
+
+/* Inline effect badges under algorithm steps */
+.step-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 var(--space-2);
+}
+.step-effect {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.step-effect:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.step-effect:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.step-effect-direct { border-color: var(--color-accent); color: var(--color-accent); }
+.step-effect-more { color: var(--color-text-muted); }

@@ -4,6 +4,7 @@ import type { EffectSummaryResult, ExplainEffectsResult, SubjectSelector } from 
 import { useRequest } from '../hooks/useRequest';
 import { describeStatus } from '../effects/status';
 import { effectLabel } from '../effects/label';
+import { stepEffects, type StepEffects } from '../effects/inline';
 
 interface Props {
   client: WebspecClient;
@@ -11,6 +12,8 @@ interface Props {
   anchor: string;
   selectedStepPath?: number[];
   onClearStep?: () => void;
+  /** Receives the per-step attribution of the whole section's effects as data arrives. */
+  onStepEffects?: (effects: StepEffects) => void;
 }
 
 type ExplainCache =
@@ -19,7 +22,7 @@ type ExplainCache =
   | { kind: 'ok'; value: ExplainEffectsResult }
   | { kind: 'error'; message: string };
 
-export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearStep }: Props) {
+export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearStep, onStepEffects }: Props) {
   const stepPathKey = selectedStepPath ? selectedStepPath.join(',') : '';
   const subject: SubjectSelector = selectedStepPath
     ? { spec, anchor, step_path: selectedStepPath }
@@ -35,13 +38,11 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
   const [expandedEffectId, setExpandedEffectId] = useState<string | null>(null);
   const [explainCache, setExplainCache] = useState<ExplainCache>({ kind: 'idle' });
 
+  const ready = effectsState.kind === 'ok' && effectsState.value.result.effects_status.state === 'ready';
+
   useEffect(() => {
-    if (effectsState.kind === 'ok') {
-      if (effectsState.value.result.effects_status.state === 'ready') {
-        setOpen(true);
-      }
-    }
-  }, [effectsState]);
+    if (ready) setOpen(true);
+  }, [ready]);
 
   useEffect(() => {
     setExplainCache({ kind: 'idle' });
@@ -50,24 +51,44 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, anchor, stepPathKey]);
 
-  function handleShowPaths(effectId: string) {
-    if (expandedEffectId === effectId) {
-      setExpandedEffectId(null);
-      return;
-    }
-    setExpandedEffectId(effectId);
-    if (explainCache.kind === 'idle') {
-      setExplainCache({ kind: 'loading' });
-      client.request({ type: 'effects_explain', subject }).then((resp) => {
+  // The witness paths say which step of this section each effect originates from, so
+  // they are loaded as soon as the summary is ready rather than on demand.
+  useEffect(() => {
+    if (!ready) return;
+    setExplainCache({ kind: 'loading' });
+    let cancelled = false;
+    client
+      .request({ type: 'effects_explain', subject })
+      .then((resp) => {
+        if (cancelled) return;
         if (resp.type === 'effects_explain') {
           setExplainCache({ kind: 'ok', value: resp.result });
         } else if (resp.type === 'error') {
           setExplainCache({ kind: 'error', message: resp.message });
         }
-      }).catch((e: unknown) => {
-        setExplainCache({ kind: 'error', message: String(e) });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setExplainCache({ kind: 'error', message: String(e) });
       });
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, spec, anchor, stepPathKey]);
+
+  useEffect(() => {
+    if (!onStepEffects || selectedStepPath) return;
+    if (effectsState.kind !== 'ok') {
+      onStepEffects(new Map());
+      return;
     }
+    const explain = explainCache.kind === 'ok' ? explainCache.value : null;
+    onStepEffects(stepEffects(effectsState.value.result, explain, { spec, anchor }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectsState, explainCache, spec, anchor, stepPathKey]);
+
+  function handleShowPaths(effectId: string) {
+    setExpandedEffectId(expandedEffectId === effectId ? null : effectId);
   }
 
   const subjectLabel = selectedStepPath

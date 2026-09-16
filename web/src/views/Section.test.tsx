@@ -75,6 +75,18 @@ describe('Section', () => {
     });
   });
 
+  it('shows effect badges under the steps they originate from', async () => {
+    const { container } = render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      const step1 = container.querySelector('li[data-step-path="1"] .step-effect');
+      const step2 = container.querySelector('li[data-step-path="2"] .step-effect');
+      expect(step1?.textContent).toContain('may fire event name=load');
+      expect(step1?.classList.contains('step-effect-path')).toBe(true);
+      expect(step2?.textContent).toContain('may queue task');
+      expect(step2?.classList.contains('step-effect-direct')).toBe(true);
+    });
+  });
+
   it('post-render pass: javascript: links lose their href', async () => {
     render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
     await waitFor(() => {

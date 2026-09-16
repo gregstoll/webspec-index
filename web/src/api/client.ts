@@ -159,7 +159,7 @@ const MOCK_EFFECTS_HTML_NAVIGATE: EffectSummaryResult = {
       kind: 'queue_task',
       params: { task: 'networking task' },
       execution: ['separate'],
-      location: { spec: 'HTML', anchor: 'navigate', url: 'https://html.spec.whatwg.org/#navigate' },
+      location: { spec: 'HTML', anchor: 'navigate', step_path: [2], url: 'https://html.spec.whatwg.org/#navigate' },
     },
   ],
   effects_status: {
@@ -191,7 +191,7 @@ const MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE: ExplainEffectsResult = {
         {
           hops: [
             {
-              from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+              from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123', step_path: [1] },
               to: { spec: 'HTML', anchor: 'fire-an-event', snapshot_sha: 'abc123' },
               relation: 'invoke',
               site: {

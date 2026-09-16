@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
 import type { RefEntry } from '../api/types';
 import { routeToHash } from '../router';
@@ -7,6 +7,8 @@ import { Loading, ErrorBanner } from './Status';
 import { EffectsPanel } from './EffectsPanel';
 import { remember } from '../trace/titles';
 import { annotateSteps } from '../content/steps';
+import { effectLabel } from '../effects/label';
+import type { StepEffects } from '../effects/inline';
 
 interface Props {
   client: WebspecClient;
@@ -16,6 +18,7 @@ interface Props {
 }
 
 export function Section({ client, spec, anchor, selectedStepPath }: Props) {
+  const [stepFx, setStepFx] = useState<StepEffects | undefined>(undefined);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
     { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
@@ -103,6 +106,7 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
           html={result.content_html}
           selectedStepPath={selectedStepPath}
           onStepSelect={handleStepSelect}
+          stepEffects={stepFx}
         />
       ) : result.content ? (
         <pre class="section-content">{result.content}</pre>
@@ -117,6 +121,7 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         anchor={result.anchor}
         selectedStepPath={selectedStepPath}
         onClearStep={() => handleStepSelect(undefined)}
+        onStepEffects={setStepFx}
       />
     </div>
   );
@@ -126,10 +131,50 @@ interface ContentBlockProps {
   html: string;
   selectedStepPath?: number[];
   onStepSelect: (path: number[] | undefined) => void;
+  stepEffects?: StepEffects;
 }
 
-function ContentBlock({ html, selectedStepPath, onStepSelect }: ContentBlockProps) {
+const INLINE_EFFECTS_CAP = 3;
+
+/// Places a badge row under each step that has effects: the first few labels, then a
+/// "+N" counter. Rebuilt from scratch whenever the attribution changes.
+function renderInlineEffects(root: HTMLElement, stepEffects: StepEffects | undefined) {
+  for (const old of root.querySelectorAll('.step-effects')) old.remove();
+  if (!stepEffects) return;
+  for (const [key, list] of stepEffects) {
+    const li = root.querySelector<HTMLLIElement>(`li[data-step-path="${key}"]`);
+    if (!li || list.length === 0) continue;
+    const row = document.createElement('div');
+    row.className = 'step-effects';
+    row.setAttribute('role', 'note');
+    for (const { effect, via } of list.slice(0, INLINE_EFFECTS_CAP)) {
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = `step-effect step-effect-${via}`;
+      badge.textContent = effectLabel(effect);
+      badge.title = via === 'direct' ? 'Effect of this step' : 'Effect reached through a call in this step';
+      row.appendChild(badge);
+    }
+    if (list.length > INLINE_EFFECTS_CAP) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'step-effect step-effect-more';
+      more.textContent = `+${list.length - INLINE_EFFECTS_CAP} more`;
+      row.appendChild(more);
+    }
+    const nested = li.querySelector(':scope > ol, :scope > ul');
+    if (nested) li.insertBefore(row, nested);
+    else li.appendChild(row);
+  }
+}
+
+function ContentBlock({ html, selectedStepPath, onStepSelect, stepEffects }: ContentBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (el) renderInlineEffects(el, stepEffects);
+  }, [html, stepEffects]);
 
   useEffect(() => {
     const el = ref.current;
@@ -153,7 +198,7 @@ function ContentBlock({ html, selectedStepPath, onStepSelect }: ContentBlockProp
     const el = ref.current;
     if (!el) return;
     function handleClick(e: MouseEvent) {
-      const btn = (e.target as Element).closest<HTMLButtonElement>('.step-select-btn');
+      const btn = (e.target as Element).closest<HTMLButtonElement>('.step-select-btn, .step-effect');
       if (!btn) return;
       const li = btn.closest<HTMLLIElement>('li[data-step-path]');
       if (!li || !li.dataset.stepPath) return;
