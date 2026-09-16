@@ -632,14 +632,16 @@ pub fn search_sections_fts(
          JOIN sections s ON sections_fts.rowid = s.id
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'          LIMIT ?3"
+         WHERE sections_fts MATCH ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+         ORDER BY sections_fts.rank LIMIT ?3"
     } else {
         "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
          FROM sections_fts
          JOIN sections s ON sections_fts.rowid = s.id
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'          LIMIT ?2"
+         WHERE sections_fts MATCH ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+         ORDER BY sections_fts.rank LIMIT ?2"
     };
 
     let mut stmt = conn.prepare(sql)?;
