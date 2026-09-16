@@ -81,6 +81,24 @@ python3 scripts/import-semantics.py ../webspec-semantics \
 
 The importer writes runtime YAML, an embedded file manifest, and provenance. Source fixtures stay in the maintained package. Rebuild to change the bundled catalog; use `--rules` for additional packages without rebuilding. Adding endpoints uses configuration; adding an unsupported control-flow form requires parser/engine work.
 
+## Mention classification
+
+A link in algorithm prose is classified as an invocation candidate or a concept mention. The engine combines two signals:
+
+1. **Target section type.** If the link target resolves to an algorithm section in the index (a structural algorithm body), the link is eligible for invocation. If the target resolves to a non-algorithm section (a definition, heading, or IDL anchor registered as an indexed anchor without a structural body), the link is a concept reference by default.
+
+2. **Call-site lexical shape.** The `operation_relation` function checks whether the link's visible text or preceding context contains an invocation verb (navigate, fetch, fire, queue, run, perform, etc.). A verb match produces an `Invoke` relationship; no verb match produces `CandidateInvoke`.
+
+The combined rule:
+
+- **Algorithm target + verb match** → `Invoke` (inline execution).
+- **Algorithm target + no verb match** → `CandidateInvoke` + `unresolved_invocation` issue.
+- **Non-algorithm target + verb match** → `Invoke` (the verb overrides the target type; the link may reference an algorithm-like operation defined as a prose definition rather than a structural algorithm).
+- **Non-algorithm target + no verb match** → `Mention`. No `unresolved_invocation` issue. The link is a concept reference (e.g., "the navigable's origin") and does not represent a call.
+- **Unknown target (missing spec or anchor)** → `missing_spec` or `missing_anchor` issue, unchanged.
+
+Mention edges do not propagate effects or issues during the fixed-point analysis.
+
 ## Clients and limits
 
 Rust exposes `effects::{get_effect_summary, explain_effects, recompute_effects}`. Python exports the same functions with typed dictionaries; see the [binding examples](../bindings/python/README.md). LSP clients use `webspec/effects` and `webspec/effectExplanation`. VS Code shows per-step effect CodeLens rows. Clicking a category opens a native hover with collapsed effect headlines; clicking a headline toggles its prepared details without another server request. The **Show Spec Effects** command opens the ordinary hover at the cursor. All adapters consume the same analysis and snapshot identities.

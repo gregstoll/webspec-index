@@ -931,14 +931,29 @@ impl<'a> Builder<'a> {
                     .cloned()
                 {
                     let (relation, execution) = operation_relation(segment, operation);
-                    self.add_edge(&owner, &target, relation, execution, site.clone(), None);
-                    if relation == Relationship::CandidateInvoke {
-                        self.add_issue(
+                    // A link to a non-algorithm section (anchor: node) that has
+                    // no verb-based invocation signal is a concept mention, not
+                    // an unresolved invocation candidate.
+                    let is_non_algorithm_target = target.starts_with("anchor:");
+                    if relation == Relationship::CandidateInvoke && is_non_algorithm_target {
+                        self.add_edge(
                             &owner,
-                            IssueCode::UnresolvedInvocation,
-                            "algorithm-bearing reference has unresolved invocation syntax",
+                            &target,
+                            Relationship::Mention,
+                            Execution::Inline,
                             site.clone(),
+                            None,
                         );
+                    } else {
+                        self.add_edge(&owner, &target, relation, execution, site.clone(), None);
+                        if relation == Relationship::CandidateInvoke {
+                            self.add_issue(
+                                &owner,
+                                IssueCode::UnresolvedInvocation,
+                                "algorithm-bearing reference has unresolved invocation syntax",
+                                site.clone(),
+                            );
+                        }
                     }
                 } else {
                     let code = if self
@@ -3900,5 +3915,288 @@ rules:
             .relationships
             .iter()
             .any(|edge| edge.relation == Relationship::Mention));
+    }
+
+    /// Regression: the seeded acceptance fixture must produce stable effect
+    /// IDs and counts for existing algorithms. The mention-vs-invocation
+    /// classification must not remove real effects.
+    #[test]
+    fn seeded_corpus_effects_are_stable_after_mention_classification() {
+        let cases = [
+            ("direct", 2),
+            ("variable", 1),
+            ("same-segment", 2),
+            ("caller-r", 2),
+            ("caller-s", 2),
+            ("cycle-r", 1),
+            ("cycle-s", 1),
+        ];
+        for (anchor, expected_count) in cases {
+            let a = artifact(anchor);
+            let result = a.summary(&selector(anchor), None).unwrap();
+            assert_eq!(
+                result.effects.len(),
+                expected_count,
+                "effect count changed for {anchor}: got {}, expected {expected_count}",
+                result.effects.len(),
+            );
+        }
+        let direct = artifact("direct");
+        let direct_result = direct.summary(&selector("direct"), None).unwrap();
+        let mut effect_ids: Vec<_> = direct_result.effects.iter().map(|e| e.id.clone()).collect();
+        effect_ids.sort();
+        let direct2 = artifact("direct");
+        let direct2_result = direct2.summary(&selector("direct"), None).unwrap();
+        let mut effect_ids2: Vec<_> = direct2_result
+            .effects
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
+        effect_ids2.sort();
+        assert_eq!(
+            effect_ids, effect_ids2,
+            "effect IDs changed between runs for direct"
+        );
+    }
+
+    /// Links to non-algorithm sections (indexed anchors without a structural
+    /// algorithm body) that lack verb-based invocation syntax are concept
+    /// mentions, not unresolved invocation candidates. Only links whose
+    /// call-site text matches an invocation pattern or whose target is an
+    /// algorithm section produce `CandidateInvoke` edges.
+    #[test]
+    fn non_algorithm_target_without_verb_is_mention() {
+        // "navigable" and "origin" are indexed anchors but not algorithms.
+        // "callee" is an algorithm target.
+        // Step texts are drawn from real HTML spec patterns.
+        let html = r##"
+          <div class="algorithm">
+            <p>To <dfn id="caller">run caller</dfn>:</p>
+            <ol>
+              <li><p>Let <var>navigable</var> be <var>document</var>'s <a href="#concept-navigable">node navigable</a>.</p></li>
+              <li><p>Let <var>origin</var> be <var>document</var>'s <a href="#concept-origin">origin</a>.</p></li>
+              <li><p>If <var>navigable</var> is a <a href="#top-level-traversable">top-level traversable</a>, then return.</p></li>
+              <li><p><a href="#callee">Run callee</a>.</p></li>
+              <li><p>Navigate <var>navigable</var> to <var>url</var> using the <a href="#concept-origin">origin</a>.</p></li>
+              <li><p>Let <var>result</var> be the result of <a href="#callee">running callee</a>.</p></li>
+            </ol>
+          </div>
+          <div class="algorithm">
+            <p>To <dfn id="callee">run callee</dfn>:</p>
+            <ol><li><p><a href="#fire">Fire an event</a> named <code>"load"</code>.</p></li></ol>
+          </div>
+          <p><dfn id="concept-navigable">node navigable</dfn> is a concept.</p>
+          <p><dfn id="concept-origin">origin</dfn> is a concept.</p>
+          <p><dfn id="top-level-traversable">top-level traversable</dfn> is a concept.</p>
+          <p><dfn id="fire">fire an event</dfn> is a target stub.</p>
+        "##;
+
+        let package = load_package_files(&[(
+            "catalog.yaml",
+            include_str!("../../tests/fixtures/effects/engine/catalog.yaml"),
+        )])
+        .unwrap();
+        let catalog = load_catalog([package]).unwrap();
+        let structure =
+            extract_step_structure(html, "TEST", "https://example.test/spec", &"a".repeat(64));
+        let anchors: Vec<_> = structure
+            .algorithms
+            .iter()
+            .map(|alg| IndexedAnchor {
+                anchor: alg.source.section_anchor.clone(),
+                url: alg.source.url.clone(),
+                text: String::new(),
+            })
+            .chain(
+                [
+                    "concept-navigable",
+                    "concept-origin",
+                    "top-level-traversable",
+                    "fire",
+                ]
+                .into_iter()
+                .map(|anchor| IndexedAnchor {
+                    anchor: anchor.to_string(),
+                    url: format!("https://example.test/spec#{anchor}"),
+                    text: String::new(),
+                }),
+            )
+            .collect();
+        let sources = [SourceSpec {
+            spec: "TEST".to_string(),
+            snapshot_sha: "a".repeat(64),
+            base_url: "https://example.test/spec".to_string(),
+            structure: Some(structure),
+            anchors,
+        }];
+        let local_matches = super::super::local::prepare(&sources[0], &catalog);
+        let artifact = analyze_with_local_matches(
+            AnalysisInput {
+                sources: &sources,
+                catalog: &catalog,
+                environment: "generic",
+                scope: AnalysisScope::Subject {
+                    subject: SubjectSelector {
+                        spec: "TEST".into(),
+                        anchor: "caller".into(),
+                        step_path: None,
+                        step_id: None,
+                        body_id: None,
+                    },
+                },
+                budgets: DiscoveryBudgets::default(),
+            },
+            Some(&local_matches),
+        )
+        .unwrap();
+
+        // Concept references should be Mention, not CandidateInvoke.
+        let concept_edges: Vec<_> = artifact
+            .relationships
+            .iter()
+            .filter(|edge| {
+                edge.to.starts_with("anchor:")
+                    && edge.to != "anchor:TEST#fire"
+                    && edge.to != "anchor:TEST#callee"
+            })
+            .collect();
+        assert!(
+            !concept_edges.is_empty(),
+            "should have edges to concept anchors"
+        );
+        for edge in &concept_edges {
+            assert_eq!(
+                edge.relation,
+                Relationship::Mention,
+                "edge to {} should be Mention, not {:?}",
+                edge.to,
+                edge.relation
+            );
+        }
+
+        // Verb-based invocations to algorithm targets should remain Invoke.
+        // Algorithm bodies get node IDs from their structural parse, not the
+        // "anchor:" prefix, so look for edges whose target subject has the
+        // callee anchor.
+        let callee_edges: Vec<_> = artifact
+            .relationships
+            .iter()
+            .filter(|edge| {
+                artifact
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == edge.to && node.subject.anchor == "callee")
+            })
+            .collect();
+        assert!(
+            !callee_edges.is_empty(),
+            "should have edges to callee algorithm body"
+        );
+        for edge in &callee_edges {
+            assert!(
+                edge.relation == Relationship::Invoke
+                    || edge.relation == Relationship::CandidateInvoke,
+                "edge to callee should be Invoke or CandidateInvoke, not {:?}",
+                edge.relation
+            );
+        }
+
+        // No unresolved_invocation issues for concept references.
+        let result = artifact.summary(&selector("caller"), None).unwrap();
+        let unresolved: Vec<_> = result
+            .issues
+            .iter()
+            .filter(|issue| issue.code == IssueCode::UnresolvedInvocation)
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "concept references should not produce unresolved_invocation issues, got {unresolved:?}"
+        );
+
+        // Effects should still propagate through the callee.
+        assert!(
+            !result.effects.is_empty(),
+            "effects from callee should propagate to caller"
+        );
+    }
+
+    /// A verb-based invocation to a non-algorithm anchor should remain an
+    /// invocation (Invoke), not be downgraded to Mention.
+    #[test]
+    fn verb_invocation_to_non_algorithm_stays_invoke() {
+        let html = r##"
+          <div class="algorithm">
+            <p>To <dfn id="verb-caller">run verb caller</dfn>:</p>
+            <ol>
+              <li><p><a href="#non-algo-target">Navigate</a> to the URL.</p></li>
+            </ol>
+          </div>
+          <p><dfn id="non-algo-target">navigate</dfn> is a target stub.</p>
+        "##;
+
+        let package = load_package_files(&[(
+            "catalog.yaml",
+            include_str!("../../tests/fixtures/effects/engine/catalog.yaml"),
+        )])
+        .unwrap();
+        let catalog = load_catalog([package]).unwrap();
+        let structure =
+            extract_step_structure(html, "TEST", "https://example.test/spec", &"a".repeat(64));
+        let anchors: Vec<_> = structure
+            .algorithms
+            .iter()
+            .map(|alg| IndexedAnchor {
+                anchor: alg.source.section_anchor.clone(),
+                url: alg.source.url.clone(),
+                text: String::new(),
+            })
+            .chain(std::iter::once(IndexedAnchor {
+                anchor: "non-algo-target".to_string(),
+                url: "https://example.test/spec#non-algo-target".to_string(),
+                text: String::new(),
+            }))
+            .collect();
+        let sources = [SourceSpec {
+            spec: "TEST".to_string(),
+            snapshot_sha: "a".repeat(64),
+            base_url: "https://example.test/spec".to_string(),
+            structure: Some(structure),
+            anchors,
+        }];
+        let local_matches = super::super::local::prepare(&sources[0], &catalog);
+        let artifact = analyze_with_local_matches(
+            AnalysisInput {
+                sources: &sources,
+                catalog: &catalog,
+                environment: "generic",
+                scope: AnalysisScope::Subject {
+                    subject: SubjectSelector {
+                        spec: "TEST".into(),
+                        anchor: "verb-caller".into(),
+                        step_path: None,
+                        step_id: None,
+                        body_id: None,
+                    },
+                },
+                budgets: DiscoveryBudgets::default(),
+            },
+            Some(&local_matches),
+        )
+        .unwrap();
+
+        let edges_to_target: Vec<_> = artifact
+            .relationships
+            .iter()
+            .filter(|edge| edge.to == "anchor:TEST#non-algo-target")
+            .collect();
+        assert!(!edges_to_target.is_empty());
+        for edge in &edges_to_target {
+            assert_eq!(
+                edge.relation,
+                Relationship::Invoke,
+                "verb invocation to non-algorithm target should be Invoke, not {:?}",
+                edge.relation
+            );
+        }
     }
 }
