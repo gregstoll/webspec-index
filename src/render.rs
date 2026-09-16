@@ -35,9 +35,51 @@ pub fn markdown_to_html(markdown: &str, resolve: &dyn Fn(&str) -> Option<LinkTar
     out
 }
 
+/// Renders the stored text of an IDL section as a code block. The text carries
+/// markdown links for the CLI; the block form needs the plain identifiers.
+pub fn idl_to_html(idl: &str) -> String {
+    let mut plain = String::with_capacity(idl.len());
+    let mut rest = idl;
+    while let Some(open) = rest.find('[') {
+        let candidate = &rest[open..];
+        match candidate
+            .find("](")
+            .and_then(|close| candidate[close..].find(')').map(|end| (close, close + end)))
+        {
+            Some((close, end)) if !candidate[1..close].contains('[') => {
+                plain.push_str(&rest[..open]);
+                plain.push_str(&candidate[1..close]);
+                rest = &candidate[end + 1..];
+            }
+            _ => {
+                plain.push_str(&rest[..=open]);
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    plain.push_str(rest);
+    let plain = plain
+        .replace("**", "")
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!("<pre class=\"idl\"><code class=\"language-webidl\">{plain}</code></pre>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idl_sections_render_as_plain_code() {
+        let html = idl_to_html(
+            "[[Exposed](https://webidl.spec.whatwg.org/#Exposed)=Window]\ninterface **`Node`** : [EventTarget](https://dom.spec.whatwg.org#eventtarget) {\n  const [unsigned short](https://webidl.spec.whatwg.org/#idl-unsigned-short) ELEMENT_NODE = 1;\n  attribute DOMString? x; // legacy <T>\n};",
+        );
+        assert_eq!(
+            html,
+            "<pre class=\"idl\"><code class=\"language-webidl\">[Exposed=Window]\ninterface `Node` : EventTarget {\n  const unsigned short ELEMENT_NODE = 1;\n  attribute DOMString? x; // legacy &lt;T&gt;\n};</code></pre>"
+        );
+    }
 
     fn resolver(url: &str) -> Option<LinkTarget> {
         url.strip_prefix("https://dom.spec.whatwg.org/#")

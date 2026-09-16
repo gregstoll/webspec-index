@@ -403,7 +403,9 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
                     effects_status: None,
                 }
             };
-            let content_html = if render == Render::Html {
+            let content_html = if render == Render::Html && qwe.query.section_type == "idl" {
+                qwe.query.content.as_deref().map(crate::render::idl_to_html)
+            } else if render == Render::Html {
                 qwe.query.content.as_deref().map(|md| {
                     let registry = crate::spec_registry::SpecRegistry::new();
                     let indexed_cache = RefCell::new(HashMap::<String, bool>::new());
