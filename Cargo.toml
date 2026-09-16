@@ -15,6 +15,10 @@ name = "webspec-index"
 path = "src/main.rs"
 required-features = ["native"]
 
+[[example]]
+name = "effects_parity"
+required-features = ["native"]
+
 [features]
 default = ["native", "pdf"]
 native = [
