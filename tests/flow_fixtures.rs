@@ -5,6 +5,9 @@
 //! (field `content`). The matching `*.expected.json` records the expected
 //! structure from `extract_flow` with an empty call list.
 //!
+//! To regenerate all expected files after a behaviour change run:
+//!   `cargo run --example gen_flow_fixtures`
+//!
 //! Expected JSON shape:
 //! ```json
 //! {

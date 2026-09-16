@@ -243,8 +243,8 @@ struct Patterns {
 impl Patterns {
     fn new() -> Self {
         Patterns {
-            re_jump: Regex::new(r"(?i)^jump\s+to\s+step\s+(\d+)").unwrap(),
-            re_return_to: Regex::new(r"(?i)^return\s+to\s+step\s+(\d+)").unwrap(),
+            re_jump: Regex::new(r"(?i)^jump\s+to\s+step\s+(\d+(?:\.\d+)*)").unwrap(),
+            re_return_to: Regex::new(r"(?i)^return\s+to\s+step\s+(\d+(?:\.\d+)*)").unwrap(),
             re_abort: Regex::new(r"(?i)^abort\s+(these\s+steps|this\s+algorithm)\b").unwrap(),
             re_return: Regex::new(r"(?i)^return\b").unwrap(),
             re_otherwise: Regex::new(r"(?i)^otherwise\b").unwrap(),
@@ -326,8 +326,17 @@ struct BuildCtx<'a> {
     issues: &'a mut Vec<model::FlowIssue>,
     external_ids: &'a mut HashSet<String>,
     calls_by_path: &'a HashMap<String, Vec<CallEntry>>,
-    top_level_ids: &'a [String],
+    /// All node ids in document order (for jump resolution across all nesting levels).
+    all_ids: &'a [String],
     patterns: &'a Patterns,
+}
+
+/// Collect every step id from a tree of items (depth-first, document order).
+fn collect_all_ids(items: &[StepItem], out: &mut Vec<String>) {
+    for item in items {
+        out.push(item.id.clone());
+        collect_all_ids(&item.children, out);
+    }
 }
 
 fn push_edge(
@@ -506,7 +515,7 @@ fn build_item(
 
         // ── Jump to step N ────────────────────────────────────────────────────
         StepShape::JumpTo(ref label) => {
-            let target = resolve_jump(label, ctx.top_level_ids);
+            let target = resolve_jump(label, ctx.all_ids);
             match target {
                 Some(id) => push_edge(ctx.edges, &item.id, &id, model::FlowEdgeKind::Jump, None),
                 None => {
@@ -588,14 +597,11 @@ fn build_item(
 }
 
 /// Resolve a jump-target label (a step number string like "5" or "5.2") against
-/// the top-level step ids.
-fn resolve_jump(label: &str, top_level_ids: &[String]) -> Option<String> {
-    // Try exact match in top-level ids first.
-    if let Some(id) = top_level_ids.iter().find(|id| id.as_str() == label) {
-        return Some(id.clone());
-    }
-    // Try numeric prefix match (e.g. label "5" matches "5" in top-level).
-    None
+/// all known node ids.  Top-level ids are searched first; nested ids follow.
+///
+/// `all_ids` must include every id collected during the build pass.
+fn resolve_jump(label: &str, all_ids: &[String]) -> Option<String> {
+    all_ids.iter().find(|id| id.as_str() == label).cloned()
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -631,7 +637,9 @@ pub fn extract_flow(
         }
     }
 
-    let top_level_ids: Vec<String> = items.iter().map(|it| it.id.clone()).collect();
+    // Collect every node id in document order for jump resolution.
+    let mut all_ids: Vec<String> = Vec::new();
+    collect_all_ids(&items, &mut all_ids);
 
     let mut nodes: Vec<model::FlowNode> = Vec::new();
     let mut edges: Vec<model::FlowEdge> = Vec::new();
@@ -645,7 +653,7 @@ pub fn extract_flow(
         issues: &mut issues,
         external_ids: &mut external_ids,
         calls_by_path: &calls_by_path,
-        top_level_ids: &top_level_ids,
+        all_ids: &all_ids,
         patterns: &patterns,
     };
 
@@ -683,11 +691,25 @@ pub fn flow_from_conn(
     };
 
     // Fetch outgoing step-refs (those with a step_path are algorithm invocations).
+    // Only keep calls whose target is an indexed section of type `algorithm`.
     let ref_edges =
         db::queries::get_outgoing_edges(conn, snapshot_id, anchor, Some(model::RefKind::Step))?;
     let calls: Vec<model::RefEntry> = ref_edges
         .into_iter()
         .filter(|e| e.step_path.is_some())
+        .filter(|e| {
+            // Look up the target's snapshot and section to confirm it is an algorithm.
+            db::queries::get_snapshot(conn, &e.spec)
+                .ok()
+                .flatten()
+                .and_then(|target_snap| {
+                    db::queries::get_section(conn, target_snap, &e.anchor)
+                        .ok()
+                        .flatten()
+                })
+                .map(|s| s.section_type == model::SectionType::Algorithm)
+                .unwrap_or(false)
+        })
         .map(|e| model::RefEntry {
             spec: e.spec,
             anchor: e.anchor,
@@ -772,9 +794,10 @@ mod tests {
 
     #[test]
     fn if_inline_gets_then_edge_to_following_sibling() {
-        let md = "1. If A, then return null.\n2. Continue.\n";
+        let md = "1. If A, then return null.\n2. Done.\n";
         let (nodes, edges, _) = run(md);
         assert_eq!(nodes[0].kind, model::FlowNodeKind::Branch);
+        assert_eq!(nodes[1].kind, model::FlowNodeKind::Step);
         let e = edge_triples(&edges);
         assert!(e.contains(&("1", "2", model::FlowEdgeKind::Then)));
     }
@@ -921,5 +944,106 @@ mod tests {
         let (_, _, issues) = run(md);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].code, "otherwise_without_if");
+    }
+
+    // ── resolve_jump resolves nested (dotted) ids ─────────────────────────────
+
+    #[test]
+    fn jump_resolves_nested_step_id() {
+        // "Jump to step 2.1" must resolve to the nested id "2.1", not be left unresolved.
+        let md = concat!(
+            "1. Jump to step 2.1.\n",
+            "2. If condition:\n",
+            "   1. Target step.\n",
+            "3. Done.\n",
+        );
+        let (nodes, edges, issues) = run(md);
+        // No unresolved_jump issue expected.
+        let jump_issues: Vec<_> = issues
+            .iter()
+            .filter(|i| i.code == "unresolved_jump")
+            .collect();
+        assert!(
+            jump_issues.is_empty(),
+            "jump to nested id should resolve, issues: {jump_issues:?}"
+        );
+        // Node "1" must have a Jump edge to "2.1".
+        let e = edge_triples(&edges);
+        assert!(
+            e.contains(&("1", "2.1", model::FlowEdgeKind::Jump)),
+            "expected jump edge 1→2.1, got: {e:?}"
+        );
+        // "2.1" must exist as a node.
+        assert!(nodes.iter().any(|n| n.id == "2.1"), "node 2.1 must exist");
+    }
+
+    // ── flow_from_conn: non-algorithm call targets are filtered out ───────────
+
+    #[test]
+    fn flow_from_conn_drops_call_to_non_algorithm_target() {
+        use crate::db;
+        use crate::model::{ParsedReference, RefKind};
+        use crate::tests::seed_two_specs;
+
+        let conn = seed_two_specs();
+        db::effects::initialize(&conn).unwrap();
+
+        // Add a step-kind ref from HTML#navigate → HTML#browsing (a Heading, not Algorithm).
+        let html_snap = db::queries::get_snapshot(&conn, "HTML").unwrap().unwrap();
+        db::write::insert_refs_bulk(
+            &conn,
+            html_snap,
+            &[ParsedReference {
+                from_anchor: "navigate".into(),
+                to_spec: "HTML".into(),
+                to_anchor: "browsing".into(),
+                step_path: Some("1.1".into()),
+                step_text: Some("See browsing context.".into()),
+                guard_path: Vec::new(),
+                call_site_id: None,
+                kind: RefKind::Step,
+            }],
+        )
+        .unwrap();
+
+        let result = flow_from_conn(&conn, "HTML", "navigate")
+            .unwrap()
+            .expect("should have algorithm steps");
+
+        // The heading target (HTML#browsing) must NOT appear as an External node or call.
+        let heading_ext_id = "HTML#browsing";
+        let has_heading_node = result.nodes.iter().any(|n| n.id == heading_ext_id);
+        assert!(
+            !has_heading_node,
+            "heading target must be filtered out, found node: {heading_ext_id}"
+        );
+
+        // The algorithm target (DOM#concept-tree) MUST still appear as an External node.
+        let algo_ext_id = "DOM#concept-tree";
+        let has_algo_node = result.nodes.iter().any(|n| n.id == algo_ext_id);
+        assert!(
+            has_algo_node,
+            "algorithm target DOM#concept-tree must be present as External node"
+        );
+
+        // No call edge to the heading target.
+        let call_edge_to_heading = result
+            .edges
+            .iter()
+            .any(|e| e.to == heading_ext_id && e.kind == model::FlowEdgeKind::Call);
+        assert!(
+            !call_edge_to_heading,
+            "no call edge to heading target must exist"
+        );
+
+        // There IS a call edge to the algorithm target.
+        let call_edge_to_algo = result
+            .edges
+            .iter()
+            .any(|e| e.to == algo_ext_id && e.kind == model::FlowEdgeKind::Call);
+        assert!(
+            call_edge_to_algo,
+            "call edge to algorithm target DOM#concept-tree must exist"
+        );
     }
 }

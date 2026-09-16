@@ -3312,8 +3312,8 @@ mod tests {
             &[ParsedSection {
                 anchor: "concept-tree".into(),
                 title: Some("Trees".into()),
-                content_text: Some("tree".into()),
-                section_type: SectionType::Heading,
+                content_text: Some("1. Walk the tree.\n2. Return result.\n".into()),
+                section_type: SectionType::Algorithm,
                 parent_anchor: None,
                 prev_anchor: None,
                 next_anchor: None,

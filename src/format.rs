@@ -516,7 +516,7 @@ pub fn flow_mermaid(result: &FlowResult) -> String {
         let shape = match node.kind {
             FlowNodeKind::Branch => format!("{mid}{{\"{label}\"}}"),
             FlowNodeKind::Terminal => format!("{mid}([\"{label}\"])"),
-            FlowNodeKind::External => format!("{mid}{{\"{label}\"}}"),
+            FlowNodeKind::External => format!("{mid}[[\"{label}\"]]"),
             _ => format!("{mid}[\"{label}\"]"),
         };
         out.push_str(&format!("  {shape}\n"));
@@ -736,8 +736,57 @@ pub fn pr_diff(result: &PrDiffResult) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        NavEntry, Navigation, PrDiffEntry, PrDiffResult, PrDiffSummary, RefEntry, RefsMatch,
+        FlowEdge, FlowEdgeKind, FlowNode, FlowNodeKind, NavEntry, Navigation, PrDiffEntry,
+        PrDiffResult, PrDiffSummary, RefEntry, RefsMatch,
     };
+
+    fn make_flow_node(id: &str, kind: FlowNodeKind, text: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind,
+            text: text.to_string(),
+            calls: vec![],
+        }
+    }
+
+    fn make_flow_edge(from: &str, to: &str, kind: FlowEdgeKind) -> FlowEdge {
+        FlowEdge {
+            from: from.to_string(),
+            to: to.to_string(),
+            kind,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn flow_mermaid_external_node_uses_double_rect() {
+        use crate::model::FlowResult;
+        let result = FlowResult {
+            spec: "HTML".to_string(),
+            anchor: "navigate".to_string(),
+            nodes: vec![
+                make_flow_node("1", FlowNodeKind::Step, "Do something."),
+                make_flow_node(
+                    "DOM#concept-tree",
+                    FlowNodeKind::External,
+                    "DOM#concept-tree",
+                ),
+            ],
+            edges: vec![make_flow_edge("1", "DOM#concept-tree", FlowEdgeKind::Call)],
+            issues: vec![],
+        };
+        let mermaid = flow_mermaid(&result);
+        // External node must use [[ ]] (double-rect), not { } (diamond)
+        assert!(
+            mermaid.contains("[[\"DOM#concept-tree\"]]"),
+            "external node must use [[…]] shape, got:\n{mermaid}"
+        );
+        assert!(
+            !mermaid.contains("{\"DOM#concept-tree\"}"),
+            "external node must NOT use {{…}} diamond shape, got:\n{mermaid}"
+        );
+        assert!(mermaid.contains("-->|call|"), "call edge must be present");
+    }
 
     #[test]
     fn test_query_format_minimal() {
