@@ -157,6 +157,7 @@ The site offers:
 - **Cross-references** between specifications
 - **Algorithm effects** with possible behavior summaries and witness examples
 - **Trace recorder** — record your path through algorithms and export as markdown with shareable links
+- **Diagram views** — interactive (pan, zoom, click-through) reference graphs, algorithm flowcharts built from the `flow` extraction, effect witness paths, and trace diagrams; every diagram exports as Mermaid text
 - **Daily updates** from the latest spec snapshots via GitHub Actions
 - **Zero server** — entirely static; the database is a chunked SQLite file served over HTTP Range requests and read through WebAssembly in your browser
 
