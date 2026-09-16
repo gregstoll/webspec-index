@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import type { WebspecClient } from '../api/client';
 import type { EffectSummaryResult, ExplainEffectsResult, SubjectSelector } from '../api/types';
 import { useRequest } from '../hooks/useRequest';
 import { describeStatus } from '../effects/status';
 import { effectLabel } from '../effects/label';
 import { stepEffects, type StepEffects } from '../effects/inline';
+import { Diagram } from '../diagram/Diagram';
+import { effectPaths } from '../diagram/effectPaths';
 
 interface Props {
   client: WebspecClient;
@@ -91,6 +93,20 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
     setExpandedEffectId(expandedEffectId === effectId ? null : effectId);
   }
 
+  // Memoised so the Diagram keeps the same graph object between renders and does
+  // not re-layout while the panel re-renders for unrelated state.
+  const expandedPaths = useMemo(() => {
+    if (explainCache.kind !== 'ok' || !expandedEffectId) return null;
+    const explanation = explainCache.value.explanations.find((e) => e.effect_id === expandedEffectId);
+    const effectEntry = explainCache.value.effects.find((e) => e.id === expandedEffectId);
+    if (!explanation || !effectEntry) return null;
+    return {
+      explanation,
+      effectEntry,
+      graph: effectPaths(explanation, effectEntry, explainCache.value.subject),
+    };
+  }, [explainCache, expandedEffectId]);
+
   const subjectLabel = selectedStepPath
     ? `Effects of step ${selectedStepPath.join('.')}`
     : 'Possible effects';
@@ -122,32 +138,18 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
       return <div class="effects-witnesses-error">Error: {explainCache.message}</div>;
     }
     if (explainCache.kind !== 'ok') return null;
-
-    const explanation = explainCache.value.explanations.find((e) => e.effect_id === effectId);
-    if (!explanation) return <div class="effects-no-witnesses">No witness paths found</div>;
+    if (!expandedPaths || expandedEffectId !== effectId) {
+      return <div class="effects-no-witnesses">No witness paths found</div>;
+    }
+    const { explanation, effectEntry, graph } = expandedPaths;
 
     return (
       <div class="effects-witnesses">
-        {explanation.witnesses.map((witness, wi) => (
-          <div key={wi} class="effects-witness">
-            {witness.hops.map((hop, hi) => (
-              <div key={hi} class="effects-hop">
-                <span class="mono">
-                  {hop.from.spec}#{hop.from.anchor}
-                  {hop.from.step_path ? ` step ${hop.from.step_path.join('.')}` : ''}
-                </span>
-                <span class="effects-hop-relation"> —{hop.relation}→ </span>
-                <span class="mono">{hop.to.spec}#{hop.to.anchor}</span>
-                {hop.site.step_text && (
-                  <blockquote class="effects-hop-quote">{hop.site.step_text}</blockquote>
-                )}
-                {hop.boundary && (
-                  <span class="effects-hop-boundary"> ({hop.boundary.execution})</span>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
+        <Diagram
+          graph={graph}
+          rankdir="LR"
+          ariaLabel={`Paths to ${effectLabel(effectEntry)}`}
+        />
         {explanation.witnesses_truncated && (
           <div class="effects-witnesses-note">More paths not shown</div>
         )}

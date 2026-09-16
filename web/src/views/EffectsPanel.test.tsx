@@ -1,8 +1,23 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/preact';
 
 afterEach(cleanup);
+
+// Mock getBoundingClientRect so Diagram's fit() has a real container size.
+beforeEach(() => {
+  vi.spyOn(SVGSVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    width: 800,
+    height: 400,
+    top: 0,
+    left: 0,
+    right: 800,
+    bottom: 400,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect);
+});
 
 import { EffectsPanel } from './EffectsPanel';
 import { MockClient } from '../api/client';
@@ -23,7 +38,7 @@ describe('EffectsPanel', () => {
     });
   });
 
-  it('clicking Show paths renders hop lines for the first effect', async () => {
+  it('clicking Show paths renders a diagram with hop target nodes', async () => {
     render(<EffectsPanel client={new MockClient()} spec="HTML" anchor="navigate" />);
     await waitFor(() => {
       expect(screen.getByText(/may fire event name=load/)).toBeTruthy();
@@ -31,12 +46,14 @@ describe('EffectsPanel', () => {
     const showPathsBtn = screen.getAllByRole('button', { name: /Show paths/ })[0];
     fireEvent.click(showPathsBtn);
     await waitFor(() => {
-      expect(screen.getAllByText(/—invoke→/).length).toBeGreaterThan(0);
-      expect(screen.getByText(/HTML#concept-event-fire/)).toBeTruthy();
+      const svg = document.querySelector('svg[role="img"]');
+      expect(svg).toBeTruthy();
+      expect(svg!.textContent).toContain('HTML#fire-an-event');
+      expect(svg!.textContent).toContain('HTML#concept-event-fire');
     });
   });
 
-  it('shows step_text quote in witness hops', async () => {
+  it('shows step_text as sublabel in diagram SVG', async () => {
     render(<EffectsPanel client={new MockClient()} spec="HTML" anchor="navigate" />);
     await waitFor(() => {
       expect(screen.getByText(/may fire event name=load/)).toBeTruthy();
@@ -44,7 +61,9 @@ describe('EffectsPanel', () => {
     const showPathsBtn = screen.getAllByRole('button', { name: /Show paths/ })[0];
     fireEvent.click(showPathsBtn);
     await waitFor(() => {
-      expect(screen.getByText('Fire an event named load at the document')).toBeTruthy();
+      const svg = document.querySelector('svg[role="img"]');
+      expect(svg).toBeTruthy();
+      expect(svg!.textContent).toContain('Fire an event named load at the document');
     });
   });
 
