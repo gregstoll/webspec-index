@@ -1493,12 +1493,12 @@ impl<'a> GraphBuilder<'a> {
     }
 
     fn mark_opaque_anchors(&mut self) {
-        let with_occurrences: std::collections::HashSet<&str> = self
+        let with_occurrences: HashSet<&str> = self
             .occurrences
             .values()
             .map(|o| o.subject_id.as_str())
             .collect();
-        let implements_sources: std::collections::HashSet<&str> = self
+        let implements_sources: HashSet<&str> = self
             .edges
             .values()
             .filter(|e| e.relation == Relationship::Implements)
