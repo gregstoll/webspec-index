@@ -122,6 +122,56 @@ describe('Section refs graph toggle', () => {
   });
 });
 
+describe('Section flow toggle', () => {
+  beforeEach(() => {
+    vi.spyOn(SVGSVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    window.location.hash = '#/HTML/navigate';
+  });
+
+  it('switching to Flow renders svg[role="img"]', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(screen.getByText('navigate')).toBeTruthy();
+    });
+    const flowBtn = screen.getByRole('button', { name: 'Flow' });
+    fireEvent.click(flowBtn);
+    await waitFor(() => {
+      expect(document.querySelector('svg[role="img"]')).toBeTruthy();
+    });
+  });
+
+  it('clicking a step node in Flow mode sets location.hash to #/HTML/navigate?step=1', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(screen.getByText('navigate')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Flow' }));
+    await waitFor(() => {
+      expect(document.querySelector('svg[role="img"]')).toBeTruthy();
+    });
+    // Step node "1" has no href, so it renders as a role=button g element
+    const stepNode = document.querySelector<SVGElement>('g[role="button"][aria-label]');
+    expect(stepNode).toBeTruthy();
+    fireEvent.click(stepNode!);
+    expect(window.location.hash).toBe('#/HTML/navigate?step=1');
+  });
+
+  it('rendering with selectedStepPath=[1] in Flow mode marks step node 1 as selected', async () => {
+    localStorage.setItem('sectionView', 'flow');
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" selectedStepPath={[1]} />);
+    await waitFor(() => {
+      expect(document.querySelector('svg[role="img"]')).toBeTruthy();
+    });
+    await waitFor(() => {
+      const selected = document.querySelector('.diagram-node.is-selected');
+      expect(selected).toBeTruthy();
+    });
+  });
+});
+
 describe('Section step selection', () => {
   beforeEach(() => {
     window.location.hash = '#/HTML/navigate';

@@ -384,6 +384,45 @@ export interface EffectFilter {
   occurrence_id?: string;
 }
 
+// --- Flow types ---
+
+export type FlowNodeKind = 'step' | 'branch' | 'loop' | 'parallel' | 'terminal' | 'external';
+export type FlowEdgeKind = 'next' | 'then' | 'else' | 'loop' | 'jump' | 'unknown' | 'call';
+
+export interface FlowCall {
+  spec: string;
+  anchor: string;
+  step_path?: string;
+}
+
+export interface FlowNode {
+  id: string;
+  kind: FlowNodeKind;
+  text: string;
+  calls?: FlowCall[];
+}
+
+export interface FlowEdge {
+  from: string;
+  to: string;
+  kind: FlowEdgeKind;
+  label?: string;
+}
+
+export interface FlowIssue {
+  step: string;
+  code: string;
+  message: string;
+}
+
+export interface FlowResult {
+  spec: string;
+  anchor: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  issues: FlowIssue[];
+}
+
 // --- Request union ---
 
 export type Request =
@@ -407,7 +446,8 @@ export type Request =
     }
   | { type: 'idl'; query: string; spec?: string; limit?: number }
   | { type: 'effects'; subject: SubjectSelector; filter?: EffectFilter }
-  | { type: 'effects_explain'; subject: SubjectSelector };
+  | { type: 'effects_explain'; subject: SubjectSelector }
+  | { type: 'flow'; target: string };
 
 // --- Error (flat, no result wrapper) ---
 
@@ -433,4 +473,5 @@ export type Response =
   | { type: 'graph'; result: GraphResult }
   | { type: 'idl'; result: IdlResult }
   | { type: 'effects'; result: EffectSummaryResult }
-  | { type: 'effects_explain'; result: ExplainEffectsResult };
+  | { type: 'effects_explain'; result: ExplainEffectsResult }
+  | { type: 'flow'; result: FlowResult };

@@ -6,6 +6,7 @@ import { useRequest } from '../hooks/useRequest';
 import { Loading, ErrorBanner } from './Status';
 import { EffectsPanel } from './EffectsPanel';
 import { RefsGraph } from './RefsGraph';
+import { FlowView } from './FlowView';
 import { remember } from '../trace/titles';
 import { annotateSteps } from '../content/steps';
 import { effectLabel } from '../effects/label';
@@ -20,6 +21,8 @@ interface Props {
 }
 
 const REFS_GRAPH_KEY = 'refsGraph';
+const SECTION_VIEW_KEY = 'sectionView';
+type SectionView = 'text' | 'flow';
 
 function readGraphPref(): boolean {
   try {
@@ -37,9 +40,26 @@ function writeGraphPref(v: boolean): void {
   }
 }
 
+function readSectionView(): SectionView {
+  try {
+    return localStorage.getItem(SECTION_VIEW_KEY) === 'flow' ? 'flow' : 'text';
+  } catch {
+    return 'text';
+  }
+}
+
+function writeSectionView(v: SectionView): void {
+  try {
+    localStorage.setItem(SECTION_VIEW_KEY, v);
+  } catch {
+    // ignore
+  }
+}
+
 export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const [stepFx, setStepFx] = useState<StepEffects | undefined>(undefined);
   const [graphOn, setGraphOn] = useState(readGraphPref);
+  const [sectionView, setSectionView] = useState<SectionView>(readSectionView);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
     { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
@@ -137,7 +157,44 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         </ul>
       )}
 
-      {result.content_html ? (
+      {result.type === 'algorithm' && (
+        <div class="section-view-toggle" role="group" aria-label="Content view">
+          <button
+            type="button"
+            class="section-view-btn"
+            aria-pressed={sectionView === 'text'}
+            onClick={() => {
+              setSectionView('text');
+              writeSectionView('text');
+            }}
+          >
+            Text
+          </button>
+          <button
+            type="button"
+            class="section-view-btn"
+            aria-pressed={sectionView === 'flow'}
+            onClick={() => {
+              setSectionView('flow');
+              writeSectionView('flow');
+            }}
+          >
+            Flow
+          </button>
+        </div>
+      )}
+
+      {sectionView === 'flow' && result.type === 'algorithm' ? (
+        <FlowView
+          client={client}
+          spec={result.spec}
+          anchor={result.anchor}
+          selectedId={selectedStepPath?.join('.')}
+          onSelect={(id) =>
+            handleStepSelect(selectedStepPath?.join('.') === id ? undefined : id.split('.').map(Number))
+          }
+        />
+      ) : result.content_html ? (
         <ContentBlock
           html={result.content_html}
           selectedStepPath={selectedStepPath}

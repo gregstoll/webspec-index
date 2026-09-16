@@ -1,4 +1,4 @@
-import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry, EffectSummaryResult, ExplainEffectsResult, GraphResult } from './types';
+import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry, EffectSummaryResult, ExplainEffectsResult, GraphResult, FlowResult } from './types';
 
 export interface WebspecClient {
   request(req: Request): Promise<Response>;
@@ -167,6 +167,30 @@ export const MOCK_GRAPH_NAVIGATE: GraphResult = {
   ],
 };
 
+// --- Flow fixtures ---
+
+export const MOCK_FLOW_NAVIGATE: FlowResult = {
+  spec: 'HTML',
+  anchor: 'navigate',
+  nodes: [
+    { id: '1', kind: 'step', text: 'Let resource be the result of fetching url.', calls: [{ spec: 'FETCH', anchor: 'concept-fetch' }] },
+    { id: '2', kind: 'branch', text: 'If resource is a network error:' },
+    { id: '3', kind: 'step', text: 'Update the session history with the new page.' },
+    { id: '4', kind: 'step', text: 'Display the inline content for the error.' },
+    { id: '5', kind: 'terminal', text: 'Return.' },
+    { id: 'FETCH#concept-fetch', kind: 'external', text: 'fetch' },
+  ],
+  edges: [
+    { from: '1', to: 'FETCH#concept-fetch', kind: 'call' },
+    { from: '1', to: '2', kind: 'next' },
+    { from: '2', to: '3', kind: 'then' },
+    { from: '2', to: '4', kind: 'else' },
+    { from: '3', to: '5', kind: 'next' },
+    { from: '4', to: '5', kind: 'next' },
+  ],
+  issues: [],
+};
+
 // --- Effects fixtures ---
 
 const MOCK_EFFECTS_HTML_NAVIGATE: EffectSummaryResult = {
@@ -217,12 +241,12 @@ const MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE: ExplainEffectsResult = {
         {
           hops: [
             {
-              from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123', step_path: [1] },
+              from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
               to: { spec: 'HTML', anchor: 'fire-an-event', snapshot_sha: 'abc123' },
               relation: 'invoke',
               site: {
                 id: 'site-1',
-                subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123' },
+                subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123', step_path: [1] },
                 url: 'https://html.spec.whatwg.org/#navigate',
                 step_text: 'Fire an event named load at the document',
               },
@@ -322,6 +346,13 @@ export class MockClient implements WebspecClient {
           return { type: 'graph', result: MOCK_GRAPH_NAVIGATE };
         }
         return { type: 'graph', result: { ...MOCK_GRAPH_NAVIGATE, root: { spec: 'HTML', anchor: target }, nodes: [], edges: [], truncated: false } };
+      }
+
+      case 'flow': {
+        if (req.target === 'HTML#navigate') {
+          return { type: 'flow', result: MOCK_FLOW_NAVIGATE };
+        }
+        return { type: 'error', code: 'not_found', message: `No flow fixture for target: ${req.target}` };
       }
 
       default:
