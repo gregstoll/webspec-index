@@ -50,8 +50,6 @@ jobs:
         run: ./target/release/webspec-index update --providers whatwg,w3c,tc39
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Prepare effects
-        run: ./target/release/webspec-index effects --all --summary-only
       - name: Export web database
         run: |
           set -o pipefail

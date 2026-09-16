@@ -66,7 +66,7 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
 
     let conn = Connection::open(&work)?;
     // Pruning fires the effects invalidation triggers on specs and snapshots, which
-    // would mark the prepared run stale in the export. The run stays valid for the
+    // would mark the stored graph stale in the export. The graph stays valid for the
     // specs that remain, so the counter is put back afterwards.
     let generation = crate::db::effects::generation(&conn)?;
     prune(&conn, &options.providers, &options.specs)?;

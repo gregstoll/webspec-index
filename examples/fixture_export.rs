@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use webspec_index::db;
+use webspec_index::effects::service::build_and_store_graph;
+use webspec_index::effects::{default_catalog, EffectsOptions};
 use webspec_index::export::{export_web, ExportOptions};
 use webspec_index::model::{ParsedReference, ParsedSection, RefKind, SectionType};
+use webspec_index::parse::steps::{extract_step_structure, STRUCTURE_VERSION};
 
 fn main() {
     let out_dir: PathBuf = std::env::args()
@@ -70,17 +73,30 @@ fn main() {
     db::write::insert_sections_bulk(
         &conn,
         dom_snap,
-        &[ParsedSection {
-            anchor: "concept-tree".into(),
-            title: Some("Trees".into()),
-            content_text: Some("1. Walk the tree.\n2. Return result.\n".into()),
-            section_type: SectionType::Algorithm,
-            parent_anchor: None,
-            prev_anchor: None,
-            next_anchor: None,
-            depth: Some(2),
-            number: None,
-        }],
+        &[
+            ParsedSection {
+                anchor: "concept-event-fire".into(),
+                title: Some("Fire an event".into()),
+                content_text: Some("1. Dispatch the event.\n2. Return result.\n".into()),
+                section_type: SectionType::Algorithm,
+                parent_anchor: None,
+                prev_anchor: None,
+                next_anchor: Some("concept-tree".into()),
+                depth: Some(2),
+                number: None,
+            },
+            ParsedSection {
+                anchor: "concept-tree".into(),
+                title: Some("Trees".into()),
+                content_text: Some("1. Walk the tree.\n2. Return result.\n".into()),
+                section_type: SectionType::Algorithm,
+                parent_anchor: None,
+                prev_anchor: Some("concept-event-fire".into()),
+                next_anchor: None,
+                depth: Some(2),
+                number: None,
+            },
+        ],
     )
     .expect("insert DOM sections");
 
@@ -100,12 +116,43 @@ fn main() {
     )
     .expect("insert refs");
 
-    conn.execute_batch(
-        "INSERT INTO effect_graph(id, generation, semantic_key, manifest_json, topology, opaque_anchor_issue_id) \
-         VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), \
-                 'fixture', '{}', X'00', NULL);",
+    let html_structure = extract_step_structure(
+        concat!(
+            "<div class=\"algorithm\"><p>To <dfn id=\"navigate\">navigate</dfn>:</p><ol>",
+            "<li><a href=\"https://dom.spec.whatwg.org/#concept-event-fire\">Fire an event</a>",
+            " named <code>load</code>.</li>",
+            "<li>Queue a task to do the thing.</li>",
+            "</ol></div>",
+        ),
+        "HTML",
+        "https://html.spec.whatwg.org/",
+        "hash:fixture",
+    );
+    db::effects::store_structure(
+        &conn,
+        html_snap,
+        STRUCTURE_VERSION,
+        &serde_json::to_string(&html_structure).expect("serialize html structure"),
     )
-    .expect("effect graph");
+    .expect("store HTML structure");
+
+    let dom_structure = extract_step_structure(
+        "<p>To <dfn id=\"concept-event-fire\">fire an event</dfn>, dispatch it.</p>",
+        "DOM",
+        "https://dom.spec.whatwg.org/",
+        "hash:domfix",
+    );
+    db::effects::store_structure(
+        &conn,
+        dom_snap,
+        STRUCTURE_VERSION,
+        &serde_json::to_string(&dom_structure).expect("serialize dom structure"),
+    )
+    .expect("store DOM structure");
+
+    let catalog = default_catalog(&[]).expect("catalog");
+    build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1))
+        .expect("build effects graph");
 
     drop(conn);
 
