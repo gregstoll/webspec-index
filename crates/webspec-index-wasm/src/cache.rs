@@ -11,6 +11,8 @@ pub struct BlockCache {
     order: VecDeque<u64>,
     bytes: u64,
     cap: u64,
+    last_fetched: Option<u64>,
+    streak: u32,
 }
 
 impl BlockCache {
@@ -20,6 +22,8 @@ impl BlockCache {
             order: VecDeque::new(),
             bytes: 0,
             cap: cap_bytes,
+            last_fetched: None,
+            streak: 0,
         }
     }
 
@@ -89,8 +93,15 @@ pub fn read_through(
             stats.cache_hits += 1;
             copy_block(buf, done, data, local)
         } else {
+            let span = if cache.last_fetched == Some(block.wrapping_sub(1)) {
+                cache.streak = (cache.streak + 1).min(4);
+                1u64 << cache.streak
+            } else {
+                cache.streak = 0;
+                1
+            };
             let start = block * BLOCK_SIZE;
-            let end = (start + BLOCK_SIZE - 1).min(layout.size - 1);
+            let end = (start + span * BLOCK_SIZE - 1).min(layout.size - 1);
             let mut data = vec![0u8; (end - start + 1) as usize];
             for piece in layout.pieces(start, end) {
                 let bytes =
@@ -99,8 +110,16 @@ pub fn read_through(
                 stats.bytes_fetched += bytes.len() as u64;
                 data[piece.buf_offset..piece.buf_offset + bytes.len()].copy_from_slice(&bytes);
             }
-            let n = copy_block(buf, done, &data, local);
-            cache.insert(block, data);
+            let n = copy_block(
+                buf,
+                done,
+                &data[..BLOCK_SIZE.min(data.len() as u64) as usize],
+                local,
+            );
+            for (i, chunk) in data.chunks(BLOCK_SIZE as usize).enumerate() {
+                cache.insert(block + i as u64, chunk.to_vec());
+            }
+            cache.last_fetched = Some(end / BLOCK_SIZE);
             n
         };
         done += n;
@@ -199,6 +218,92 @@ mod tests {
         assert!(!read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 992).unwrap());
         assert_eq!(&buf[..8], &src.data[992..1000]);
         assert!(buf[8..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn sequential_misses_grow_the_fetch_span_up_to_sixteen_blocks() {
+        let src = source((64 * BLOCK_SIZE) as usize, 1 << 30);
+        let layout = ChunkLayout {
+            size: 64 * BLOCK_SIZE,
+            chunk_size: 1 << 30,
+        };
+        let mut cache = BlockCache::new(CACHE_CAP_BYTES);
+        let mut stats = Stats::default();
+        let mut buf = vec![0u8; BLOCK_SIZE as usize];
+        for block in 0..40u64 {
+            read_through(
+                &layout,
+                &mut cache,
+                &mut stats,
+                &src,
+                &mut buf,
+                block * BLOCK_SIZE,
+            )
+            .unwrap();
+            assert_eq!(buf[0], ((block * BLOCK_SIZE) % 251) as u8);
+        }
+        // 1 + 2 + 4 + 8 + 16 + 16 = 47 blocks covered by 6 fetches; block 40 not needed.
+        let calls = src.calls.borrow();
+        assert_eq!(calls.len(), 6, "{calls:?}");
+        let spans: Vec<u64> = calls
+            .iter()
+            .map(|(_, s, e)| (e - s + 1) / BLOCK_SIZE)
+            .collect();
+        assert_eq!(spans, vec![1, 2, 4, 8, 16, 16]);
+    }
+
+    #[test]
+    fn random_miss_resets_the_span_to_one_block() {
+        let src = source((64 * BLOCK_SIZE) as usize, 1 << 30);
+        let layout = ChunkLayout {
+            size: 64 * BLOCK_SIZE,
+            chunk_size: 1 << 30,
+        };
+        let mut cache = BlockCache::new(CACHE_CAP_BYTES);
+        let mut stats = Stats::default();
+        let mut buf = vec![0u8; 16];
+        read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 0).unwrap();
+        read_through(&layout, &mut cache, &mut stats, &src, &mut buf, BLOCK_SIZE).unwrap();
+        read_through(
+            &layout,
+            &mut cache,
+            &mut stats,
+            &src,
+            &mut buf,
+            50 * BLOCK_SIZE,
+        )
+        .unwrap();
+        let calls = src.calls.borrow();
+        let spans: Vec<u64> = calls
+            .iter()
+            .map(|(_, s, e)| (e - s + 1) / BLOCK_SIZE)
+            .collect();
+        assert_eq!(spans, vec![1, 2, 1]);
+    }
+
+    #[test]
+    fn read_ahead_stops_at_end_of_file() {
+        let size = 3 * BLOCK_SIZE + 100;
+        let src = source(size as usize, 1 << 30);
+        let layout = ChunkLayout {
+            size,
+            chunk_size: 1 << 30,
+        };
+        let mut cache = BlockCache::new(CACHE_CAP_BYTES);
+        let mut stats = Stats::default();
+        let mut buf = vec![0u8; 16];
+        read_through(&layout, &mut cache, &mut stats, &src, &mut buf, 0).unwrap();
+        read_through(&layout, &mut cache, &mut stats, &src, &mut buf, BLOCK_SIZE).unwrap();
+        read_through(
+            &layout,
+            &mut cache,
+            &mut stats,
+            &src,
+            &mut buf,
+            3 * BLOCK_SIZE,
+        )
+        .unwrap();
+        assert_eq!(stats.bytes_fetched, size);
     }
 
     #[test]
