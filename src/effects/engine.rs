@@ -2576,9 +2576,30 @@ fn operation_relation(
         .unwrap_or_default()
         .to_ascii_lowercase();
     const VERBS: &[&str] = &[
-        "abort", "append", "apply", "call", "clean", "continue", "dispatch", "enqueue", "evaluate",
-        "execute", "fire", "invoke", "load", "navigate", "perform", "prepare", "queue", "resume",
-        "run", "schedule", "wait",
+        "abort",
+        "append",
+        "apply",
+        "call",
+        "clean",
+        "continue",
+        "dispatch",
+        "enqueue",
+        "evaluate",
+        "execute",
+        "fire",
+        "invoke",
+        "load",
+        "navigate",
+        "obtain",
+        "parse",
+        "perform",
+        "prepare",
+        "queue",
+        "resume",
+        "run",
+        "schedule",
+        "serialize",
+        "wait",
     ];
     // These verbs identify linked actions, but are too broad to use as
     // preceding cues: "Set x to [an algorithm]" need not invoke it.
@@ -4054,11 +4075,7 @@ rules:
         let concept_edges: Vec<_> = artifact
             .relationships
             .iter()
-            .filter(|edge| {
-                edge.to.starts_with("anchor:")
-                    && edge.to != "anchor:TEST#fire"
-                    && edge.to != "anchor:TEST#callee"
-            })
+            .filter(|edge| edge.to.starts_with("anchor:") && edge.to != "anchor:TEST#fire")
             .collect();
         assert!(
             !concept_edges.is_empty(),
