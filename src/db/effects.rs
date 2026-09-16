@@ -373,6 +373,8 @@ pub struct SqlSiteStore<'a>(pub &'a Connection);
 
 impl crate::effects::graph::SiteStore for SqlSiteStore<'_> {
     fn site(&self, key: &str) -> Option<SourceSite> {
+        // SiteStore is infallible; a missing or unreadable site yields None by
+        // design — callers treat absent sites as unknown context.
         self.0
             .query_row("SELECT json FROM effect_sites WHERE key=?1", [key], |row| {
                 let json: String = row.get(0)?;
@@ -1029,6 +1031,9 @@ mod tests {
         let mut issues_map = BTreeMap::new();
         issues_map.insert("n1".into(), vec![0u32]);
 
+        let mut definitions = BTreeMap::new();
+        definitions.insert("n1".into(), vec!["n2".into()]);
+
         let mut g = Graph {
             engine_version: 1,
             environment: "web".into(),
@@ -1039,7 +1044,7 @@ mod tests {
             occurrences,
             issue_catalog: vec![issue],
             issues: issues_map,
-            definitions: BTreeMap::new(),
+            definitions,
             sites,
             effect_categories: BTreeMap::new(),
             edges_by_source: Default::default(),
@@ -1071,9 +1076,164 @@ mod tests {
         assert_eq!(loaded.edges, graph.edges);
         assert_eq!(loaded.occurrences, graph.occurrences);
         assert_eq!(loaded.issue_catalog, graph.issue_catalog);
+        assert_eq!(loaded.definitions, graph.definitions);
         assert!(loaded.sites.is_empty());
         let key = graph.sites.keys().next().unwrap();
         assert_eq!(SqlSiteStore(&conn).site(key), graph.sites.get(key).cloned());
         assert!(!loaded.edges_by_source.is_empty());
+    }
+
+    #[test]
+    fn graph_store_prunes_opaque_anchor_nodes() {
+        use crate::effects::model::IssueCode;
+
+        let subj = |anchor: &str| Subject {
+            spec: "HTML".into(),
+            anchor: anchor.to_string(),
+            snapshot_sha: "sha1".into(),
+            step_id: None,
+            step_path: None,
+            body_id: None,
+        };
+        let node = |id: &str, order: u64| ExecutionNode {
+            id: id.to_string(),
+            subject: subj(id),
+            source_order: order,
+            is_body: false,
+            definition_only: false,
+        };
+
+        // issue_catalog[0] is the opaque "no reusable algorithm body" issue
+        // issue_catalog[1] is an ordinary second issue
+        let opaque_issue = GraphIssue {
+            code: IssueCode::UnsupportedStructure,
+            message: "indexed anchor has no reusable algorithm body for test".into(),
+            site_key: None,
+        };
+        let extra_issue = GraphIssue {
+            code: IssueCode::MissingSpec,
+            message: "second issue".into(),
+            site_key: None,
+        };
+
+        let mut nodes = BTreeMap::new();
+        nodes.insert("n1".into(), node("n1", 0));
+        // will be pruned: only issue is the opaque one, not an edge endpoint
+        nodes.insert("anchor:pruned".into(), node("anchor:pruned", 1));
+        // will be kept: is the target of an edge
+        nodes.insert("anchor:kept-edge".into(), node("anchor:kept-edge", 2));
+        // will be kept: has opaque issue plus a second issue
+        nodes.insert("anchor:kept-issues".into(), node("anchor:kept-issues", 3));
+
+        let edge = ExecutionEdge {
+            id: "e1".into(),
+            from: "n1".into(),
+            to: "anchor:kept-edge".into(),
+            relation: Relationship::Invoke,
+            execution: Execution::Inline,
+            site_key: "k".into(),
+            site_id: "s".into(),
+            context: vec![],
+            context_truncated: false,
+            boundary: None,
+            source_order: 0,
+        };
+        let mut edges = BTreeMap::new();
+        edges.insert("e1".into(), edge);
+
+        let mut anchor_nodes_map = BTreeMap::new();
+        anchor_nodes_map.insert(("HTML".into(), "base".into()), "n1".into());
+        anchor_nodes_map.insert(("HTML".into(), "pruned".into()), "anchor:pruned".into());
+        anchor_nodes_map.insert(
+            ("HTML".into(), "kept-edge".into()),
+            "anchor:kept-edge".into(),
+        );
+        anchor_nodes_map.insert(
+            ("HTML".into(), "kept-issues".into()),
+            "anchor:kept-issues".into(),
+        );
+
+        let mut issues_map = BTreeMap::new();
+        issues_map.insert("anchor:pruned".into(), vec![0u32]);
+        issues_map.insert("anchor:kept-issues".into(), vec![0u32, 1u32]);
+
+        let mut g = Graph {
+            engine_version: 1,
+            environment: "web".into(),
+            catalog_digest: "digest2".into(),
+            nodes,
+            anchor_nodes: anchor_nodes_map,
+            edges,
+            occurrences: BTreeMap::new(),
+            issue_catalog: vec![opaque_issue, extra_issue],
+            issues: issues_map,
+            definitions: BTreeMap::new(),
+            sites: BTreeMap::new(),
+            effect_categories: BTreeMap::new(),
+            edges_by_source: Default::default(),
+            edges_by_target: Default::default(),
+        };
+        g.index_edges();
+
+        let conn = crate::db::open_test_db().unwrap();
+        store_graph(
+            &conn,
+            &StoredGraphMeta {
+                generation: 1,
+                semantic_key: "pruning-test".into(),
+                manifest_json: "{}".into(),
+                opaque_anchor_issue: None,
+            },
+            &g,
+        )
+        .unwrap();
+
+        let meta = load_graph_meta(&conn).unwrap().unwrap();
+        assert_eq!(
+            meta.opaque_anchor_issue,
+            Some(0u32),
+            "opaque issue id must be 0"
+        );
+
+        let loaded = load_graph(&conn).unwrap().unwrap();
+        assert!(
+            !loaded.nodes.contains_key("anchor:pruned"),
+            "pruned anchor must be absent"
+        );
+        assert!(
+            loaded.nodes.contains_key("anchor:kept-edge"),
+            "edge-target anchor must be kept"
+        );
+        assert!(
+            loaded.nodes.contains_key("anchor:kept-issues"),
+            "multi-issue anchor must be kept"
+        );
+        assert!(
+            loaded.nodes.contains_key("n1"),
+            "ordinary node must be kept"
+        );
+
+        // anchor_nodes entry for the pruned node must be gone
+        assert!(
+            !loaded.anchor_nodes.values().any(|v| v == "anchor:pruned"),
+            "anchor_nodes must not reference pruned node"
+        );
+        assert!(
+            loaded
+                .anchor_nodes
+                .values()
+                .any(|v| v == "anchor:kept-edge"),
+            "anchor_nodes must reference kept edge-target node"
+        );
+
+        // issues for kept anchor nodes round-trip; pruned node has no entry
+        assert_eq!(
+            loaded.issues.get("anchor:kept-issues"),
+            Some(&vec![0u32, 1u32])
+        );
+        assert!(
+            !loaded.issues.contains_key("anchor:pruned"),
+            "pruned node must have no issues entry"
+        );
     }
 }
