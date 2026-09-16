@@ -7,6 +7,9 @@ use crate::source::{RangeSource, SourceError};
 
 pub struct XhrSource {
     pub base_url: String,
+    /// Content hash of the export, appended to chunk URLs so a browser never mixes
+    /// cached ranges from an earlier export with ranges from the current one.
+    pub version: String,
 }
 
 impl RangeSource for XhrSource {
@@ -16,11 +19,7 @@ impl RangeSource for XhrSource {
         local_start: u64,
         local_end_inclusive: u64,
     ) -> Result<Vec<u8>, SourceError> {
-        let url = format!(
-            "{}/{}",
-            self.base_url.trim_end_matches('/'),
-            ChunkLayout::chunk_name(chunk)
-        );
+        let url = ChunkLayout::chunk_url(&self.base_url, chunk, &self.version);
         let xhr = XmlHttpRequest::new().map_err(js_err)?;
         xhr.open_with_async("GET", &url, false).map_err(js_err)?;
         xhr.set_request_header(
@@ -49,9 +48,13 @@ impl RangeSource for XhrSource {
     }
 }
 
+/// Fetches a small text resource, revalidating any cached copy so a fresh manifest is
+/// seen as soon as a new export is published.
 pub fn fetch_text_sync(url: &str) -> Result<String, SourceError> {
     let xhr = XmlHttpRequest::new().map_err(js_err)?;
     xhr.open_with_async("GET", url, false).map_err(js_err)?;
+    xhr.set_request_header("Cache-Control", "no-cache")
+        .map_err(js_err)?;
     xhr.send().map_err(js_err)?;
     let status = xhr.status().map_err(js_err)?;
     if status != 200 {

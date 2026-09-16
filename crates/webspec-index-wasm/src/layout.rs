@@ -41,11 +41,32 @@ impl ChunkLayout {
     pub fn chunk_name(index: u32) -> String {
         format!("{index:04}.bin")
     }
+
+    /// URL of a chunk below `base_url`, tagged with the export's content hash so that
+    /// cached ranges from a previous export are never reused for this one.
+    pub fn chunk_url(base_url: &str, index: u32, version: &str) -> String {
+        let name = Self::chunk_name(index);
+        let base = base_url.trim_end_matches('/');
+        if version.is_empty() {
+            format!("{base}/{name}")
+        } else {
+            format!("{base}/{name}?v={version}")
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_urls_carry_the_export_version() {
+        assert_eq!(
+            ChunkLayout::chunk_url("https://x.test/db/", 3, "abc"),
+            "https://x.test/db/0003.bin?v=abc"
+        );
+        assert_eq!(ChunkLayout::chunk_url("/db", 0, ""), "/db/0000.bin");
+    }
 
     #[test]
     fn chunk_count_rounds_up() {

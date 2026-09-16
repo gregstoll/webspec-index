@@ -23,6 +23,8 @@ mod exports {
     struct ManifestHeader {
         size: u64,
         chunk_size: u64,
+        #[serde(default)]
+        sha256: String,
     }
 
     #[wasm_bindgen]
@@ -40,7 +42,10 @@ mod exports {
                 size: manifest.size,
                 chunk_size: manifest.chunk_size,
             },
-            Box::new(xhr::XhrSource { base_url }),
+            Box::new(xhr::XhrSource {
+                base_url,
+                version: manifest.sha256,
+            }),
             cache::CACHE_CAP_BYTES,
         );
         vfs::register_file("webspec.db", file).map_err(|e| JsValue::from_str(&e))?;
