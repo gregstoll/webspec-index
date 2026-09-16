@@ -53,9 +53,11 @@ export function stepEffects(
       if (!effect) continue;
       for (const witness of explanation.witnesses) {
         const first = witness.hops[0];
-        if (first && first.from.step_path && isHere(first.from)) {
-          add(first.from.step_path, effect, 'path');
-        }
+        if (!first) continue;
+        // The hop's `from` names the subject algorithm as a whole; the call site
+        // carries the step where the invocation happens.
+        const origin = first.site.subject.step_path ? first.site.subject : first.from;
+        if (origin.step_path && isHere(origin)) add(origin.step_path, effect, 'path');
       }
     }
   }

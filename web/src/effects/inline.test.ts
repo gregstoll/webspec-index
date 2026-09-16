@@ -23,10 +23,10 @@ function witnessFrom(step_path: number[], spec = 'HTML', anchor = 'navigate'): W
   return {
     hops: [
       {
-        from: { spec, anchor, snapshot_sha: 'x', step_path },
+        from: { spec, anchor, snapshot_sha: 'x' },
         to: { spec: 'FETCH', anchor: 'fetch', snapshot_sha: 'y' },
-        relation: 'invokes',
-        site: { id: 's', subject: { spec, anchor, snapshot_sha: 'x' }, url: 'u' },
+        relation: 'invoke',
+        site: { id: 's', subject: { spec, anchor, snapshot_sha: 'x', step_path }, url: 'u' },
         context: [],
       },
     ],
