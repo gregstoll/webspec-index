@@ -94,6 +94,7 @@ const MOCK_BROWSING: QueryResult = {
   anchor: 'browsing-the-web',
   url: 'https://html.spec.whatwg.org/#browsing-the-web',
   title: 'Browsing the web',
+  number: '7.4',
   type: 'heading',
   navigation: {
     parent: null,
@@ -114,6 +115,7 @@ const MOCK_CONCEPT_TREE: QueryResult = {
   anchor: 'concept-tree',
   url: 'https://dom.spec.whatwg.org/#concept-tree',
   title: 'Trees',
+  number: '2.1',
   type: 'heading',
   navigation: {
     parent: null,
@@ -135,10 +137,10 @@ const MOCK_SEARCH: SearchResult = {
 };
 
 const MOCK_HTML_HEADINGS: ListEntry[] = [
-  { anchor: 'introduction', title: 'Introduction', depth: 2 },
-  { anchor: 'browsing-the-web', title: 'Browsing the web', depth: 2 },
+  { anchor: 'introduction', title: 'Introduction', depth: 2, number: '1' },
+  { anchor: 'browsing-the-web', title: 'Browsing the web', depth: 2, number: '7.4' },
   { anchor: 'navigate', title: 'navigate', depth: 3, parent: 'browsing-the-web' },
-  { anchor: 'beginning-navigation', title: 'Beginning navigation', depth: 3, parent: 'browsing-the-web' },
+  { anchor: 'beginning-navigation', title: 'Beginning navigation', depth: 3, parent: 'browsing-the-web', number: '7.4.2' },
 ];
 
 // --- Effects fixtures ---

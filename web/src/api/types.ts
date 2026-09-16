@@ -12,6 +12,7 @@ export type RefKind = 'step' | 'note' | 'idl' | 'prose';
 export interface NavEntry {
   anchor: string;
   title?: string;
+  number?: string;
 }
 
 // parent/prev/next are serialized as JSON null when absent, not omitted.
@@ -42,6 +43,7 @@ export interface QueryResult {
   anchor: string;
   url: string;
   title?: string;
+  number?: string;
   type: string;          // section type: heading | algorithm | definition | idl | prose
   content?: string;
   content_html?: string; // populated when request includes render: "html"
@@ -88,6 +90,7 @@ export interface ListEntry {
   title?: string;
   depth: number;
   parent?: string;
+  number?: string;
 }
 
 // --- Refs ---

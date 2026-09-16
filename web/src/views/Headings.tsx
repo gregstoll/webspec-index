@@ -44,6 +44,7 @@ export function Headings({ client, spec }: Props) {
             </a>
             {entry.title && (
               <a href={`#/${spec}/${entry.anchor}`} style={{ fontWeight: entry.depth <= 2 ? 600 : 400 }}>
+                {entry.number && <span class="section-number">{entry.number}</span>}
                 {entry.title}
               </a>
             )}
