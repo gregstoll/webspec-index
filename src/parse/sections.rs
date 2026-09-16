@@ -641,7 +641,7 @@ pub fn collect_headings(html: &str) -> Result<Vec<ParsedSection>> {
 
 /// Check if a dfn sits inside the body of an algorithm (i.e. part of its steps).
 /// Such dfns belong to the algorithm's markdown content, not to a section of their own.
-fn is_inside_algorithm_content(element: &scraper::ElementRef) -> bool {
+pub(crate) fn is_inside_algorithm_content(element: &scraper::ElementRef) -> bool {
     // The dfn may sit in a sublist; the pattern below is anchored on the outermost list.
     let mut outermost_list = None;
     let mut current = element.parent();

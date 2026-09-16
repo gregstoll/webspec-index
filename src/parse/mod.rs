@@ -203,6 +203,12 @@ fn parse_generic_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec
                 }
             }
             "tr" | "dt" | "section" | "li" => {
+                // An id on an algorithm step is a link target inside that algorithm's
+                // body, not a section of its own; indexing it would make it the
+                // algorithm's next sibling in navigation.
+                if sections::is_inside_algorithm_content(&element) {
+                    continue;
+                }
                 if let Some(section) = sections::parse_anchor_element(&element, converter)? {
                     sections.push(section);
                 }
@@ -266,6 +272,37 @@ fn is_inside_emu_clause(element: &scraper::ElementRef) -> bool {
 mod tests {
     use super::*;
     use crate::model::SectionType;
+
+    #[test]
+    fn step_ids_inside_an_algorithm_are_not_sections() {
+        let html = r#"
+            <h2 id="nav">Navigation</h2>
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li>If x is null:
+                    <ol><li id="assert-null-x"><p>Assert: y is "z".</p></li></ol>
+                </li>
+                <li id="second-step">Return.</li>
+            </ol>
+            <p>To <dfn id="reload">reload</dfn>:</p>
+            <ol><li>Return.</li></ol>
+            <ul><li id="prop-list-item">A named property.</li></ul>
+        "#;
+
+        let parsed = parse_spec(html, "TEST", "https://test.example.com").unwrap();
+        let anchors: Vec<&str> = parsed.sections.iter().map(|s| s.anchor.as_str()).collect();
+        assert_eq!(
+            anchors,
+            vec!["nav", "navigate", "reload", "prop-list-item"],
+            "{anchors:?}"
+        );
+        let navigate = parsed
+            .sections
+            .iter()
+            .find(|s| s.anchor == "navigate")
+            .unwrap();
+        assert_eq!(navigate.next_anchor.as_deref(), Some("reload"));
+    }
 
     #[test]
     fn test_parse_spec_full_pipeline() {
