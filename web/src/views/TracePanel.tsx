@@ -5,6 +5,7 @@ import { getTitleCache } from '../trace/titles';
 import { traceToMarkdown } from '../trace/markdown';
 import { encodeTrace } from '../trace/share';
 import type { Route } from '../router';
+import { TraceDiagram } from './TraceDiagram';
 import '../styles/trace.css';
 
 interface TracePanelProps {
@@ -25,6 +26,7 @@ export function TracePanelToggle({ count, onClick }: { count: number; onClick: (
 export function TracePanel({ route, selectedStepPath, onClose }: TracePanelProps) {
   const [entries, setEntries] = useState<readonly TraceEntry[]>(() => traceStore.entries);
   const [copyFeedback, setCopyFeedback] = useState('');
+  const [showDiagram, setShowDiagram] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -102,12 +104,27 @@ export function TracePanel({ route, selectedStepPath, onClose }: TracePanelProps
     <div class="trace-panel" role="complementary" aria-label="Trace recorder">
       <div class="trace-panel-header">
         <span class="trace-panel-title">Trace recorder — {entries.length} step{entries.length !== 1 ? 's' : ''}</span>
+        {entries.length > 0 && (
+          <button
+            class={`trace-action-btn trace-diagram-toggle${showDiagram ? ' is-active' : ''}`}
+            onClick={() => setShowDiagram((v) => !v)}
+            aria-pressed={showDiagram}
+          >
+            Diagram
+          </button>
+        )}
         <button class="trace-panel-close" onClick={onClose} aria-label="Close trace panel">✕</button>
       </div>
 
       <div class="trace-panel-body">
         {entries.length === 0 && (
           <div class="trace-empty">No steps recorded yet. Navigate to a section and press <kbd>t</kbd> or use "Add section".</div>
+        )}
+
+        {showDiagram && entries.length > 0 && (
+          <div class="trace-diagram-container">
+            <TraceDiagram entries={entries} rankdir="LR" />
+          </div>
         )}
 
         {entries.map((e, i) => (

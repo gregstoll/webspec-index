@@ -5,6 +5,7 @@ import type { TraceEntry } from '../trace/store';
 import { getTitleCache } from '../trace/titles';
 import { routeToHash } from '../router';
 import { ErrorBanner } from './Status';
+import { TraceDiagram } from './TraceDiagram';
 import '../styles/trace.css';
 
 interface TraceViewProps {
@@ -78,11 +79,19 @@ export function TraceView({ payload }: TraceViewProps) {
     if (entries.length > 0) location.hash = entryHref(entries[0]);
   }
 
+  const fullEntries: TraceEntry[] = entries.map((e, i) => ({ ...e, id: String(i) }));
+
   return (
     <div class="page trace-view">
       <h1 class="trace-view-heading">
         Shared trace — {entries.length} step{entries.length !== 1 ? 's' : ''}
       </h1>
+
+      {entries.length > 0 && (
+        <div class="trace-diagram-container">
+          <TraceDiagram entries={fullEntries} rankdir="LR" />
+        </div>
+      )}
 
       <ol class="trace-view-list">
         {entries.map((e, i) => {
