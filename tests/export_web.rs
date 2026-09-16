@@ -40,9 +40,8 @@ fn seeded_db(path: &Path) -> rusqlite::Connection {
         "INSERT INTO effect_structures(snapshot_id, representation_version, structure_json) VALUES (1, 'v', '{}');
          INSERT INTO effect_local_matches(input_key, payload_json) VALUES ('k', '{}');
          INSERT INTO update_checks(spec_id, last_checked) VALUES (1, 'now');
-         INSERT INTO effect_runs(analysis_id, generation, semantic_key, scope_key, budget_key, reached_fixed_point, manifest_json, artifact_json)
-           VALUES ('a1', (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), 's', 'sc', 'b', 1, '{}', 'BIGARTIFACT');
-         INSERT INTO effect_subjects(analysis_id, subject_key, summary_json) VALUES ('a1', 'k', '{}');",
+         INSERT INTO effect_graph(id, generation, semantic_key, manifest_json, topology, opaque_anchor_issue_id)
+           VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), 's', '{}', X'00', NULL);",
     )
     .unwrap();
     conn
@@ -131,22 +130,15 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         )
         .unwrap();
     assert_eq!(fts, 1);
-    let artifact: String = conn
-        .query_row("SELECT artifact_json FROM effect_runs", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(artifact, "");
-    let prepared_runs: i64 = conn
+    let has_graph: bool = conn
         .query_row(
-            "SELECT COUNT(*) FROM effect_runs
-             WHERE generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation')",
+            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1
+             AND generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation'))",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(
-        prepared_runs, 1,
-        "pruning must not mark the prepared run stale"
-    );
+    assert!(has_graph, "pruning must not mark the stored graph stale");
     let has_index: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_refs_to'",
@@ -162,14 +154,10 @@ fn export_refuses_without_prepared_effects() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
     let conn = seeded_db(&src);
-    conn.execute_batch("DELETE FROM effect_subjects; DELETE FROM effect_runs;")
-        .unwrap();
+    conn.execute_batch("DELETE FROM effect_graph;").unwrap();
     drop(conn);
     let err = export_web(&src, &dir.path().join("web"), &options()).unwrap_err();
-    assert!(
-        err.to_string().contains("effects --all --summary-only"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("effects --all"), "{err}");
 }
 
 #[test]
@@ -198,9 +186,8 @@ fn export_specs_filter_keeps_only_listed_specs() {
         [dom_snap],
     )
     .unwrap();
-    // Re-stamp effect_run with the new generation so ensure_prepared_effects passes.
     conn.execute_batch(
-        "UPDATE effect_runs SET generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation');",
+        "UPDATE effect_graph SET generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation');",
     )
     .unwrap();
     drop(conn);

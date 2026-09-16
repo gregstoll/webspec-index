@@ -42,7 +42,6 @@
         "mode": {"enum": ["auto", "cached", "off"], "default": "auto"},
         "rule_paths": {"type": "array", "default": [], "items": {"type": "string"}},
         "environment": {"type": "string", "minLength": 1, "default": "web"},
-        "analysis_id": {"type": "string", "pattern": "^an_[0-9a-f]{16,64}$"},
         "budgets": {"$ref": "#/$defs/budgets"}
       }
     },
@@ -98,10 +97,9 @@
     "recomputeRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "scope"],
+      "required": ["schema_version"],
       "properties": {
         "schema_version": {"const": 1},
-        "scope": {"$ref": "#/$defs/scope"},
         "options": {"$ref": "#/$defs/options"}
       }
     }

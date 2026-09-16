@@ -1,6 +1,5 @@
 {
   "schema_version": 1,
-  "scope": {"kind": "all"},
   "options": {
     "mode": "auto",
     "rule_paths": [],

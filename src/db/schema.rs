@@ -205,10 +205,6 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
     for table in [
         "effect_sites",
         "effect_graph",
-        "effect_subjects",
-        "effect_witnesses",
-        "effect_issues",
-        "effect_runs",
         "effect_local_matches",
         "effect_anchors",
         "effect_structures",

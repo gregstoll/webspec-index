@@ -1,9 +1,12 @@
 //! Snapshot-consistent analysis orchestration, persisted summaries, and cache policy.
 use super::bundled::default_catalog;
 use super::catalog::Catalog;
+#[cfg(feature = "native")]
+use super::engine::IssueId;
 use super::engine::{
-    self, AnalysisArtifact, AnalysisInput, ArtifactSummary, IndexedAnchor, IssueId, SourceSpec,
+    self, AnalysisArtifact, ArtifactSummary, GraphInput, IndexedAnchor, SourceSpec,
 };
+use super::graph::ExecutionNode;
 use super::model::*;
 #[cfg(any(feature = "native", test))]
 use crate::db;
@@ -11,7 +14,9 @@ use crate::db::effects as storage;
 use crate::parse::steps::{StructuralSpec, STRUCTURE_VERSION};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::rc::Rc;
 
 fn failure(error: impl std::fmt::Display) -> RequestError {
     RequestError {
@@ -27,24 +32,6 @@ fn unavailable(message: impl Into<String>) -> RequestError {
         message: message.into(),
         details: None,
     }
-}
-
-fn selector(subject: &Subject) -> SubjectSelector {
-    SubjectSelector {
-        spec: subject.spec.clone(),
-        anchor: subject.anchor.clone(),
-        step_id: subject.step_id.clone(),
-        step_path: None,
-        body_id: if subject.step_id.is_none() {
-            subject.body_id.clone()
-        } else {
-            None
-        },
-    }
-}
-
-fn key(subject: &SubjectSelector) -> Result<String, RequestError> {
-    canonical_json(&serde_json::to_value(subject).map_err(failure)?).map_err(failure)
 }
 
 fn owning_scope(subject: &SubjectSelector) -> AnalysisScope {
@@ -126,7 +113,10 @@ fn manifest(
     })
 }
 
-fn semantic_key(manifest: &InputManifest, generation: i64) -> Result<String, RequestError> {
+pub fn graph_semantic_key(
+    manifest: &InputManifest,
+    generation: i64,
+) -> Result<String, RequestError> {
     canonical_json_sha256(&json!({"specs":manifest.specs,"generation":generation,
         "representation":manifest.structural_representation_version,"registry":manifest.registry_resolution_version,
         "engine":manifest.analysis_engine_version,"catalog":manifest.catalog_digest,"environment":manifest.environment})).map_err(failure)
@@ -138,16 +128,15 @@ pub fn input_fingerprint(options: &EffectsOptions) -> Result<String, RequestErro
     let conn = db::open_or_create_db().map_err(failure)?;
     let catalog = default_catalog(&options.rule_paths)?;
     let tx = conn.unchecked_transaction().map_err(failure)?;
-    let manifest = manifest(&tx, &catalog, AnalysisScope::All, options)?;
-    let inputs = semantic_key(&manifest, storage::generation(&tx).map_err(failure)?)?;
-    let publication: i64 = tx
-        .query_row(
-            "SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_publication'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(failure)?;
-    Ok(format!("{inputs}:{publication}"))
+    let generation = storage::generation(&tx).map_err(failure)?;
+    match storage::load_graph_meta(&tx).map_err(failure)? {
+        Some(meta) => Ok(format!("{}:{}", meta.semantic_key, meta.generation)),
+        None => {
+            let m = manifest(&tx, &catalog, AnalysisScope::All, options)?;
+            let sk = graph_semantic_key(&m, generation)?;
+            Ok(format!("{sk}:{generation}"))
+        }
+    }
 }
 
 fn load_sources(conn: &Connection, catalog: &Catalog) -> Result<Vec<SourceSpec>, RequestError> {
@@ -260,66 +249,6 @@ fn envelope(summary: ArtifactSummary, manifest: &InputManifest, id: &str) -> Eff
     }
 }
 
-#[derive(Clone, serde::Serialize)]
-struct StoredSummary {
-    #[serde(flatten)]
-    result: EffectSummaryResult,
-    #[serde(rename = "_issue_refs")]
-    issue_refs: Vec<String>,
-}
-
-fn record_envelope(
-    record: engine::ArtifactSummaryRecord,
-    artifact: &AnalysisArtifact,
-    id: &str,
-) -> StoredSummary {
-    let codes = |ids: &[engine::IssueId]| {
-        ids.iter()
-            .filter_map(|&id| artifact.issue(id))
-            .map(|issue| issue.code)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>()
-    };
-    StoredSummary {
-        issue_refs: record.issue_ids.iter().map(ToString::to_string).collect(),
-        result: EffectSummaryResult {
-            schema_version: EFFECTS_SCHEMA_VERSION,
-            subject: record.subject,
-            effects: record.effects,
-            effects_status: EffectsStatus::ready(
-                record.coverage,
-                codes(&record.issue_ids),
-                0,
-                id.into(),
-            ),
-            defined_bodies: record
-                .defined_bodies
-                .into_iter()
-                .map(|body| {
-                    let issues = codes(&body.issue_ids);
-                    DefinedBody {
-                        subject: body.subject,
-                        effects: body.effects,
-                        effects_status: EffectsStatus::ready(
-                            if issues.is_empty() {
-                                Coverage::Complete
-                            } else {
-                                Coverage::Partial
-                            },
-                            issues,
-                            0,
-                            id.into(),
-                        ),
-                    }
-                })
-                .collect(),
-            issues: vec![],
-            input_manifest: None,
-        },
-    }
-}
-
 fn no_result(subject: Subject, disabled: bool) -> EffectSummaryResult {
     EffectSummaryResult {
         schema_version: EFFECTS_SCHEMA_VERSION,
@@ -342,103 +271,6 @@ fn no_result(subject: Subject, disabled: bool) -> EffectSummaryResult {
         issues: Vec::new(),
         input_manifest: None,
     }
-}
-
-fn run_manifest(run: &storage::StoredRun) -> Result<InputManifest, RequestError> {
-    serde_json::from_str(&run.manifest_json).map_err(failure)
-}
-
-fn cached_run(
-    conn: &Connection,
-    catalog: &Catalog,
-    selected: &SubjectSelector,
-    options: &EffectsOptions,
-) -> Result<Option<storage::StoredRun>, RequestError> {
-    if let Some(id) = &options.analysis_id {
-        let run = storage::load_run(conn, id)
-            .map_err(failure)?
-            .ok_or_else(|| unavailable(format!("analysis {id} is no longer retained")))?;
-        if storage::generation(conn).map_err(failure)? != run.generation {
-            return Err(unavailable(
-                "the sources for this analysis have been replaced",
-            ));
-        }
-        let manifest = run_manifest(&run)?;
-        if manifest.catalog_digest != catalog.content_digest
-            || manifest.environment != options.environment
-            || manifest.budget_profile != options.budgets
-        {
-            return Err(RequestError::invalid("historical analysis requests cannot alter catalog, environment, or discovery budgets"));
-        }
-        return Ok(Some(run));
-    }
-    let scope = owning_scope(selected);
-    let tx = conn.unchecked_transaction().map_err(failure)?;
-    let generation = storage::generation(&tx).map_err(failure)?;
-    let manifest = manifest(&tx, catalog, scope.clone(), options)?;
-    let semantic = semantic_key(&manifest, generation)?;
-    let scope_key = digest_serializable(&scope).map_err(failure)?;
-    let budget_key = digest_serializable(&options.budgets).map_err(failure)?;
-    for run in storage::matching_runs(&tx, &semantic, generation).map_err(failure)? {
-        let compatible = run.reached_fixed_point
-            || options.mode == EffectsMode::Cached
-            || (run.scope_key == scope_key && run.budget_key == budget_key);
-        if compatible
-            && storage::load_subject(&tx, &run.analysis_id, &key(selected)?)
-                .map_err(failure)?
-                .is_some()
-        {
-            return Ok(Some(run));
-        }
-    }
-    Ok(None)
-}
-
-fn materialized(
-    conn: &Connection,
-    run: &storage::StoredRun,
-    subject: &SubjectSelector,
-) -> Result<Option<EffectSummaryResult>, RequestError> {
-    let Some(text) =
-        storage::load_subject(conn, &run.analysis_id, &key(subject)?).map_err(failure)?
-    else {
-        return Ok(None);
-    };
-    let mut value: serde_json::Value = serde_json::from_str(&text).map_err(failure)?;
-    if let Some(choices) = value.get("ambiguous_subjects") {
-        return Err(RequestError {
-            code: RequestErrorCode::AmbiguousSubject,
-            message: "step path identifies several sites; select a step_id".into(),
-            details: Some(choices.clone()),
-        });
-    }
-    if let Some(references) = value
-        .as_object_mut()
-        .and_then(|object| object.remove("_issue_refs"))
-    {
-        let references: Vec<String> = serde_json::from_value(references).map_err(failure)?;
-        let issues: Vec<serde_json::Value> =
-            storage::load_issues(conn, &run.analysis_id, &references)
-                .map_err(failure)?
-                .iter()
-                .map(|text| serde_json::from_str(text).map_err(failure))
-                .collect::<Result<_, _>>()?;
-        value["issues"] = serde_json::Value::Array(issues);
-    }
-    let mut result: EffectSummaryResult = serde_json::from_value(value).map_err(failure)?;
-    result.input_manifest = Some(run_manifest(run)?);
-    Ok(Some(result))
-}
-
-fn artifact(conn: &Connection, run: &storage::StoredRun) -> Result<AnalysisArtifact, RequestError> {
-    let run = if run.artifact_json.is_empty() {
-        storage::load_run(conn, &run.analysis_id)
-            .map_err(failure)?
-            .ok_or_else(|| unavailable("analysis was removed"))?
-    } else {
-        run.clone()
-    };
-    serde_json::from_str(&run.artifact_json).map_err(failure)
 }
 
 /// Compute local matches for the given uncached sources.
@@ -487,33 +319,22 @@ fn parallel_prepare(
     }
 }
 
-fn compute(
+pub fn build_and_store_graph(
     conn: &Connection,
     catalog: &Catalog,
-    scope: AnalysisScope,
-    options: &EffectsOptions,
-) -> Result<storage::StoredRun, RequestError> {
-    compute_impl(conn, catalog, scope, options, None)
-}
-
-fn compute_impl(
-    conn: &Connection,
-    catalog: &Catalog,
-    scope: AnalysisScope,
     options: &EffectsOptions,
     threads: Option<usize>,
-) -> Result<storage::StoredRun, RequestError> {
+) -> Result<storage::StoredGraphMeta, RequestError> {
     for _ in 0..2 {
-        let (generation, mut manifest, sources) = {
+        let (generation, mut m, sources) = {
             let tx = conn.unchecked_transaction().map_err(failure)?;
             let generation = storage::generation(&tx).map_err(failure)?;
-            let manifest = manifest(&tx, catalog, scope.clone(), options)?;
+            let m = manifest(&tx, catalog, AnalysisScope::All, options)?;
             let sources = load_sources(&tx, catalog)?;
-            (generation, manifest, sources)
+            (generation, m, sources)
         };
         let mut matches = super::local::LocalMatches::new();
         {
-            // Check which sources have cached local matches and which need computing.
             let keys: Vec<String> = sources
                 .iter()
                 .map(|s| super::local::input_key(s, catalog, &options.environment))
@@ -532,14 +353,8 @@ fn compute_impl(
                     }
                 }
             }
-
-            // Compute uncached local matches. Under the native feature this runs in parallel
-            // across the thread pool; under wasm/test-only builds it falls back to serial.
-            // threads=None → resolve from WEBSPEC_EFFECTS_THREADS / available_parallelism.
             let computed: Vec<(usize, super::local::LocalMatches)> =
                 parallel_prepare(&sources, catalog, &uncached, threads);
-
-            // Write computed results to the DB (sequential — rusqlite Connection is not Sync).
             for (i, local) in &computed {
                 storage::store_local_matches(
                     conn,
@@ -548,9 +363,6 @@ fn compute_impl(
                 )
                 .map_err(failure)?;
             }
-
-            // Fill computed slots back in and merge into the combined matches map in source
-            // order, which is the same order the serial path would have used.
             let mut computed_map: std::collections::HashMap<usize, super::local::LocalMatches> =
                 computed.into_iter().collect();
             for (i, slot) in cached_locals.iter_mut().enumerate() {
@@ -566,16 +378,16 @@ fn compute_impl(
                 matches.extend(local);
             }
         }
-        let artifact = engine::analyze_with_local_matches(
-            AnalysisInput {
+        let graph = engine::build_graph(
+            GraphInput {
                 sources: &sources,
                 catalog,
                 environment: &options.environment,
-                scope: scope.clone(),
-                budgets: options.budgets.clone(),
             },
             Some(&matches),
         )?;
+
+        // Compute missing_inputs from graph algorithm roots.
         let indexed: BTreeMap<_, BTreeSet<_>> = sources
             .iter()
             .map(|source| {
@@ -585,17 +397,22 @@ fn compute_impl(
                 )
             })
             .collect();
-        let processed: BTreeSet<_> = artifact
-            .processed_subjects
-            .iter()
-            .map(|s| (s.spec.clone(), s.anchor.clone()))
-            .collect();
         let mut missing = BTreeSet::new();
         for source in &sources {
             for algorithm in source.structure.iter().flat_map(|s| &s.algorithms) {
-                if !processed
-                    .contains(&(source.spec.clone(), algorithm.source.section_anchor.clone()))
-                {
+                let node_id = format!("anchor:{}#{}", source.spec, algorithm.source.section_anchor);
+                let is_root = graph
+                    .nodes
+                    .get(&node_id)
+                    .is_some_and(|n| n.is_body && n.subject.body_id.is_none())
+                    || graph.nodes.values().any(|n| {
+                        n.is_body
+                            && n.subject.body_id.is_none()
+                            && !n.id.starts_with("anchor:")
+                            && n.subject.spec == source.spec
+                            && n.subject.anchor == algorithm.source.section_anchor
+                    });
+                if !is_root {
                     continue;
                 }
                 for target in algorithm
@@ -613,70 +430,35 @@ fn compute_impl(
                 }
             }
         }
-        manifest.missing_inputs = missing
+        m.missing_inputs = missing
             .into_iter()
             .map(|(spec, anchor)| MissingInput {
                 spec,
                 anchor: Some(anchor),
             })
             .collect();
-        let id = analysis_id(&manifest, generation).map_err(failure)?;
-        let mut summaries: BTreeMap<String, Vec<StoredSummary>> = BTreeMap::new();
-        for summary in artifact.summary_records(None)? {
-            let subject = summary.subject.clone();
-            let selected = selector(&subject);
-            let result = record_envelope(summary, &artifact, &id);
-            summaries
-                .entry(key(&selected)?)
-                .or_default()
-                .push(result.clone());
-            if let Some(path) = &subject.step_path {
-                let by_path = SubjectSelector {
-                    spec: subject.spec.clone(),
-                    anchor: subject.anchor.clone(),
-                    step_path: Some(path.clone()),
-                    step_id: None,
-                    body_id: None,
-                };
-                summaries.entry(key(&by_path)?).or_default().push(result);
-            }
-        }
-        let rows: Vec<_> = summaries.into_iter().map(|(key, mut values)| {
-            values.dedup_by(|a,b| a.result.subject == b.result.subject);
-            let text = if values.len() == 1 { serde_json::to_string(&values[0]) } else { serde_json::to_string(&json!({"ambiguous_subjects": values.iter().map(|v| &v.result.subject).collect::<Vec<_>>()})) };
-            text.map(|text| (key,text)).map_err(failure)
-        }).collect::<Result<_,_>>()?;
-        let run = storage::StoredRun {
-            analysis_id: id,
+
+        let sk = graph_semantic_key(&m, generation)?;
+        let meta = storage::StoredGraphMeta {
             generation,
-            semantic_key: semantic_key(&manifest, generation)?,
-            scope_key: digest_serializable(&scope).map_err(failure)?,
-            budget_key: digest_serializable(&options.budgets).map_err(failure)?,
-            reached_fixed_point: artifact.reached_fixed_point,
-            manifest_json: serde_json::to_string(&manifest).map_err(failure)?,
-            artifact_json: serde_json::to_string(&artifact).map_err(failure)?,
+            semantic_key: sk,
+            manifest_json: serde_json::to_string(&m).map_err(failure)?,
+            opaque_anchor_issue: None,
         };
-        let issues = artifact
-            .issue_catalog()
-            .map(|(id, issue)| {
-                serde_json::to_string(issue)
-                    .map(|text| (id.to_string(), text))
-                    .map_err(failure)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut witnesses = Vec::new();
-        artifact.prepare_witnesses(&artifact.sites, |subject, effect, witness| {
-            witnesses.push((
-                key(&selector(subject))?,
-                effect.to_owned(),
-                serde_json::to_string(&witness).map_err(failure)?,
-            ));
-            Ok(())
-        })?;
-        if storage::publish_run_with_witnesses(conn, &run, &rows, &issues, &witnesses)
-            .map_err(failure)?
-        {
-            return Ok(run);
+        let store_ok = {
+            let tx = conn.unchecked_transaction().map_err(failure)?;
+            if storage::generation(&tx).map_err(failure)? != generation {
+                false
+            } else {
+                storage::store_graph(&tx, &meta, &graph).map_err(failure)?;
+                tx.commit().map_err(failure)?;
+                true
+            }
+        };
+        if store_ok {
+            GRAPH.with(|cell| cell.borrow_mut().take());
+            ANALYSES.with(|cell| cell.borrow_mut().clear());
+            return Ok(meta);
         }
     }
     Err(RequestError {
@@ -684,6 +466,186 @@ fn compute_impl(
         message: "snapshot_changed: corpus changed during both analysis attempts".into(),
         details: Some(json!({"issue":"snapshot_changed"})),
     })
+}
+
+#[cfg(feature = "native")]
+pub fn recompute_effects(
+    request: &RecomputeEffectsRequest,
+) -> Result<RecomputeEffectsResult, RequestError> {
+    request.validate()?;
+    let conn = db::open_or_create_db().map_err(failure)?;
+    let catalog = default_catalog(&request.options.rule_paths)?;
+    let meta = build_and_store_graph(&conn, &catalog, &request.options, None)?;
+    let m: InputManifest = serde_json::from_str(&meta.manifest_json).map_err(failure)?;
+
+    let graph = storage::load_graph(&conn)
+        .map_err(failure)?
+        .ok_or_else(|| failure("graph was not stored"))?;
+
+    let body_count = graph.nodes.values().filter(|n| n.is_body).count() as u64;
+    let relationship_count = graph.edges.len() as u64;
+
+    let artifact =
+        engine::analyze_graph(&graph, AnalysisScope::All, request.options.budgets.clone())?;
+    let site_store = storage::SqlSiteStore(&conn);
+    let all_issue_ids: Vec<_> = (0..artifact.issues.len() as IssueId).collect();
+    let all_issues = artifact.materialize_issues(&all_issue_ids, &site_store)?;
+    let issue_count = all_issues.len() as u64;
+    let cap = 200.min(all_issues.len());
+
+    Ok(RecomputeEffectsResult {
+        schema_version: EFFECTS_SCHEMA_VERSION,
+        input_manifest: m,
+        body_count,
+        relationship_count,
+        issues: all_issues.into_iter().take(cap).collect(),
+        issue_count,
+    })
+}
+
+// ----- Thread-local caches -----
+
+struct LoadedGraph {
+    meta: storage::StoredGraphMeta,
+    graph: Rc<engine::Graph>,
+}
+
+type AnalysisKey = (String, String, String); // (semantic_key, scope_json, budgets_json)
+const ANALYSIS_CACHE_CAPACITY: usize = 8;
+
+thread_local! {
+    static GRAPH: RefCell<Option<LoadedGraph>> = const { RefCell::new(None) };
+    static ANALYSES: RefCell<VecDeque<(AnalysisKey, Rc<AnalysisArtifact>)>> = const { RefCell::new(VecDeque::new()) };
+}
+
+fn load_cached_graph(
+    conn: &Connection,
+) -> Result<Option<(storage::StoredGraphMeta, Rc<engine::Graph>)>, RequestError> {
+    let meta = storage::load_graph_meta(conn).map_err(failure)?;
+    let Some(meta) = meta else {
+        return Ok(None);
+    };
+    let generation = storage::generation(conn).map_err(failure)?;
+    if meta.generation != generation {
+        return Ok(None);
+    }
+    let cached = GRAPH.with(|cell| {
+        let borrow = cell.borrow();
+        if let Some(loaded) = borrow.as_ref() {
+            if loaded.meta.semantic_key == meta.semantic_key
+                && loaded.meta.generation == meta.generation
+            {
+                return Some((loaded.meta.clone(), Rc::clone(&loaded.graph)));
+            }
+        }
+        None
+    });
+    if let Some(pair) = cached {
+        return Ok(Some(pair));
+    }
+    let graph = storage::load_graph(conn)
+        .map_err(failure)?
+        .ok_or_else(|| failure("graph metadata exists but topology is missing"))?;
+    let rc = Rc::new(graph);
+    GRAPH.with(|cell| {
+        *cell.borrow_mut() = Some(LoadedGraph {
+            meta: meta.clone(),
+            graph: Rc::clone(&rc),
+        });
+    });
+    ANALYSES.with(|cell| cell.borrow_mut().clear());
+    Ok(Some((meta, rc)))
+}
+
+fn graph_for(
+    conn: &Connection,
+    catalog: &Catalog,
+    options: &EffectsOptions,
+) -> Result<Option<(storage::StoredGraphMeta, Rc<engine::Graph>)>, RequestError> {
+    if let Some(pair) = load_cached_graph(conn)? {
+        let meta = &pair.0;
+        let m: InputManifest = serde_json::from_str(&meta.manifest_json).map_err(failure)?;
+        if m.catalog_digest != catalog.content_digest || m.environment != options.environment {
+            return Err(RequestError::invalid(
+                "stored graph was built with a different catalog or environment",
+            ));
+        }
+        return Ok(Some(pair));
+    }
+    match options.mode {
+        EffectsMode::Cached => Ok(None),
+        #[cfg(feature = "native")]
+        EffectsMode::Auto => {
+            build_and_store_graph(conn, catalog, options, None)?;
+            load_cached_graph(conn)
+        }
+        #[cfg(not(feature = "native"))]
+        EffectsMode::Auto => Ok(None),
+        EffectsMode::Off => Ok(None),
+    }
+}
+
+fn artifact_for(
+    graph: &Rc<engine::Graph>,
+    semantic_key: &str,
+    scope: AnalysisScope,
+    budgets: &DiscoveryBudgets,
+) -> Result<Rc<AnalysisArtifact>, RequestError> {
+    let scope_json =
+        canonical_json(&serde_json::to_value(&scope).map_err(failure)?).map_err(failure)?;
+    let budget_json =
+        canonical_json(&serde_json::to_value(budgets).map_err(failure)?).map_err(failure)?;
+    let key = (semantic_key.to_owned(), scope_json, budget_json);
+    let found = ANALYSES.with(|cell| {
+        let q = cell.borrow();
+        q.iter().find(|(k, _)| *k == key).map(|(_, a)| Rc::clone(a))
+    });
+    if let Some(rc) = found {
+        return Ok(rc);
+    }
+    let artifact = engine::analyze_graph(graph, scope, budgets.clone())?;
+    let rc = Rc::new(artifact);
+    ANALYSES.with(|cell| {
+        let mut q = cell.borrow_mut();
+        if q.len() >= ANALYSIS_CACHE_CAPACITY {
+            q.pop_front();
+        }
+        q.push_back((key, Rc::clone(&rc)));
+    });
+    Ok(rc)
+}
+
+fn synthesise_anchor(
+    graph: &engine::Graph,
+    meta: &storage::StoredGraphMeta,
+    spec: &str,
+    anchor: &str,
+    snapshot_sha: &str,
+) -> engine::Graph {
+    let mut g = graph.clone();
+    let node_id = format!("anchor:{spec}#{anchor}");
+    let node = ExecutionNode {
+        id: node_id.clone(),
+        subject: Subject {
+            spec: spec.to_owned(),
+            anchor: anchor.to_owned(),
+            snapshot_sha: snapshot_sha.to_owned(),
+            step_id: None,
+            step_path: None,
+            body_id: None,
+        },
+        source_order: u64::MAX,
+        is_body: true,
+        definition_only: false,
+    };
+    g.nodes.insert(node_id.clone(), node);
+    g.anchor_nodes
+        .insert((spec.to_owned(), anchor.to_owned()), node_id.clone());
+    if let Some(issue_id) = meta.opaque_anchor_issue {
+        g.issues.entry(node_id).or_default().push(issue_id);
+    }
+    g.index_edges();
+    g
 }
 
 #[cfg(feature = "native")]
@@ -704,21 +666,53 @@ pub fn get_effect_summary_on(
     let mut selected = request.subject.clone();
     selected.spec = subject.spec.clone();
     let catalog = default_catalog(&request.options.rule_paths)?;
-    let run = match cached_run(conn, &catalog, &selected, &request.options)? {
-        Some(run) => run,
-        None if request.options.mode == EffectsMode::Cached => {
-            return Ok(no_result(subject, false))
-        }
-        None => compute(conn, &catalog, owning_scope(&selected), &request.options)?,
+    let Some((meta, graph)) = graph_for(conn, &catalog, &request.options)? else {
+        return Ok(no_result(subject, false));
     };
-    if request.filter.is_none() {
-        if let Some(result) = materialized(conn, &run, &selected)? {
-            return Ok(result);
-        }
-    }
-    let a = artifact(conn, &run)?;
-    let summary = a.summary(&selected, request.filter.as_ref(), &a.sites)?;
-    Ok(envelope(summary, &run_manifest(&run)?, &run.analysis_id))
+    let m: InputManifest = serde_json::from_str(&meta.manifest_json).map_err(failure)?;
+    let analysis_id = format!("an_{}", &meta.semantic_key[..16]);
+
+    let has_node = graph
+        .anchor_nodes
+        .contains_key(&(subject.spec.clone(), subject.anchor.clone()));
+    let no_step_body =
+        selected.step_id.is_none() && selected.step_path.is_none() && selected.body_id.is_none();
+
+    let (use_graph, scope) = if has_node {
+        (Rc::clone(&graph), owning_scope(&selected))
+    } else if no_step_body {
+        let synth = synthesise_anchor(
+            &graph,
+            &meta,
+            &subject.spec,
+            &subject.anchor,
+            &subject.snapshot_sha,
+        );
+        let scope = owning_scope(&selected);
+        (Rc::new(synth), scope)
+    } else {
+        return Err(RequestError {
+            code: RequestErrorCode::SubjectNotFound,
+            message: format!(
+                "{}#{} has no graph node and requires step/body selection",
+                subject.spec, subject.anchor
+            ),
+            details: None,
+        });
+    };
+
+    let artifact = if has_node {
+        artifact_for(&graph, &meta.semantic_key, scope, &request.options.budgets)?
+    } else {
+        Rc::new(engine::analyze_graph(
+            &use_graph,
+            scope,
+            request.options.budgets.clone(),
+        )?)
+    };
+    let site_store = storage::SqlSiteStore(conn);
+    let summary = artifact.summary(&selected, request.filter.as_ref(), &site_store)?;
+    Ok(envelope(summary, &m, &analysis_id))
 }
 
 /// Editor details only read prepared rows. A cache miss never starts analysis.
@@ -736,24 +730,74 @@ pub fn prepared_effect_details_on(
 ) -> Result<ExplainEffectsResult, RequestError> {
     let mut request = request.clone();
     request.options.mode = EffectsMode::Cached;
-    request.options.analysis_id = None;
     request.filter = None;
     let summary = get_effect_summary_on(conn, &request)?;
-    let EffectsStatus::Ready { analysis_id, .. } = &summary.effects_status else {
+    let EffectsStatus::Ready { .. } = &summary.effects_status else {
         return Err(unavailable("Prepared effects are unavailable. Run webspec-index effects --all --summary-only after indexing."));
     };
-    let subject_key = key(&selector(&summary.subject))?;
+
+    let mut selected = request.subject.clone();
+    selected.spec = summary.subject.spec.clone();
+    let catalog = default_catalog(&request.options.rule_paths)?;
+    let Some((meta, graph)) = graph_for(conn, &catalog, &request.options)? else {
+        return Err(unavailable("Prepared effects are unavailable. Run webspec-index effects --all --summary-only after indexing."));
+    };
+
+    let has_node = graph
+        .anchor_nodes
+        .contains_key(&(summary.subject.spec.clone(), summary.subject.anchor.clone()));
+    let no_step_body =
+        selected.step_id.is_none() && selected.step_path.is_none() && selected.body_id.is_none();
+
+    let use_graph = if has_node {
+        Rc::clone(&graph)
+    } else if no_step_body {
+        Rc::new(synthesise_anchor(
+            &graph,
+            &meta,
+            &summary.subject.spec,
+            &summary.subject.anchor,
+            &summary.subject.snapshot_sha,
+        ))
+    } else {
+        return Err(unavailable("Prepared paths are unavailable. Run webspec-index effects --all --summary-only to prepare them."));
+    };
+
+    let scope = owning_scope(&selected);
+    let artifact = if has_node {
+        artifact_for(&graph, &meta.semantic_key, scope, &request.options.budgets)?
+    } else {
+        Rc::new(engine::analyze_graph(
+            &use_graph,
+            scope,
+            request.options.budgets.clone(),
+        )?)
+    };
+
+    let site_store = storage::SqlSiteStore(conn);
+    let mut witness_map: BTreeMap<String, super::model::Witness> = BTreeMap::new();
+    artifact.prepare_witnesses(&site_store, |subj, effect_id, witness| {
+        if subj == &summary.subject {
+            witness_map.entry(effect_id.to_owned()).or_insert(witness);
+        }
+        Ok(())
+    })?;
+
     let mut explanations = Vec::new();
     for effect in &summary.effects {
-        let witness = storage::load_witness(conn, analysis_id, &subject_key, &effect.id)
-            .map_err(failure)?
-            .ok_or_else(|| unavailable("Prepared paths are unavailable. Run webspec-index effects --all --summary-only to prepare them."))?;
-        explanations.push(EffectExplanation {
-            effect_id: effect.id.clone(),
-            witnesses: vec![serde_json::from_str(&witness).map_err(failure)?],
-            witnesses_truncated: true,
-            issues: Vec::new(),
-        });
+        match witness_map.remove(&effect.id) {
+            Some(witness) => {
+                explanations.push(EffectExplanation {
+                    effect_id: effect.id.clone(),
+                    witnesses: vec![witness],
+                    witnesses_truncated: true,
+                    issues: Vec::new(),
+                });
+            }
+            None => {
+                return Err(unavailable("Prepared paths are unavailable. Run webspec-index effects --all --summary-only to prepare them."));
+            }
+        }
     }
     Ok(ExplainEffectsResult {
         schema_version: summary.schema_version,
@@ -782,20 +826,33 @@ pub fn explain_effects(
             filter: request.filter.clone(),
         },
     )?;
-    let explanations = if let EffectsStatus::Ready { analysis_id, .. } = &summary.effects_status {
-        let run = storage::load_run(&conn, analysis_id)
-            .map_err(failure)?
-            .ok_or_else(|| unavailable("analysis was removed"))?;
+    let explanations = if let EffectsStatus::Ready { .. } = &summary.effects_status {
         let mut selected = request.subject.clone();
         selected.spec = summary.subject.spec.clone();
-        let a = artifact(&conn, &run)?;
-        a.explain(
-            &selected,
-            request.filter.as_ref(),
-            &request.explanation,
-            &a.sites,
-        )?
-        .explanations
+        let catalog = default_catalog(&request.options.rule_paths)?;
+        let Some((meta, graph)) = graph_for(&conn, &catalog, &request.options)? else {
+            return Ok(ExplainEffectsResult {
+                schema_version: summary.schema_version,
+                subject: summary.subject,
+                effects: summary.effects,
+                effects_status: summary.effects_status,
+                defined_bodies: summary.defined_bodies,
+                explanations: Vec::new(),
+                issues: summary.issues,
+                input_manifest: summary.input_manifest,
+            });
+        };
+        let scope = owning_scope(&selected);
+        let artifact = artifact_for(&graph, &meta.semantic_key, scope, &request.options.budgets)?;
+        let site_store = storage::SqlSiteStore(&conn);
+        artifact
+            .explain(
+                &selected,
+                request.filter.as_ref(),
+                &request.explanation,
+                &site_store,
+            )?
+            .explanations
     } else {
         Vec::new()
     };
@@ -808,34 +865,6 @@ pub fn explain_effects(
         explanations,
         issues: summary.issues,
         input_manifest: summary.input_manifest,
-    })
-}
-
-#[cfg(feature = "native")]
-pub fn recompute_effects(
-    request: &RecomputeEffectsRequest,
-) -> Result<RecomputeEffectsResult, RequestError> {
-    request.validate()?;
-    let conn = db::open_or_create_db().map_err(failure)?;
-    let mut scope = request.scope.clone();
-    if let AnalysisScope::Subject { subject } = &mut scope {
-        subject.spec = resolve_subject(&conn, subject)?.spec;
-    }
-    let catalog = default_catalog(&request.options.rule_paths)?;
-    let run = compute(&conn, &catalog, scope, &request.options)?;
-    let artifact = artifact(&conn, &run)?;
-    let all_issue_ids: Vec<_> = (0..artifact.issues.len() as IssueId).collect();
-    let materialized_issues = artifact.materialize_issues(&all_issue_ids, &artifact.sites)?;
-    Ok(RecomputeEffectsResult {
-        schema_version: EFFECTS_SCHEMA_VERSION,
-        analysis_id: run.analysis_id.clone(),
-        input_manifest: run_manifest(&run)?,
-        processed_subjects: artifact.processed_subjects.clone(),
-        unprocessed_subjects: artifact.unprocessed_subjects.clone(),
-        body_count: artifact.counts.bodies,
-        relationship_count: artifact.counts.relationships,
-        state_count: artifact.counts.states,
-        issues: materialized_issues,
     })
 }
 
@@ -880,6 +909,42 @@ mod tests {
     }
 
     #[test]
+    fn update_builds_a_graph_and_queries_read_it_without_runs() {
+        let (conn, _) = setup();
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
+        assert!(storage::load_graph_meta(&conn).unwrap().is_some());
+        let result = get_effect_summary_on(&conn, &request("TEST", "R")).unwrap();
+        assert!(matches!(result.effects_status, EffectsStatus::Ready { .. }));
+        assert_eq!(result.effects.len(), 1);
+    }
+
+    #[test]
+    fn prepared_details_come_from_the_stored_graph() {
+        let (conn, _) = setup();
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
+        let details = prepared_effect_details_on(&conn, &request("TEST", "R")).unwrap();
+        assert_eq!(details.explanations.len(), 1);
+        assert_eq!(details.explanations[0].witnesses.len(), 1);
+        assert!(details.explanations[0].witnesses_truncated);
+    }
+
+    #[test]
+    fn stale_graph_is_unavailable_in_cached_mode() {
+        let (conn, _) = setup();
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
+        storage::invalidate(&conn).unwrap();
+        let mut req = request("TEST", "R");
+        req.options.mode = EffectsMode::Cached;
+        assert!(matches!(
+            get_effect_summary_on(&conn, &req).unwrap().effects_status,
+            EffectsStatus::Unavailable { .. }
+        ));
+    }
+
+    #[test]
     fn cache_miss_is_unavailable_and_off_does_not_compute() {
         let (conn, _) = setup();
         let mut req = request("TEST", "R");
@@ -893,12 +958,6 @@ mod tests {
             get_effect_summary_on(&conn, &req).unwrap().effects_status,
             EffectsStatus::Disabled { .. }
         ));
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM effect_runs", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
     }
 
     #[test]
@@ -921,6 +980,7 @@ mod tests {
             .anchors
             .iter()
             .any(|a| a.anchor == "missing"));
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
         let result = get_effect_summary_on(&conn, &request("dom", "concept-event-fire")).unwrap();
         assert!(result.effects.iter().any(|e| e.kind == "event.fire"));
         assert_eq!(
@@ -932,73 +992,13 @@ mod tests {
     }
 
     #[test]
-    fn prepared_details_never_compute_and_survive_unreadable_graph() {
-        let (conn, _) = setup();
-        let req = request("TEST", "R");
-        assert!(prepared_effect_details_on(&conn, &req).is_err());
-        assert_eq!(
-            conn.query_row("SELECT COUNT(*) FROM effect_runs", [], |row| row
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        get_effect_summary_on(&conn, &req).unwrap();
-        conn.execute(
-            "UPDATE effect_runs SET artifact_json='invalid graph JSON'",
-            [],
-        )
-        .unwrap();
-        let details = prepared_effect_details_on(&conn, &req).unwrap();
-        assert!(!details.effects.is_empty());
-        assert_eq!(details.effects.len(), details.explanations.len());
-        assert!(details.explanations.iter().all(|e| e.witnesses.len() == 1));
-        conn.execute("DELETE FROM effect_witnesses", []).unwrap();
-        assert!(
-            prepared_effect_details_on(&conn, &req).is_err(),
-            "missing prepared paths cannot fall back to graph search"
-        );
-    }
-
-    #[test]
-    fn warm_summary_reads_materialized_row_without_decoding_graph() {
-        let (conn, _) = setup();
-        let req = request("TEST", "R");
-        let cold = get_effect_summary_on(&conn, &req).unwrap();
-        assert!(cold.effects.iter().any(|e| e.kind == "event.fire"
-            && e.params.get("name") == Some(&Some(EffectValue::String("hello".into())))));
-        let location = cold
-            .effects
-            .iter()
-            .find(|e| e.params.get("name") == Some(&Some(EffectValue::String("hello".into()))))
-            .unwrap()
-            .location
-            .as_ref()
-            .unwrap();
-        assert_eq!(location.spec, "TEST");
-        assert_eq!(location.anchor, "R");
-        assert_eq!(location.step_path, Some(vec![1]));
-        conn.execute(
-            "UPDATE effect_runs SET artifact_json='invalid graph JSON'",
-            [],
-        )
-        .unwrap();
-        assert_eq!(get_effect_summary_on(&conn, &req).unwrap(), cold);
-        let mut step = req;
-        step.subject.step_path = Some(vec![1]);
-        assert_eq!(
-            get_effect_summary_on(&conn, &step).unwrap().effects,
-            cold.effects
-        );
-    }
-
-    #[test]
-    fn source_replacement_removes_effects_and_invalidates_exact_run() {
+    fn source_replacement_invalidates_graph() {
         let (conn, root) = setup();
         let req = request("TEST", "R");
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
         let before = get_effect_summary_on(&conn, &req).unwrap();
-        let EffectsStatus::Ready { analysis_id, .. } = before.effects_status else {
-            panic!("analysis not ready")
-        };
+        assert!(matches!(before.effects_status, EffectsStatus::Ready { .. }));
         let replacement = crate::parse::steps::extract_step_structure(
             "<div class=algorithm><p>To <dfn id=R>R</dfn>:</p><ol><li>Return.</li></ol></div>",
             "TEST",
@@ -1017,15 +1017,11 @@ mod tests {
             &serde_json::to_string(&replacement).unwrap(),
         )
         .unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
         let after = get_effect_summary_on(&conn, &req).unwrap();
         assert!(after.effects.is_empty());
-        let mut old = req;
-        old.options.analysis_id = Some(analysis_id);
-        assert_eq!(
-            get_effect_summary_on(&conn, &old).unwrap_err().code,
-            RequestErrorCode::AnalysisUnavailable
-        );
     }
+
     #[cfg(feature = "native")]
     #[test]
     fn changing_rule_contents_invalidates_without_reparsing_sources() {
@@ -1036,11 +1032,15 @@ mod tests {
         std::fs::write(&path, yaml).unwrap();
         let mut req = request("TEST", "R");
         req.options.rule_paths = vec![dir.path().to_string_lossy().into()];
+        let catalog1 = default_catalog(&req.options.rule_paths).unwrap();
+        build_and_store_graph(&conn, &catalog1, &req.options, Some(1)).unwrap();
         let before = get_effect_summary_on(&conn, &req).unwrap();
-        let generation = storage::generation(&conn).unwrap();
+
         std::fs::write(&path, yaml.replace("first", "second")).unwrap();
+        let catalog2 = default_catalog(&req.options.rule_paths).unwrap();
+        build_and_store_graph(&conn, &catalog2, &req.options, Some(1)).unwrap();
         let after = get_effect_summary_on(&conn, &req).unwrap();
-        assert_eq!(generation, storage::generation(&conn).unwrap());
+
         assert_ne!(before.effects_status, after.effects_status);
         assert!(after
             .effects
@@ -1053,11 +1053,12 @@ mod tests {
             .any(|effect| effect.params.get("name")
                 == Some(&Some(EffectValue::String("first".into())))));
     }
+
     #[test]
     fn global_recompute_reuses_scoped_local_matches() {
         let (conn, _) = setup();
-        let req = request("TEST", "R");
-        get_effect_summary_on(&conn, &req).unwrap();
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
         assert_eq!(
             conn.query_row("SELECT count(*) FROM effect_local_matches", [], |r| r
                 .get::<_, i64>(0))
@@ -1065,81 +1066,27 @@ mod tests {
             2
         );
         conn.execute_batch("CREATE TRIGGER reject_local_match_write BEFORE INSERT ON effect_local_matches BEGIN SELECT RAISE(ABORT,'local matches must be reused'); END;").unwrap();
-        let catalog = default_catalog(&[]).unwrap();
-        let run = compute(&conn, &catalog, AnalysisScope::All, &req.options).unwrap();
-        let cached = artifact(&conn, &run).unwrap();
-        let sources = load_sources(&conn, &catalog).unwrap();
-        let direct = engine::analyze(AnalysisInput {
-            sources: &sources,
-            catalog: &catalog,
-            environment: &req.options.environment,
-            scope: AnalysisScope::All,
-            budgets: req.options.budgets,
-        })
-        .unwrap();
-        assert_eq!(cached, direct);
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
     }
 
+    #[cfg(feature = "native")]
     #[test]
-    fn same_snapshot_structural_change_cannot_reuse_exact_run_id() {
-        let (conn, root) = setup();
-        let req = request("TEST", "R");
-        let before = get_effect_summary_on(&conn, &req).unwrap();
-        let EffectsStatus::Ready { analysis_id, .. } = before.effects_status else {
-            panic!("analysis not ready")
-        };
-        let replacement = crate::parse::steps::extract_step_structure(
-            "<div class=algorithm><p>To <dfn id=R>R</dfn>:</p><ol><li>Return.</li></ol></div>",
-            "TEST",
-            "https://test.example/",
-            "hash:test",
-        );
-        storage::store_structure(
-            &conn,
-            root,
-            STRUCTURE_VERSION,
-            &serde_json::to_string(&replacement).unwrap(),
-        )
-        .unwrap();
-        let after = get_effect_summary_on(&conn, &req).unwrap();
-        let EffectsStatus::Ready {
-            analysis_id: new_id,
-            ..
-        } = after.effects_status
-        else {
-            panic!("analysis not ready")
-        };
-        assert_ne!(analysis_id, new_id);
-        let mut old = req;
-        old.options.analysis_id = Some(analysis_id);
-        assert_eq!(
-            get_effect_summary_on(&conn, &old).unwrap_err().code,
-            RequestErrorCode::AnalysisUnavailable
-        );
-    }
-    #[test]
-    fn partial_global_run_does_not_suppress_subject_completion() {
+    fn parallel_local_matches_produce_identical_graphs() {
         let (conn, _) = setup();
-        let req = request("TEST", "R");
         let catalog = default_catalog(&[]).unwrap();
-        let mut limited = req.options.clone();
-        limited.budgets.max_bodies = 1;
-        limited.budgets.max_relationships = 1;
-        let partial = compute(&conn, &catalog, AnalysisScope::All, &limited).unwrap();
-        assert!(!partial.reached_fixed_point);
-        let result = get_effect_summary_on(&conn, &req).unwrap();
-        let EffectsStatus::Ready {
-            analysis_id,
-            issues,
-            ..
-        } = result.effects_status
-        else {
-            panic!("analysis not ready")
-        };
-        assert_ne!(analysis_id, partial.analysis_id);
-        assert!(!issues.contains(&IssueCode::AnalysisBudget));
-        assert!(!result.effects.is_empty());
+        let options = request("TEST", "R").options;
+
+        build_and_store_graph(&conn, &catalog, &options, Some(1)).unwrap();
+        let meta1 = storage::load_graph_meta(&conn).unwrap().unwrap();
+
+        conn.execute("DELETE FROM effect_local_matches", [])
+            .unwrap();
+        build_and_store_graph(&conn, &catalog, &options, Some(2)).unwrap();
+        let meta2 = storage::load_graph_meta(&conn).unwrap().unwrap();
+
+        assert_eq!(meta1.semantic_key, meta2.semantic_key);
     }
+
     #[test]
     fn compact_navigation_style_summary_keeps_async_and_script_before_many_events() {
         let conn = db::open_test_db().unwrap();
@@ -1155,6 +1102,8 @@ mod tests {
         }
         html.push_str("<li><a href='https://html.spec.whatwg.org/#queue-a-microtask'>Queue a microtask</a>.</li><li><a href='https://html.spec.whatwg.org/#run-a-classic-script'>Run a classic script</a>.</li></ol></div>");
         seed(&conn, "TEST", &html);
+        let catalog = default_catalog(&[]).unwrap();
+        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
         let result = get_effect_summary_on(&conn, &request("TEST", "R")).unwrap();
         assert_eq!(result.effects.len(), 16);
         let compact: Vec<_> = result
@@ -1167,59 +1116,5 @@ mod tests {
         let badges = super::super::render::compact_badges(&result.effects, 3, 120, None);
         assert!(badges.contains("queue a microtask"));
         assert!(badges.contains("run author code"));
-    }
-
-    /// Verify that running the full pipeline with 1 thread and with 2 threads produces
-    /// byte-identical stored summaries.  This exercises `parallel_prepare` by forcing a
-    /// cache miss (deleting `effect_local_matches` between the two runs) so both paths
-    /// actually call `super::local::prepare` rather than loading from cache.
-    #[cfg(feature = "native")]
-    #[test]
-    fn parallel_local_matches_produce_identical_stored_summaries() {
-        let (conn, _) = setup();
-        let catalog = default_catalog(&[]).unwrap();
-        let options = request("TEST", "R").options;
-
-        // First run: 1 thread (serial).
-        let run1 = compute_impl(&conn, &catalog, AnalysisScope::All, &options, Some(1)).unwrap();
-        let load_subjects = |conn: &Connection, analysis_id: &str| -> Vec<(String, String)> {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT subject_key FROM effect_subjects \
-                     WHERE analysis_id=?1 ORDER BY subject_key",
-                )
-                .unwrap();
-            let keys: Vec<String> = stmt
-                .query_map([analysis_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            keys.into_iter()
-                .map(|k| {
-                    let v = storage::load_subject(conn, analysis_id, &k)
-                        .unwrap()
-                        .unwrap();
-                    (k, v)
-                })
-                .collect()
-        };
-        let subjects1 = load_subjects(&conn, &run1.analysis_id);
-
-        // Purge local matches so the second run recomputes them.
-        conn.execute("DELETE FROM effect_local_matches", [])
-            .unwrap();
-
-        // Second run: 2 threads (parallel).
-        let run2 = compute_impl(&conn, &catalog, AnalysisScope::All, &options, Some(2)).unwrap();
-        let subjects2 = load_subjects(&conn, &run2.analysis_id);
-
-        assert_eq!(
-            run1.analysis_id, run2.analysis_id,
-            "analysis_id must be identical (same inputs → same content hash)"
-        );
-        assert_eq!(
-            subjects1, subjects2,
-            "stored summaries must be byte-identical between 1-thread and 2-thread runs"
-        );
     }
 }

@@ -164,15 +164,14 @@ async fn main() -> Result<()> {
     let started = Instant::now();
     let all = recompute_effects(&RecomputeEffectsRequest {
         schema_version: 1,
-        scope: AnalysisScope::All,
         options: EffectsOptions::default(),
     })?;
     let all_ms = ms(started);
     let mut sizes = BTreeMap::new();
     for (table, column) in [
         ("effect_structures", "structure_json"),
-        ("effect_runs", "artifact_json"),
-        ("effect_subjects", "summary_json"),
+        ("effect_graph", "topology"),
+        ("effect_sites", "json"),
         ("effect_local_matches", "payload_json"),
     ] {
         let size: i64 = conn.query_row(
@@ -199,8 +198,7 @@ async fn main() -> Result<()> {
             "indexed_corpus_recompute_ms":all_ms,"peak_memory":rss,
             "effects":cold.effects,"effects_status":cold.effects_status,
             "explanation_groups":explained.explanations.len(),"input_manifest":all.input_manifest,
-            "processed_subjects":all.processed_subjects.len(),"unprocessed_subjects":all.unprocessed_subjects.len(),
-            "bodies":all.body_count,"relationships":all.relationship_count,"states":all.state_count
+            "bodies":all.body_count,"relationships":all.relationship_count,"issues":all.issue_count
         }))?
     );
     Ok(())

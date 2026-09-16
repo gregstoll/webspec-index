@@ -364,7 +364,7 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     // A separate indexing/maintenance process prepares all summaries. An already
     // running editor must notice publication after previously caching a miss.
     let precompute = Command::new(env!("CARGO_BIN_EXE_webspec-index"))
-        .args(["effects", "--all", "--summary-only"])
+        .args(["effects", "--all"])
         .env("SPEC_INDEX_TEST_DB", db.path().join("index.db"))
         .output()
         .unwrap();
@@ -373,10 +373,14 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
         "{}",
         String::from_utf8_lossy(&precompute.stderr)
     );
-    let runs: i64 = conn
-        .query_row("SELECT COUNT(*) FROM effect_runs", [], |row| row.get(0))
+    let has_graph: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert_eq!(runs, 1);
+    assert!(has_graph);
     let previous = client.refresh_requests;
     let _ = client.request(9, "textDocument/inlayHint", hint_params.clone());
     client.wait_for_refresh_after(previous);
@@ -416,12 +420,14 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
         "automatic hovers must not reconstruct traces: {hover}"
     );
 
-    assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM effect_runs", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        runs,
-        "warm editor interactions must reuse prepared analysis"
+    assert!(
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+            [],
+            |row| row.get::<_, bool>(0)
+        )
+        .unwrap(),
+        "graph must still be present after warm interactions"
     );
 
     let warm_lenses = client.request(

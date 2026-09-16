@@ -547,8 +547,6 @@ pub struct EffectsOptions {
     pub mode: EffectsMode,
     pub rule_paths: Vec<String>,
     pub environment: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub analysis_id: Option<String>,
     pub budgets: DiscoveryBudgets,
 }
 
@@ -558,7 +556,6 @@ impl Default for EffectsOptions {
             mode: EffectsMode::Auto,
             rule_paths: Vec::new(),
             environment: DEFAULT_ENVIRONMENT.to_string(),
-            analysis_id: None,
             budgets: DiscoveryBudgets::default(),
         }
     }
@@ -663,7 +660,6 @@ impl ExplainEffectsRequest {
 pub struct RecomputeEffectsRequest {
     #[serde(deserialize_with = "deserialize_schema_version")]
     pub schema_version: u32,
-    pub scope: AnalysisScope,
     #[serde(default)]
     pub options: EffectsOptions,
 }
@@ -671,16 +667,8 @@ pub struct RecomputeEffectsRequest {
 impl RecomputeEffectsRequest {
     pub fn validate(&self) -> Result<(), RequestError> {
         validate_version(self.schema_version)?;
-        if self.options.analysis_id.is_some() {
-            return Err(RequestError::invalid(
-                "recomputation is incompatible with a historical analysis_id",
-            ));
-        }
         if self.options.mode != EffectsMode::Auto {
             return Err(RequestError::invalid("recomputation requires mode auto"));
-        }
-        if let AnalysisScope::Subject { subject } = &self.scope {
-            subject.validate()?;
         }
         self.options.validate()
     }
@@ -691,22 +679,16 @@ impl RecomputeEffectsRequest {
 pub struct RecomputeEffectsResult {
     #[serde(deserialize_with = "deserialize_schema_version")]
     pub schema_version: u32,
-    pub analysis_id: String,
     pub input_manifest: InputManifest,
-    pub processed_subjects: Vec<Subject>,
-    pub unprocessed_subjects: Vec<Subject>,
     pub body_count: u64,
     pub relationship_count: u64,
-    pub state_count: u64,
     pub issues: Vec<Issue>,
+    pub issue_count: u64,
 }
 
 impl RecomputeEffectsResult {
     pub fn validate(&self) -> Result<(), RequestError> {
         validate_version(self.schema_version)?;
-        if self.analysis_id.is_empty() {
-            return Err(RequestError::invalid("analysis_id must be non-empty"));
-        }
         self.input_manifest.budget_profile.validate()
     }
 }

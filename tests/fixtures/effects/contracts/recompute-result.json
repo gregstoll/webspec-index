@@ -1,6 +1,5 @@
 {
   "schema_version": 1,
-  "analysis_id": "an_fedcba9876543210",
   "input_manifest": {
     "specs": [{"spec": "TEST", "snapshot_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
     "structural_representation_version": 1,
@@ -12,12 +11,8 @@
     "budget_profile": {"max_bodies": 20000, "max_relationships": 500000, "max_states": 2000000},
     "missing_inputs": []
   },
-  "processed_subjects": [
-    {"spec": "TEST", "anchor": "r", "snapshot_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-  ],
-  "unprocessed_subjects": [],
   "body_count": 1,
   "relationship_count": 2,
-  "state_count": 2,
-  "issues": []
+  "issues": [],
+  "issue_count": 0
 }

@@ -258,12 +258,12 @@
     },
     "recomputeResult": {
       "type": "object", "additionalProperties": false,
-      "required": ["schema_version", "analysis_id", "input_manifest", "processed_subjects", "unprocessed_subjects", "body_count", "relationship_count", "state_count", "issues"],
+      "required": ["schema_version", "input_manifest", "body_count", "relationship_count", "issues", "issue_count"],
       "properties": {
-        "schema_version": {"const": 1}, "analysis_id": {"$ref": "#/$defs/analysisId"}, "input_manifest": {"$ref": "#/$defs/manifest"},
-        "processed_subjects": {"type": "array", "items": {"$ref": "#/$defs/subject"}}, "unprocessed_subjects": {"type": "array", "items": {"$ref": "#/$defs/subject"}},
-        "body_count": {"type": "integer", "minimum": 0}, "relationship_count": {"type": "integer", "minimum": 0}, "state_count": {"type": "integer", "minimum": 0},
-        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}}
+        "schema_version": {"const": 1}, "input_manifest": {"$ref": "#/$defs/manifest"},
+        "body_count": {"type": "integer", "minimum": 0}, "relationship_count": {"type": "integer", "minimum": 0},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "issue_count": {"type": "integer", "minimum": 0}
       }
     }
   }

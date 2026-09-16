@@ -2,7 +2,7 @@
 //! against a golden export made from the materialized effects DB.
 //!
 //! Usage:
-//!   cargo run --release --example effects_parity -- target/golden-effects.sqlite [--analysis <id>] [--limit N] [--threads T]
+//!   cargo run --release --example effects_parity -- target/golden-effects.sqlite [--limit N] [--threads T]
 //!
 //! Exits 0 if every checked subject matches, 1 if any mismatch is found.
 
@@ -13,12 +13,12 @@ use std::{
     time::Instant,
 };
 
+use flate2::read::DeflateDecoder;
 use rayon::prelude::*;
-use rusqlite::Connection;
+use rusqlite::{types::ValueRef, Connection};
 use serde_json::Value;
 use webspec_index::{
     db,
-    db::effects as gold_store,
     effects::{
         model::{
             EffectsMode, EffectsOptions, EffectsRequest, RequestErrorCode, SubjectSelector,
@@ -27,6 +27,21 @@ use webspec_index::{
         service::{get_effect_summary_on, prepared_effect_details_on},
     },
 };
+
+fn decode_payload(value: ValueRef<'_>) -> String {
+    match value {
+        ValueRef::Text(bytes) => String::from_utf8(bytes.to_vec()).expect("utf8"),
+        ValueRef::Blob(bytes) => {
+            use std::io::Read;
+            let mut text = String::new();
+            DeflateDecoder::new(bytes)
+                .read_to_string(&mut text)
+                .expect("deflate");
+            text
+        }
+        _ => panic!("unexpected payload type"),
+    }
+}
 
 fn normalize(value: &mut Value) {
     if let Some(obj) = value.as_object_mut() {
@@ -81,9 +96,11 @@ fn make_request(sel: SubjectSelector) -> EffectsRequest {
 
 fn main() {
     let mut args_iter = std::env::args().skip(1);
-    let golden_path = PathBuf::from(args_iter.next().expect(
-        "usage: effects_parity <golden.sqlite> [--analysis <id>] [--limit N] [--threads T]",
-    ));
+    let golden_path = PathBuf::from(
+        args_iter
+            .next()
+            .expect("usage: effects_parity <golden.sqlite> [--limit N] [--threads T]"),
+    );
     let mut analysis_id = "an_78c733c3d20da90b".to_string();
     let mut limit: Option<usize> = None;
     let mut num_threads = std::thread::available_parallelism()
@@ -103,7 +120,6 @@ fn main() {
         Connection::open_with_flags(&golden_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .expect("open golden DB");
 
-    // Load all subject keys ordered by subject_key, then apply limit.
     let all_keys: Vec<String> = {
         let mut stmt = golden
             .prepare(
@@ -120,7 +136,6 @@ fn main() {
     let subject_keys: Vec<String> = all_keys.into_iter().take(take).collect();
     let key_set: HashSet<&str> = subject_keys.iter().map(String::as_str).collect();
 
-    // Load all witness (subject_key, effect_id) pairs, filter to our subjects, then load JSON.
     let witness_pairs: Vec<(String, String)> = {
         let mut stmt = golden
             .prepare(
@@ -139,22 +154,29 @@ fn main() {
         if !key_set.contains(sk.as_str()) {
             continue;
         }
-        let json = gold_store::load_witness(&golden, &analysis_id, &sk, &eid)
-            .expect("load_witness")
-            .expect("witness row missing after key confirmed present");
+        let json: String = golden
+            .query_row(
+                "SELECT witness_json FROM effect_witnesses WHERE analysis_id=?1 AND subject_key=?2 AND effect_id=?3",
+                (&analysis_id, &sk, &eid),
+                |row| Ok(decode_payload(row.get_ref(0)?)),
+            )
+            .expect("load_witness");
         let val: Value = serde_json::from_str(&json).expect("parse witness json");
         witnesses_by_subject.entry(sk).or_default().push((eid, val));
     }
 
-    // Build GoldenSubject for each key, expanding _issue_refs.
     let mut subjects: Vec<GoldenSubject> = subject_keys
         .iter()
         .map(|key| {
             let sel: SubjectSelector =
                 serde_json::from_str(key).expect("parse subject_key as SubjectSelector");
-            let json = gold_store::load_subject(&golden, &analysis_id, key)
-                .expect("load_subject")
-                .expect("subject row missing");
+            let json: String = golden
+                .query_row(
+                    "SELECT summary_json FROM effect_subjects WHERE analysis_id=?1 AND subject_key=?2",
+                    (&analysis_id, key),
+                    |row| Ok(decode_payload(row.get_ref(0)?)),
+                )
+                .expect("load_subject");
             let mut value: Value = serde_json::from_str(&json).expect("parse summary_json");
 
             let is_ambiguous = value.get("ambiguous_subjects").is_some();
@@ -164,13 +186,21 @@ fn main() {
                     .and_then(|o| o.remove("_issue_refs"))
                     .map(|v| serde_json::from_value(v).expect("parse _issue_refs"))
                     .unwrap_or_default();
-                let issue_jsons =
-                    gold_store::load_issues(&golden, &analysis_id, &refs).expect("load_issues");
-                let issue_vals: Vec<Value> = issue_jsons
-                    .iter()
-                    .map(|j| serde_json::from_str(j).expect("parse issue json"))
-                    .collect();
-                value["issues"] = Value::Array(issue_vals);
+                if !refs.is_empty() {
+                    let mut select = golden
+                        .prepare("SELECT issue_json FROM effect_issues WHERE analysis_id=?1 AND issue_id=?2")
+                        .expect("prepare issues");
+                    let issue_vals: Vec<Value> = refs
+                        .iter()
+                        .map(|id| {
+                            let json: String = select
+                                .query_row((&analysis_id, id), |row| Ok(decode_payload(row.get_ref(0)?)))
+                                .expect("load issue");
+                            serde_json::from_str(&json).expect("parse issue json")
+                        })
+                        .collect();
+                    value["issues"] = Value::Array(issue_vals);
+                }
                 normalize(&mut value);
             }
 
@@ -185,7 +215,6 @@ fn main() {
         })
         .collect();
 
-    // Sort by (spec, anchor) for per-section analysis cache locality.
     subjects.sort_by(|a, b| (&a.sel.spec, &a.sel.anchor).cmp(&(&b.sel.spec, &b.sel.anchor)));
 
     let total = subjects.len();

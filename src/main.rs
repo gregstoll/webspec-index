@@ -139,9 +139,8 @@ struct EffectsArgs {
 
     #[arg(
         long,
-        requires = "summary_only",
         conflicts_with = "subject",
-        help = "Precompute effects for the indexed corpus"
+        help = "Build the effects graph for the indexed corpus"
     )]
     all: bool,
 
@@ -174,16 +173,6 @@ struct EffectsArgs {
 
     #[arg(long, help = "Restrict witnesses to one source occurrence")]
     occurrence_id: Option<String>,
-
-    #[arg(
-        long,
-        conflicts_with = "analysis_id",
-        help = "Bypass compatible cached analysis"
-    )]
-    recompute: bool,
-
-    #[arg(long, help = "Use an exact retained analysis run")]
-    analysis_id: Option<String>,
 
     #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
     rules: Vec<String>,
@@ -573,11 +562,14 @@ enum Command {
             help = "Re-parse only specs from these providers (comma-separated: whatwg,w3c,tc39)"
         )]
         providers: Vec<String>,
+
+        #[command(flatten)]
+        effect_options: UpdateEffectsArgs,
     },
 
     /// Inspect possible effects of a specification algorithm or step
     #[command(
-        long_about = "Inspect possible effects and their evidence for one subject, or precompute the indexed corpus with --all --summary-only."
+        long_about = "Inspect possible effects and their evidence for one subject, or build the effects graph with --all."
     )]
     Effects(Box<EffectsArgs>),
 
@@ -759,7 +751,7 @@ anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
 list <SPEC> [--pr N]
 refs <SPEC#anchor|TARGET> [-d incoming|outgoing|both(default)] [-l N(10)] [--pr N] [--kind step|note|idl|prose]
 trace <FROM> <TO> [--max-depth N(6)] [--kind step(default)|note|idl|prose|any] [-l N(20)] [-d verbose(default)|edges|compact] [--format json|markdown]
-effects [<SPEC#anchor|URL> | --all --summary-only] [--step N.N|--step-id ID|--body-id ID] [--compact|--summary-only] [--kind KIND] [--category CATEGORY] [--rule ID] [--effect-id ID] [--occurrence-id ID] [--recompute] [--analysis-id ID] [--rules PATH] [--environment NAME]
+effects [<SPEC#anchor|URL> | --all] [--step N.N|--step-id ID|--body-id ID] [--compact|--summary-only] [--kind KIND] [--category CATEGORY] [--rule ID] [--effect-id ID] [--occurrence-id ID] [--rules PATH] [--environment NAME]
 update [-s SPEC] [-f force] [--refetch] [--providers a,b] [--effects auto|off] [--rules PATH] [--environment NAME]
 reparse [-s SPEC] [--providers a,b] — re-parse from on-disk HTML cache, no network
 clear-db [-y skip confirm]
@@ -1076,7 +1068,6 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 webspec_index::effects::recompute_effects(
                     &webspec_index::effects::RecomputeEffectsRequest {
                         schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
-                        scope: webspec_index::effects::AnalysisScope::All,
                         options: webspec_index::effects::EffectsOptions {
                             rule_paths: effect_options.rules,
                             environment: effect_options.environment,
@@ -1096,8 +1087,24 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
-        Command::Reparse { spec, providers } => {
+        Command::Reparse {
+            spec,
+            providers,
+            effect_options,
+        } => {
             let results = webspec_index::reparse_specs(spec.as_deref(), &providers).await?;
+            if effect_options.effects == UpdateEffectsMode::Auto {
+                webspec_index::effects::recompute_effects(
+                    &webspec_index::effects::RecomputeEffectsRequest {
+                        schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
+                        options: webspec_index::effects::EffectsOptions {
+                            rule_paths: effect_options.rules,
+                            environment: effect_options.environment,
+                            ..Default::default()
+                        },
+                    },
+                )?;
+            }
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
                 .map(|(name, snapshot_id)| model::UpdateEntry {
@@ -1123,8 +1130,6 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 rule_id,
                 effect_id,
                 occurrence_id,
-                recompute,
-                analysis_id,
                 rules,
                 environment,
                 max_bodies,
@@ -1141,17 +1146,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 || rule_id.is_some()
                 || effect_id.is_some()
                 || occurrence_id.is_some();
-            if all
-                && (step.is_some()
-                    || step_id.is_some()
-                    || body_id.is_some()
-                    || has_filter
-                    || recompute
-                    || analysis_id.is_some())
-            {
-                anyhow::bail!(
-                    "--all cannot be combined with subject selectors, filters, --recompute, or --analysis-id"
-                );
+            if all && (step.is_some() || step_id.is_some() || body_id.is_some() || has_filter) {
+                anyhow::bail!("--all cannot be combined with subject selectors or filters");
             }
 
             let budgets = effects::DiscoveryBudgets {
@@ -1159,36 +1155,22 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 max_relationships,
                 max_states,
             };
-            let mut options = effects::EffectsOptions {
+            let options = effects::EffectsOptions {
                 mode: effects::EffectsMode::Auto,
                 rule_paths: rules.clone(),
                 environment,
-                analysis_id: analysis_id.clone(),
                 budgets,
             };
-
-            if analysis_id.is_some()
-                && (!rules.is_empty()
-                    || options.environment != effects::DEFAULT_ENVIRONMENT
-                    || options.budgets != effects::DiscoveryBudgets::default())
-            {
-                anyhow::bail!(
-                    "--analysis-id cannot be combined with altered rules, environment, or discovery budgets"
-                );
-            }
 
             if all {
                 let result = effects::recompute_effects(&effects::RecomputeEffectsRequest {
                     schema_version: effects::EFFECTS_SCHEMA_VERSION,
-                    scope: effects::AnalysisScope::All,
                     options,
                 })?;
                 print_output(&cli.format, &result, |_| {
                     format!(
-                        "Effects analysis `{}` processed {} subjects; {} remain unprocessed.\n",
-                        result.analysis_id,
-                        result.processed_subjects.len(),
-                        result.unprocessed_subjects.len()
+                        "Effects graph built: {} bodies, {} relationships.\n",
+                        result.body_count, result.relationship_count,
                     )
                 });
                 return Ok(ExitCode::SUCCESS);
@@ -1205,24 +1187,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 body_id,
             };
 
-            // Only the explicitly requested root may be indexed here. Effect analysis
-            // itself reports missing dependencies rather than fetching them.
-            if analysis_id.is_none() {
-                let queried = webspec_index::query_section(&subject_text, None).await?;
-                selector.spec = queried.spec;
-                selector.anchor = queried.anchor;
-            }
-
-            if recompute {
-                let recomputed = effects::recompute_effects(&effects::RecomputeEffectsRequest {
-                    schema_version: effects::EFFECTS_SCHEMA_VERSION,
-                    scope: effects::AnalysisScope::Subject {
-                        subject: selector.clone(),
-                    },
-                    options: options.clone(),
-                })?;
-                options.analysis_id = Some(recomputed.analysis_id);
-            }
+            let queried = webspec_index::query_section(&subject_text, None).await?;
+            selector.spec = queried.spec;
+            selector.anchor = queried.anchor;
 
             let filter = has_filter.then_some(effects::EffectFilter {
                 kind,
@@ -1580,9 +1547,9 @@ mod cli_effect_tests {
     }
 
     #[test]
-    fn all_requires_summary_only() {
+    fn all_accepts_bare_invocation() {
         let result = Cli::try_parse_from(["webspec-index", "effects", "--all"]);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]

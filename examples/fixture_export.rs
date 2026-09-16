@@ -101,14 +101,11 @@ fn main() {
     .expect("insert refs");
 
     conn.execute_batch(
-        "INSERT INTO effect_runs(analysis_id, generation, semantic_key, scope_key, budget_key, \
-                                  reached_fixed_point, manifest_json, artifact_json) \
-         VALUES ('fixture', (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), \
-                 'nav', 'sc', 'b', 1, '{}', '{}'); \
-         INSERT INTO effect_subjects(analysis_id, subject_key, summary_json) \
-         VALUES ('fixture', 'navigate', '{}');",
+        "INSERT INTO effect_graph(id, generation, semantic_key, manifest_json, topology, opaque_anchor_issue_id) \
+         VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), \
+                 'fixture', '{}', X'00', NULL);",
     )
-    .expect("effect rows");
+    .expect("effect graph");
 
     drop(conn);
 

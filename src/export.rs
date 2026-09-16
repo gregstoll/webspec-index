@@ -74,7 +74,6 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
         "DROP TABLE IF EXISTS effect_structures;
          DROP TABLE IF EXISTS effect_local_matches;
          DROP TABLE IF EXISTS update_checks;
-         UPDATE effect_runs SET artifact_json = '';
          INSERT INTO sections_fts(sections_fts) VALUES('optimize');",
     )?;
     conn.execute(
@@ -98,15 +97,14 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
 }
 
 fn ensure_prepared_effects(conn: &Connection) -> Result<()> {
-    let prepared: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM effect_runs r
-         WHERE r.generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation')
-           AND EXISTS (SELECT 1 FROM effect_subjects s WHERE s.analysis_id = r.analysis_id)",
+    let has_graph: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1
+           AND generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation'))",
         [],
         |row| row.get(0),
     )?;
-    if prepared == 0 {
-        bail!("no prepared effects for the current index; run `webspec-index effects --all --summary-only` first");
+    if !has_graph {
+        bail!("no effects graph for the current index; run `webspec-index effects --all` first");
     }
     Ok(())
 }
