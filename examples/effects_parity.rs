@@ -39,10 +39,10 @@ fn normalize(value: &mut Value) {
     }
 }
 
-fn diff_lines(golden: &str, new: &str, max_lines: usize) -> String {
+fn first_differing_lines(golden: &str, new: &str, max_lines: usize) -> String {
     let gl: Vec<&str> = golden.lines().collect();
     let nl: Vec<&str> = new.lines().collect();
-    let mut out = String::from("--- golden\n+++ new\n");
+    let mut out = String::from("(first differing lines — golden:-  new:+)\n");
     let mut shown = 0;
     for i in 0..gl.len().max(nl.len()) {
         let g = gl.get(i).copied().unwrap_or("");
@@ -250,7 +250,7 @@ fn main() {
                 let summary_ok = if gs.golden_value != new_val {
                     let gp = serde_json::to_string_pretty(&gs.golden_value).unwrap_or_default();
                     let np = serde_json::to_string_pretty(&new_val).unwrap_or_default();
-                    let diff = diff_lines(&gp, &np, 40);
+                    let diff = first_differing_lines(&gp, &np, 40);
                     eprintln!("MISMATCH summary {}\n{diff}", gs.key);
                     false
                 } else {
@@ -270,27 +270,35 @@ fn main() {
                         }
                         Ok(details) => {
                             let mut all_ok = true;
-                            for expl in &details.explanations {
-                                let new_w = match expl.witnesses.first() {
-                                    Some(w) => w,
-                                    None => continue,
-                                };
-                                if let Some((_, gw)) =
-                                    gs.witnesses.iter().find(|(eid, _)| eid == &expl.effect_id)
-                                {
-                                    let nw_val =
-                                        serde_json::to_value(new_w).expect("serialize Witness");
-                                    if gw != &nw_val {
-                                        let gp =
-                                            serde_json::to_string_pretty(gw).unwrap_or_default();
-                                        let np = serde_json::to_string_pretty(&nw_val)
-                                            .unwrap_or_default();
-                                        let diff = diff_lines(&gp, &np, 40);
+                            for (geid, gw) in &gs.witnesses {
+                                let new_w = details
+                                    .explanations
+                                    .iter()
+                                    .find(|e| &e.effect_id == geid)
+                                    .and_then(|e| e.witnesses.first());
+                                match new_w {
+                                    None => {
                                         eprintln!(
-                                            "MISMATCH witness {} effect {}\n{diff}",
-                                            gs.key, expl.effect_id
+                                            "MISMATCH witness {} effect {}: witness missing on new side",
+                                            gs.key, geid
                                         );
                                         all_ok = false;
+                                    }
+                                    Some(w) => {
+                                        let nw_val =
+                                            serde_json::to_value(w).expect("serialize Witness");
+                                        if gw != &nw_val {
+                                            let gp = serde_json::to_string_pretty(gw)
+                                                .unwrap_or_default();
+                                            let np = serde_json::to_string_pretty(&nw_val)
+                                                .unwrap_or_default();
+                                            let diff = first_differing_lines(&gp, &np, 40);
+                                            eprintln!(
+                                                "MISMATCH witness {} effect {}\n{diff}",
+                                                gs.key, geid
+                                            );
+                                            all_ok = false;
+                                        }
                                     }
                                 }
                             }
