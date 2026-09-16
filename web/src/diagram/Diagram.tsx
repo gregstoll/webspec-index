@@ -279,6 +279,13 @@ function NodeGroup({
             e.preventDefault();
             onExpand(node.id);
           }}
+          onKeyDown={(e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onExpand(node.id);
+            }
+          }}
           role="button"
           aria-label={`Expand ${node.label}`}
           tabIndex={0}

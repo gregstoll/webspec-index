@@ -71,6 +71,36 @@ describe('Diagram', () => {
     expect(onSelect).toHaveBeenCalledWith('b');
   });
 
+  it('pressing Enter on the expand button calls onExpand', async () => {
+    const onExpand = vi.fn();
+    const singleNode: DiagramGraph = {
+      nodes: [{ id: 'a', label: 'Node A', kind: 'step' }],
+      edges: [],
+    };
+    render(<Diagram graph={singleNode} ariaLabel="Test" onExpand={onExpand} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Expand Node A' })).toBeTruthy();
+    });
+    const expandBtn = screen.getByRole('button', { name: 'Expand Node A' });
+    fireEvent.keyDown(expandBtn, { key: 'Enter' });
+    expect(onExpand).toHaveBeenCalledWith('a');
+  });
+
+  it('pressing Space on the expand button calls onExpand', async () => {
+    const onExpand = vi.fn();
+    const singleNode: DiagramGraph = {
+      nodes: [{ id: 'a', label: 'Node A', kind: 'step' }],
+      edges: [],
+    };
+    render(<Diagram graph={singleNode} ariaLabel="Test" onExpand={onExpand} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Expand Node A' })).toBeTruthy();
+    });
+    const expandBtn = screen.getByRole('button', { name: 'Expand Node A' });
+    fireEvent.keyDown(expandBtn, { key: ' ' });
+    expect(onExpand).toHaveBeenCalledWith('a');
+  });
+
   it('"Fit" toolbar button is present', async () => {
     render(<Diagram graph={graphWithHref} ariaLabel="Test" />);
     await waitFor(() => {

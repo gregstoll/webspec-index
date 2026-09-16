@@ -66,7 +66,7 @@ function witnessToGraph(
 
     const fromSublabel = hop.site.step_text
       ? hop.site.step_text.length > 60
-        ? hop.site.step_text.slice(0, 60)
+        ? hop.site.step_text.slice(0, 60) + '…'
         : hop.site.step_text
       : undefined;
 

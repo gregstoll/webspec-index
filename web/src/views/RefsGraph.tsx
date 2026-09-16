@@ -18,6 +18,15 @@ export function RefsGraph({ client, spec, anchor }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const expandedRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+  const sessionRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +34,7 @@ export function RefsGraph({ client, spec, anchor }: Props) {
     setError(null);
     setLoading(true);
     expandedRef.current = new Set();
+    sessionRef.current += 1;
 
     client
       .request({
@@ -61,7 +71,7 @@ export function RefsGraph({ client, spec, anchor }: Props) {
     if (expandedRef.current.has(id)) return;
     expandedRef.current.add(id);
 
-    let cancelled = false;
+    const session = sessionRef.current;
     client
       .request({
         type: 'graph',
@@ -71,14 +81,12 @@ export function RefsGraph({ client, spec, anchor }: Props) {
         max_nodes: 60,
       })
       .then((res) => {
-        if (cancelled) return;
+        if (!mountedRef.current || sessionRef.current !== session) return;
         if (res.type !== 'graph') return;
         const { graph: built } = buildRefsGraph(res.result as GraphResult);
         setGraph((prev) => (prev != null ? mergeGraphs(prev, built) : built));
       })
       .catch(() => { /* ignore expand errors silently */ });
-
-    return () => { cancelled = true; };
   }
 
   if (loading) {

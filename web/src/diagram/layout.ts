@@ -50,7 +50,7 @@ export async function layoutGraph(
 
   const lw = opts?.labelWidth ?? 32;
   for (const node of g.nodes) {
-    const { width, height } = measureLabel(node.label, lw);
+    const { width, height } = measureLabel(node.label, lw, node.sublabel);
     graph.setNode(node.id, {
       width: width + PAD_X * 2,
       height: height + PAD_Y * 2,

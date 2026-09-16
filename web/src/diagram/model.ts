@@ -93,33 +93,43 @@ export function mergeGraphs(a: DiagramGraph, b: DiagramGraph): DiagramGraph {
 
 /**
  * Monospace label size estimate: 8 px per character, wraps at `labelWidth` chars (default 32).
- * Line height 18 px.
+ * Line height 18 px. When a sublabel is provided its wrapped lines are added at 0.85× line height
+ * (smaller font), matching how LabelLines renders them.
  */
-export function measureLabel(label: string, labelWidth = 32): { width: number; height: number } {
+export function measureLabel(label: string, labelWidth = 32, sublabel?: string): { width: number; height: number } {
   const LINE_H = 18;
   const CHAR_W = 8;
   const WRAP = labelWidth;
 
-  const words = label.split(' ');
-  const lines: string[] = [];
-  let current = '';
-
-  for (const word of words) {
-    if (current === '') {
-      current = word;
-    } else if (current.length + 1 + word.length <= WRAP) {
-      current += ' ' + word;
-    } else {
-      lines.push(current);
-      current = word;
+  function wrapText(text: string): string[] {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let current = '';
+    for (const word of words) {
+      if (current === '') {
+        current = word;
+      } else if (current.length + 1 + word.length <= WRAP) {
+        current += ' ' + word;
+      } else {
+        lines.push(current);
+        current = word;
+      }
     }
+    if (current !== '') lines.push(current);
+    return lines.length > 0 ? lines : [''];
   }
-  if (current !== '') lines.push(current);
-  if (lines.length === 0) lines.push('');
 
-  const maxLen = Math.max(...lines.map((l) => l.length));
+  const mainLines = wrapText(label);
+  const maxLen = Math.max(...mainLines.map((l) => l.length));
+
+  let sublabelHeight = 0;
+  if (sublabel) {
+    const sublabelLines = wrapText(sublabel);
+    sublabelHeight = sublabelLines.length * LINE_H * 0.85;
+  }
+
   return {
     width: maxLen * CHAR_W,
-    height: lines.length * LINE_H,
+    height: mainLines.length * LINE_H + sublabelHeight,
   };
 }

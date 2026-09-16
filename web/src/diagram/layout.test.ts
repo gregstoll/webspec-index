@@ -58,6 +58,27 @@ describe('layoutGraph', () => {
     expect(wideNode.width).toBeGreaterThanOrEqual(narrowNode.width);
   });
 
+  it('node with a two-line sublabel gets a taller box than the same node without', async () => {
+    const base: DiagramGraph = {
+      nodes: [{ id: 'x', label: 'Navigate', kind: 'step' }],
+      edges: [],
+    };
+    const withSublabel: DiagramGraph = {
+      nodes: [
+        {
+          id: 'x',
+          label: 'Navigate',
+          kind: 'step',
+          sublabel: 'A long sublabel text that definitely wraps into two lines at narrow width',
+        },
+      ],
+      edges: [],
+    };
+    const baseLayout = await layoutGraph(base, { labelWidth: 20 });
+    const sublabelLayout = await layoutGraph(withSublabel, { labelWidth: 20 });
+    expect(sublabelLayout.nodes[0].height).toBeGreaterThan(baseLayout.nodes[0].height);
+  });
+
   it('labelWidth=5 wraps "First long label" into more lines than labelWidth=50', async () => {
     const graph: DiagramGraph = {
       nodes: [{ id: 'x', label: 'First long label for testing', kind: 'step' }],

@@ -195,7 +195,7 @@ describe('effectPaths', () => {
     expect(effectNodes.length).toBe(1);
   });
 
-  it('sublabel on from node is step_text truncated to 60 chars', () => {
+  it('sublabel on from node is step_text truncated to 60 chars with ellipsis appended', () => {
     const longText = 'A'.repeat(70);
     const w = makeWitness([
       {
@@ -214,6 +214,6 @@ describe('effectPaths', () => {
     };
     const graph = effectPaths(expl, effect, subject);
     const fromNode = graph.nodes.find((n) => n.id === 'HTML#navigate@1');
-    expect(fromNode?.sublabel?.length).toBe(60);
+    expect(fromNode?.sublabel).toBe('A'.repeat(60) + '…');
   });
 });

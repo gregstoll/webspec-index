@@ -77,7 +77,15 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
     }
     place();
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(place);
+      ro.observe(aside);
+    }
+    return () => {
+      window.removeEventListener('resize', place);
+      ro?.disconnect();
+    };
   }, [stepKey, stepFx, sectionView]);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
