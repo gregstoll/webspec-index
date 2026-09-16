@@ -28,6 +28,7 @@ native = [
     "dep:moz-cli-version-check",
     "dep:async-trait",
     "dep:strsim",
+    "dep:rayon",
 ]
 pdf = ["dep:lopdf", "dep:pdf-extract", "dep:euclid"]
 
@@ -77,6 +78,7 @@ sha2 = "0.10"
 tower-lsp = { version = "0.20", optional = true }
 regex = "1"
 strsim = { version = "0.11", optional = true }
+rayon = { version = "1", optional = true }
 dashmap = { version = "6", optional = true }
 
 # Version checking

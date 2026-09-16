@@ -3283,6 +3283,7 @@ dependencies = [
  "pdf-extract",
  "percent-encoding",
  "pulldown-cmark",
+ "rayon",
  "regex",
  "reqwest 0.13.2",
  "rusqlite",

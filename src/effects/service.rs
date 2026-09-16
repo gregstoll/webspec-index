@@ -441,11 +441,67 @@ fn artifact(conn: &Connection, run: &storage::StoredRun) -> Result<AnalysisArtif
     serde_json::from_str(&run.artifact_json).map_err(failure)
 }
 
+/// Compute local matches for the given uncached sources.
+///
+/// `threads` overrides the thread count; `None` reads `WEBSPEC_EFFECTS_THREADS` from
+/// the environment and falls back to [`std::thread::available_parallelism`]. Under the
+/// `native` feature this dispatches work across a rayon thread pool; without that feature
+/// it falls back to a serial loop so wasm and lib-only builds are unaffected.
+fn parallel_prepare(
+    sources: &[super::engine::SourceSpec],
+    catalog: &Catalog,
+    uncached: &[usize],
+    threads: Option<usize>,
+) -> Vec<(usize, super::local::LocalMatches)> {
+    #[cfg(feature = "native")]
+    {
+        use rayon::prelude::*;
+        let thread_count: usize = threads.unwrap_or_else(|| {
+            std::env::var("WEBSPEC_EFFECTS_THREADS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(1)
+                })
+        });
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(thread_count)
+            .build()
+            .expect("rayon thread pool");
+        pool.install(|| {
+            uncached
+                .par_iter()
+                .map(|&i| (i, super::local::prepare(&sources[i], catalog)))
+                .collect()
+        })
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = threads;
+        uncached
+            .iter()
+            .map(|&i| (i, super::local::prepare(&sources[i], catalog)))
+            .collect()
+    }
+}
+
 fn compute(
     conn: &Connection,
     catalog: &Catalog,
     scope: AnalysisScope,
     options: &EffectsOptions,
+) -> Result<storage::StoredRun, RequestError> {
+    compute_impl(conn, catalog, scope, options, None)
+}
+
+fn compute_impl(
+    conn: &Connection,
+    catalog: &Catalog,
+    scope: AnalysisScope,
+    options: &EffectsOptions,
+    threads: Option<usize>,
 ) -> Result<storage::StoredRun, RequestError> {
     for _ in 0..2 {
         let (generation, mut manifest, sources) = {
@@ -456,23 +512,59 @@ fn compute(
             (generation, manifest, sources)
         };
         let mut matches = super::local::LocalMatches::new();
-        for source in &sources {
-            let key = super::local::input_key(source, catalog, &options.environment);
-            let cached = storage::load_local_matches(conn, &key).map_err(failure)?;
-            let local = match cached {
-                Some(text) => serde_json::from_str(&text).map_err(failure)?,
-                None => {
-                    let local = super::local::prepare(source, catalog);
-                    storage::store_local_matches(
-                        conn,
-                        &key,
-                        &serde_json::to_string(&local).map_err(failure)?,
-                    )
-                    .map_err(failure)?;
-                    local
+        {
+            // Check which sources have cached local matches and which need computing.
+            let keys: Vec<String> = sources
+                .iter()
+                .map(|s| super::local::input_key(s, catalog, &options.environment))
+                .collect();
+            let mut cached_locals: Vec<Option<super::local::LocalMatches>> =
+                Vec::with_capacity(sources.len());
+            let mut uncached: Vec<usize> = Vec::new();
+            for (i, key) in keys.iter().enumerate() {
+                match storage::load_local_matches(conn, key).map_err(failure)? {
+                    Some(text) => {
+                        cached_locals.push(Some(serde_json::from_str(&text).map_err(failure)?));
+                    }
+                    None => {
+                        cached_locals.push(None);
+                        uncached.push(i);
+                    }
                 }
-            };
-            matches.extend(local);
+            }
+
+            // Compute uncached local matches. Under the native feature this runs in parallel
+            // across the thread pool; under wasm/test-only builds it falls back to serial.
+            // threads=None → resolve from WEBSPEC_EFFECTS_THREADS / available_parallelism.
+            let computed: Vec<(usize, super::local::LocalMatches)> =
+                parallel_prepare(&sources, catalog, &uncached, threads);
+
+            // Write computed results to the DB (sequential — rusqlite Connection is not Sync).
+            for (i, local) in &computed {
+                storage::store_local_matches(
+                    conn,
+                    &keys[*i],
+                    &serde_json::to_string(local).map_err(failure)?,
+                )
+                .map_err(failure)?;
+            }
+
+            // Fill computed slots back in and merge into the combined matches map in source
+            // order, which is the same order the serial path would have used.
+            let mut computed_map: std::collections::HashMap<usize, super::local::LocalMatches> =
+                computed.into_iter().collect();
+            for (i, slot) in cached_locals.iter_mut().enumerate() {
+                if slot.is_none() {
+                    *slot = Some(
+                        computed_map
+                            .remove(&i)
+                            .expect("every uncached source was computed"),
+                    );
+                }
+            }
+            for local in cached_locals.into_iter().flatten() {
+                matches.extend(local);
+            }
         }
         let artifact = engine::analyze_with_local_matches(
             AnalysisInput {
@@ -1067,5 +1159,59 @@ mod tests {
         let badges = super::super::render::compact_badges(&result.effects, 3, 120, None);
         assert!(badges.contains("queue a microtask"));
         assert!(badges.contains("run author code"));
+    }
+
+    /// Verify that running the full pipeline with 1 thread and with 2 threads produces
+    /// byte-identical stored summaries.  This exercises `parallel_prepare` by forcing a
+    /// cache miss (deleting `effect_local_matches` between the two runs) so both paths
+    /// actually call `super::local::prepare` rather than loading from cache.
+    #[cfg(feature = "native")]
+    #[test]
+    fn parallel_local_matches_produce_identical_stored_summaries() {
+        let (conn, _) = setup();
+        let catalog = default_catalog(&[]).unwrap();
+        let options = request("TEST", "R").options;
+
+        // First run: 1 thread (serial).
+        let run1 = compute_impl(&conn, &catalog, AnalysisScope::All, &options, Some(1)).unwrap();
+        let load_subjects = |conn: &Connection, analysis_id: &str| -> Vec<(String, String)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT subject_key FROM effect_subjects \
+                     WHERE analysis_id=?1 ORDER BY subject_key",
+                )
+                .unwrap();
+            let keys: Vec<String> = stmt
+                .query_map([analysis_id], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            keys.into_iter()
+                .map(|k| {
+                    let v = storage::load_subject(conn, analysis_id, &k)
+                        .unwrap()
+                        .unwrap();
+                    (k, v)
+                })
+                .collect()
+        };
+        let subjects1 = load_subjects(&conn, &run1.analysis_id);
+
+        // Purge local matches so the second run recomputes them.
+        conn.execute("DELETE FROM effect_local_matches", [])
+            .unwrap();
+
+        // Second run: 2 threads (parallel).
+        let run2 = compute_impl(&conn, &catalog, AnalysisScope::All, &options, Some(2)).unwrap();
+        let subjects2 = load_subjects(&conn, &run2.analysis_id);
+
+        assert_eq!(
+            run1.analysis_id, run2.analysis_id,
+            "analysis_id must be identical (same inputs → same content hash)"
+        );
+        assert_eq!(
+            subjects1, subjects2,
+            "stored summaries must be byte-identical between 1-thread and 2-thread runs"
+        );
     }
 }

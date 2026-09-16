@@ -15,7 +15,7 @@ use crate::parse::steps::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 pub const ANALYSIS_ENGINE_VERSION: u32 = 11;
 
@@ -268,6 +268,7 @@ pub(crate) fn analyze_with_local_matches(
     builder.index_sources();
     builder.add_catalog_declarations();
     builder.add_structural_relationships();
+    builder.build_edge_indices();
     builder.mark_opaque_anchors();
     builder.select_scope()?;
     builder.propagate();
@@ -280,6 +281,12 @@ struct Builder<'a> {
     nodes: BTreeMap<String, ExecutionNode>,
     anchor_nodes: BTreeMap<(String, String), String>,
     edges: BTreeMap<String, ExecutionEdge>,
+    /// Edge IDs grouped by the node they originate from (`edge.from`).
+    /// Built once by [`Self::build_edge_indices`] after all edges are added.
+    edges_by_source: HashMap<String, Vec<String>>,
+    /// Edge IDs grouped by their target node (`edge.to`).
+    /// Built once by [`Self::build_edge_indices`] after all edges are added.
+    edges_by_target: HashMap<String, Vec<String>>,
     occurrences: BTreeMap<String, LocalOccurrence>,
     issue_catalog: Vec<Issue>,
     issue_ids: BTreeMap<String, IssueId>,
@@ -301,6 +308,8 @@ impl<'a> Builder<'a> {
             nodes: BTreeMap::new(),
             anchor_nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
+            edges_by_source: HashMap::new(),
+            edges_by_target: HashMap::new(),
             occurrences: BTreeMap::new(),
             issue_catalog: Vec::new(),
             issue_ids: BTreeMap::new(),
@@ -312,6 +321,23 @@ impl<'a> Builder<'a> {
             unprocessed: BTreeSet::new(),
             fixed: true,
             order: 0,
+        }
+    }
+
+    /// Build reverse-lookup indices for `edges` so that callers can look up
+    /// incoming or outgoing edges for a node in O(degree) instead of O(|E|).
+    /// Must be called after all edges have been added (i.e. after
+    /// [`Self::add_structural_relationships`] and before [`Self::select_scope`]).
+    fn build_edge_indices(&mut self) {
+        for (id, edge) in &self.edges {
+            self.edges_by_source
+                .entry(edge.from.clone())
+                .or_default()
+                .push(id.clone());
+            self.edges_by_target
+                .entry(edge.to.clone())
+                .or_default()
+                .push(id.clone());
         }
     }
 
@@ -1334,47 +1360,56 @@ impl<'a> Builder<'a> {
 
     fn select_scope(&mut self) -> Result<(), RequestError> {
         let roots: Vec<String> = match &self.input.scope {
-            AnalysisScope::All => self
-                .nodes
-                .values()
-                .filter(|node| {
-                    (node.is_body
-                        && node.subject.body_id.is_none()
-                        && !node.id.starts_with("anchor:"))
-                        || self
-                            .occurrences
-                            .values()
-                            .any(|occurrence| occurrence.subject_id == node.id)
-                        || self.edges.values().any(|edge| {
-                            edge.from == node.id && edge.relation == Relationship::Implements
-                        })
-                })
-                .map(|node| node.id.clone())
-                .collect(),
+            AnalysisScope::All => {
+                // Build O(1) lookup sets to avoid O(N×(O+E)) scans per node.
+                let nodes_with_occurrences: HashSet<&str> = self
+                    .occurrences
+                    .values()
+                    .map(|occ| occ.subject_id.as_str())
+                    .collect();
+                let nodes_with_implements: HashSet<&str> = self
+                    .edges
+                    .values()
+                    .filter(|edge| edge.relation == Relationship::Implements)
+                    .map(|edge| edge.from.as_str())
+                    .collect();
+                self.nodes
+                    .values()
+                    .filter(|node| {
+                        (node.is_body
+                            && node.subject.body_id.is_none()
+                            && !node.id.starts_with("anchor:"))
+                            || nodes_with_occurrences.contains(node.id.as_str())
+                            || nodes_with_implements.contains(node.id.as_str())
+                    })
+                    .map(|node| node.id.clone())
+                    .collect()
+            }
             AnalysisScope::Subject { subject } => vec![self.resolve_selector(subject)?],
         };
         let mut queue: VecDeque<String> = roots.into();
         let mut visited_relationships = BTreeSet::new();
+        let mut selected_body_count: u64 = 0;
         while let Some(node) = queue.pop_front() {
             if self.selected.contains(&node) {
                 continue;
             }
             let adding_body = self.nodes.get(&node).is_some_and(|node| node.is_body);
-            let selected_bodies = self
-                .selected
-                .iter()
-                .filter(|id| self.nodes.get(*id).is_some_and(|node| node.is_body))
-                .count() as u64;
-            if adding_body && selected_bodies >= self.input.budgets.max_bodies {
+            if adding_body && selected_body_count >= self.input.budgets.max_bodies {
                 self.fixed = false;
                 self.unprocessed.insert(node);
                 continue;
             }
             self.selected.insert(node.clone());
+            if adding_body {
+                selected_body_count += 1;
+            }
             let outgoing: Vec<_> = self
-                .edges
-                .values()
-                .filter(|edge| edge.from == node)
+                .edges_by_source
+                .get(&node)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| self.edges.get(id))
                 .cloned()
                 .collect();
             for edge in outgoing {
@@ -1441,11 +1476,13 @@ impl<'a> Builder<'a> {
         }
         while let Some(child) = queue.pop_front() {
             let incoming: Vec<_> = self
-                .edges
-                .values()
+                .edges_by_target
+                .get(&child.subject_id)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| self.edges.get(id))
                 .filter(|edge| {
-                    edge.to == child.subject_id
-                        && edge.relation != Relationship::Mention
+                    edge.relation != Relationship::Mention
                         && self.selected.contains(&edge.from)
                         && self.active_relationships.contains(&edge.id)
                 })
@@ -1494,15 +1531,21 @@ impl<'a> Builder<'a> {
             }
         }
         // Issues follow the same possible-execution edges to callers.
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for edge in self.edges.values().filter(|edge| {
+        // Pre-filter active edges once; the fixed-point loop body is then O(active_edges).
+        let issue_edges: Vec<_> = self
+            .active_relationships
+            .iter()
+            .filter_map(|id| self.edges.get(id))
+            .filter(|edge| {
                 edge.relation != Relationship::Mention
                     && self.selected.contains(&edge.from)
                     && self.selected.contains(&edge.to)
-                    && self.active_relationships.contains(&edge.id)
-            }) {
+            })
+            .collect();
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for edge in &issue_edges {
                 let inherited = self.issues.get(&edge.to).cloned().unwrap_or_default();
                 let target = self.issues.entry(edge.from.clone()).or_default();
                 for issue in inherited {
