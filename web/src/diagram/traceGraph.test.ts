@@ -33,38 +33,36 @@ describe('traceGraph', () => {
     expect(g.edges[0]).toMatchObject({ from: 'HTML#navigate', to: 'DOM#concept-tree', kind: 'path' });
   });
 
-  it('step entries add a step node clustered under the section with section→step edge', () => {
+  it('a step entry is one node naming the algorithm and the step, with no separate section node', () => {
     const entries: TraceEntry[] = [
       { id: '1', spec: 'HTML', anchor: 'navigate', step_path: [3, 1] },
+    ];
+    const g = traceGraph(entries, noTitles);
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]).toMatchObject({
+      id: 'HTML#navigate@3.1',
+      kind: 'step',
+      label: 'HTML#navigate · step 3.1',
+      href: '#/HTML/navigate?step=3.1',
+    });
+    expect(g.edges).toHaveLength(0);
+  });
+
+  it('steps of different algorithms link directly step to step', () => {
+    const entries: TraceEntry[] = [
+      { id: '1', spec: 'HTML', anchor: 'navigate', step_path: [24, 9, 1] },
+      { id: '2', spec: 'HTML', anchor: 'attempt-to-populate-the-history-entrys-document', step_path: [5] },
+      { id: '3', spec: 'HTML', anchor: 'attempt-to-populate-the-history-entrys-document', step_path: [5] },
     ];
     const g = traceGraph(entries, noTitles);
     expect(g.nodes).toHaveLength(2);
-
-    const sec = g.nodes.find((n) => n.id === 'HTML#navigate');
-    expect(sec).toBeDefined();
-    expect(sec!.kind).toBe('section');
-
-    const step = g.nodes.find((n) => n.id === 'HTML#navigate@3.1');
-    expect(step).toBeDefined();
-    expect(step!.kind).toBe('step');
-    expect(step!.label).toBe('step 3.1');
-    expect(step!.cluster).toBe('HTML#navigate');
-    expect(step!.href).toBe('#/HTML/navigate?step=3.1');
-
-    expect(g.edges).toHaveLength(1);
-    expect(g.edges[0]).toMatchObject({ from: 'HTML#navigate', to: 'HTML#navigate@3.1', kind: 'path' });
-  });
-
-  it('the section→step edge is not duplicated for repeated step entries', () => {
-    const entries: TraceEntry[] = [
-      { id: '1', spec: 'HTML', anchor: 'navigate', step_path: [3, 1] },
-      { id: '2', spec: 'HTML', anchor: 'navigate', step_path: [3, 1] },
-    ];
-    const g = traceGraph(entries, noTitles);
-    const secStepEdges = g.edges.filter(
-      (e) => e.from === 'HTML#navigate' && e.to === 'HTML#navigate@3.1',
-    );
-    expect(secStepEdges).toHaveLength(1);
+    expect(g.edges).toEqual([
+      {
+        from: 'HTML#navigate@24.9.1',
+        to: 'HTML#attempt-to-populate-the-history-entrys-document@5',
+        kind: 'path',
+      },
+    ]);
   });
 
   it('consecutive entries get one path edge each, self-loops skipped', () => {

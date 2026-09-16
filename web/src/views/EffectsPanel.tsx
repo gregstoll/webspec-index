@@ -20,6 +20,8 @@ interface Props {
   focusEffectId?: string;
   /** Summary only: counts and issues, no effect list. Used while no step is selected. */
   compact?: boolean;
+  /** Show only these effect ids of the section's analysis (the selected step's effects). */
+  onlyEffects?: readonly string[];
 }
 
 type ExplainCache =
@@ -37,9 +39,13 @@ export function EffectsPanel({
   onStepEffects,
   focusEffectId,
   compact = false,
+  onlyEffects,
 }: Props) {
-  const stepPathKey = selectedStepPath ? selectedStepPath.join(',') : '';
-  const subject: SubjectSelector = selectedStepPath
+  // With `onlyEffects` the panel shows a slice of the whole section's analysis (the
+  // effects attributed to the selected step), so it queries the section, not the step.
+  const stepScoped = selectedStepPath !== undefined && onlyEffects === undefined;
+  const stepPathKey = stepScoped ? selectedStepPath.join(',') : '';
+  const subject: SubjectSelector = stepScoped
     ? { spec, anchor, step_path: selectedStepPath }
     : { spec, anchor };
 
@@ -180,7 +186,10 @@ export function EffectsPanel({
   function renderBody() {
     if (effectsState.kind !== 'ok') return null;
 
-    const { effects, issues } = effectsState.value.result;
+    const { issues } = effectsState.value.result;
+    const effects = onlyEffects
+      ? effectsState.value.result.effects.filter((e) => onlyEffects.includes(e.id))
+      : effectsState.value.result.effects;
 
     if (compact) {
       const explain = explainCache.kind === 'ok' ? explainCache.value : null;

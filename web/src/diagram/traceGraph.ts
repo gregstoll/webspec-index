@@ -3,30 +3,26 @@ import type { TitleEntry } from '../trace/titles';
 import type { DiagramGraph, DiagramNode, DiagramEdge } from './model';
 import { routeToHash } from '../router';
 
-function sectionId(spec: string, anchor: string): string {
-  return `${spec}#${anchor}`;
+function entryId(entry: TraceEntry): string {
+  const base = `${entry.spec}#${entry.anchor}`;
+  return entry.step_path && entry.step_path.length > 0 ? `${base}@${entry.step_path.join('.')}` : base;
 }
 
-function stepId(spec: string, anchor: string, step_path: number[]): string {
-  return `${spec}#${anchor}@${step_path.join('.')}`;
-}
-
-function sectionHref(spec: string, anchor: string): string {
-  return routeToHash({ kind: 'section', spec, anchor });
-}
-
-function stepHref(spec: string, anchor: string, step_path: number[]): string {
-  return routeToHash({ kind: 'section', spec, anchor, step: step_path });
+function entryHref(entry: TraceEntry): string {
+  return entry.step_path && entry.step_path.length > 0
+    ? routeToHash({ kind: 'section', spec: entry.spec, anchor: entry.anchor, step: entry.step_path })
+    : routeToHash({ kind: 'section', spec: entry.spec, anchor: entry.anchor });
 }
 
 /**
  * Build a DiagramGraph from an ordered list of trace entries.
  *
- * - One `section` node per distinct SPEC#anchor.
- * - An entry with step_path adds a `step` node clustered under its section,
- *   plus a path edge section → step (deduped).
- * - Consecutive entries are linked with a `path` edge (self-loops skipped).
- * - Notes on section entries become the node sublabel (last note wins on collision).
+ * - One node per distinct entry target: a section (`SPEC#anchor`) or a step of it
+ *   (`SPEC#anchor@3.1`, labelled "SPEC#anchor · step 3.1"). Steps are not hung
+ *   below a separate section node; the path runs directly from step to step.
+ * - Consecutive entries are linked with a `path` edge (self-loops skipped, deduped).
+ * - The note of an entry becomes its node's sublabel (last note wins); a section
+ *   node without a note shows the cached title instead.
  */
 export function traceGraph(
   entries: readonly TraceEntry[],
@@ -44,56 +40,28 @@ export function traceGraph(
     edges.push({ from, to, kind: 'path' });
   }
 
-  function ensureSection(spec: string, anchor: string, note?: string): string {
-    const id = sectionId(spec, anchor);
+  const ids: string[] = [];
+  for (const entry of entries) {
+    const id = entryId(entry);
+    const key = `${entry.spec}#${entry.anchor}`;
+    const isStep = entry.step_path !== undefined && entry.step_path.length > 0;
     if (!nodes.has(id)) {
-      const cacheKey = `${spec}#${anchor}`;
-      const cached = titles.get(cacheKey);
+      const cached = titles.get(key);
+      const title = cached?.title !== key ? cached?.title : undefined;
       nodes.set(id, {
         id,
-        label: cacheKey,
-        sublabel: cached?.title !== cacheKey ? cached?.title : undefined,
-        kind: 'section',
-        href: sectionHref(spec, anchor),
+        label: isStep ? `${key} · step ${entry.step_path!.join('.')}` : key,
+        sublabel: entry.note ?? title,
+        kind: isStep ? 'step' : 'section',
+        href: entryHref(entry),
       });
+    } else if (entry.note !== undefined) {
+      nodes.set(id, { ...nodes.get(id)!, sublabel: entry.note });
     }
-    if (note !== undefined) {
-      const existing = nodes.get(id)!;
-      nodes.set(id, { ...existing, sublabel: note });
-    }
-    return id;
+    ids.push(id);
   }
 
-  const nodeIdForEntry: string[] = [];
-
-  for (const entry of entries) {
-    const secId = ensureSection(entry.spec, entry.anchor, entry.step_path ? undefined : entry.note);
-
-    if (entry.step_path && entry.step_path.length > 0) {
-      const sId = stepId(entry.spec, entry.anchor, entry.step_path);
-      if (!nodes.has(sId)) {
-        nodes.set(sId, {
-          id: sId,
-          label: `step ${entry.step_path.join('.')}`,
-          sublabel: entry.note,
-          kind: 'step',
-          href: stepHref(entry.spec, entry.anchor, entry.step_path),
-          cluster: secId,
-        });
-      } else if (entry.note !== undefined) {
-        const existing = nodes.get(sId)!;
-        nodes.set(sId, { ...existing, sublabel: entry.note });
-      }
-      addEdge(secId, sId);
-      nodeIdForEntry.push(sId);
-    } else {
-      nodeIdForEntry.push(secId);
-    }
-  }
-
-  for (let i = 0; i + 1 < nodeIdForEntry.length; i++) {
-    addEdge(nodeIdForEntry[i], nodeIdForEntry[i + 1]);
-  }
+  for (let i = 0; i + 1 < ids.length; i++) addEdge(ids[i], ids[i + 1]);
 
   return { nodes: [...nodes.values()], edges };
 }

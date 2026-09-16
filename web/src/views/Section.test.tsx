@@ -110,6 +110,10 @@ describe('Section', () => {
     expect(window.location.hash).toBe('#/HTML/navigate?step=2');
     rerender(<Section client={new MockClient()} spec="HTML" anchor="navigate" selectedStepPath={[2]} />);
     await waitFor(() => {
+      const items = container.querySelectorAll('aside.section-aside .effects-item');
+      expect([...items].map((el) => el.id)).toEqual(['effect-effect-2']);
+    });
+    await waitFor(() => {
       const item = container.querySelector('aside.section-aside #effect-effect-2');
       expect(item?.textContent).toContain('Hide paths');
     });

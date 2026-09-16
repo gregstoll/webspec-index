@@ -272,6 +272,7 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
             spec={result.spec}
             anchor={result.anchor}
             selectedStepPath={selectedStepPath}
+            onlyEffects={(stepFx?.get(stepKey ?? '') ?? []).map((e) => e.effect.id)}
             focusEffectId={focusEffectId}
             onClearStep={() => handleStepSelect(undefined)}
           />
