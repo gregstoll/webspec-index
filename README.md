@@ -80,12 +80,20 @@ webspec-index effects "HTML#navigate" --summary-only --recompute
 webspec-index effects --all --summary-only
 
 # Export a chunked read-only database for the web UI
-webspec-index export-web --out DIR   # chunked read-only DB + manifest for the web UI
+webspec-index export-web --out DIR                      # all providers
+webspec-index export-web --out DIR --specs html,dom     # only HTML and DOM
 
 # Update specs to latest versions
 webspec-index update
+webspec-index update --force            # re-parse from on-disk HTML cache (no network)
+webspec-index update --force --refetch  # re-download everything
 webspec-index update --providers whatwg,w3c,tc39   # limit to specific providers
 webspec-index update --effects off  # skip the post-update effects refresh
+
+# Re-parse from the on-disk HTML cache (no network)
+webspec-index reparse
+webspec-index reparse --spec HTML
+webspec-index reparse --providers whatwg,w3c
 ```
 
 Effect results describe behavior the selected specification subject may cause. A

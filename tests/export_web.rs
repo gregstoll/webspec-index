@@ -51,6 +51,7 @@ fn seeded_db(path: &Path) -> rusqlite::Connection {
 fn options() -> ExportOptions {
     ExportOptions {
         providers: vec!["whatwg".into(), "w3c".into(), "tc39".into()],
+        specs: vec![],
         chunk_size: 64 * 1024,
         max_total_bytes: 50 * 1024 * 1024,
         page_size: 16384,
@@ -180,4 +181,35 @@ fn export_fails_the_size_gate() {
     opts.max_total_bytes = 1024;
     let err = export_web(&src, &dir.path().join("web"), &opts).unwrap_err();
     assert!(err.to_string().contains("exceeds"), "{err}");
+}
+
+#[test]
+fn export_specs_filter_keeps_only_listed_specs() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("index.db");
+    let conn = seeded_db(&src);
+    // Seed a second spec (DOM, provider=whatwg). Inserting into specs/snapshots
+    // bumps the effects_generation trigger, so update the effect_run to match.
+    let dom = db::write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
+        .unwrap();
+    let dom_snap = db::write::insert_snapshot(&conn, dom, "hash:dddd", "2026-09-01").unwrap();
+    conn.execute(
+        "INSERT INTO sections(snapshot_id, anchor, title, content_text, section_type) VALUES (?1, 'concept-tree', 'Tree', 'body', 'heading')",
+        [dom_snap],
+    )
+    .unwrap();
+    // Re-stamp effect_run with the new generation so ensure_prepared_effects passes.
+    conn.execute_batch(
+        "UPDATE effect_runs SET generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation');",
+    )
+    .unwrap();
+    drop(conn);
+
+    let out = dir.path().join("web");
+    let mut opts = options();
+    opts.specs = vec!["html".into()]; // filter to HTML only (case-insensitive)
+    let manifest = export_web(&src, &out, &opts).unwrap();
+
+    assert_eq!(manifest.specs.len(), 1, "only HTML should be in the export");
+    assert_eq!(manifest.specs[0].name, "HTML");
 }

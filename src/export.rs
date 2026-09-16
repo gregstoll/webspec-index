@@ -13,6 +13,9 @@ const DEFAULT_PROVIDERS: &[&str] = &["whatwg", "w3c", "tc39"];
 
 pub struct ExportOptions {
     pub providers: Vec<String>,
+    /// If non-empty, only specs whose canonical name (upper-case) matches one
+    /// of these strings are exported. Case-insensitive.
+    pub specs: Vec<String>,
     pub chunk_size: u64,
     pub max_total_bytes: u64,
     pub page_size: u32,
@@ -22,6 +25,7 @@ impl Default for ExportOptions {
     fn default() -> Self {
         Self {
             providers: DEFAULT_PROVIDERS.iter().map(|s| s.to_string()).collect(),
+            specs: Vec::new(),
             chunk_size: 50 * 1024 * 1024,
             max_total_bytes: 900 * 1024 * 1024,
             page_size: 16384,
@@ -65,7 +69,7 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
     // would mark the prepared run stale in the export. The run stays valid for the
     // specs that remain, so the counter is put back afterwards.
     let generation = crate::db::effects::generation(&conn)?;
-    prune(&conn, &options.providers)?;
+    prune(&conn, &options.providers, &options.specs)?;
     conn.execute_batch(
         "DROP TABLE IF EXISTS effect_structures;
          DROP TABLE IF EXISTS effect_local_matches;
@@ -107,15 +111,27 @@ fn ensure_prepared_effects(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn prune(conn: &Connection, providers: &[String]) -> Result<()> {
-    let placeholders = vec!["?"; providers.len()].join(", ");
+fn prune(conn: &Connection, providers: &[String], specs: &[String]) -> Result<()> {
+    let prov_placeholders = vec!["?"; providers.len()].join(", ");
+    let mut params: Vec<String> = providers.to_vec();
+
+    // When a spec filter is given, build a second IN clause on the spec name
+    // (case-insensitive via UPPER()).
+    let spec_clause = if specs.is_empty() {
+        String::new()
+    } else {
+        let spec_placeholders = vec!["?"; specs.len()].join(", ");
+        params.extend(specs.iter().map(|s| s.to_uppercase()));
+        format!(" OR UPPER(sp.name) NOT IN ({spec_placeholders})")
+    };
+
     let sql = format!(
         "CREATE TEMP TABLE doomed_snapshots AS \
          SELECT sn.id FROM snapshots sn JOIN specs sp ON sp.id = sn.spec_id \
          WHERE sn.pr_number IS NOT NULL OR sn.sha NOT LIKE 'hash:%' \
-         OR sp.provider NOT IN ({placeholders})"
+         OR sp.provider NOT IN ({prov_placeholders}){spec_clause}"
     );
-    conn.execute(&sql, rusqlite::params_from_iter(providers))?;
+    conn.execute(&sql, rusqlite::params_from_iter(&params))?;
     conn.execute_batch(
         "DELETE FROM sections WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM refs WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
