@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/preact';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 import { Section } from './Section';
 import { MockClient } from '../api/client';
 
@@ -98,9 +101,29 @@ describe('Section', () => {
   });
 });
 
+describe('Section refs graph toggle', () => {
+  beforeEach(() => {
+    vi.spyOn(SVGSVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  });
+
+  it('clicking "Graph" mounts an svg[role="img"]', async () => {
+    render(<Section client={new MockClient()} spec="HTML" anchor="navigate" />);
+    await waitFor(() => {
+      expect(screen.getByText('navigate')).toBeTruthy();
+    });
+    const toggleBtn = screen.getByRole('button', { name: 'Graph' });
+    fireEvent.click(toggleBtn);
+    await waitFor(() => {
+      expect(document.querySelector('svg[role="img"]')).toBeTruthy();
+    });
+  });
+});
+
 describe('Section step selection', () => {
   beforeEach(() => {
-    // Reset hash before each test
     window.location.hash = '#/HTML/navigate';
   });
 

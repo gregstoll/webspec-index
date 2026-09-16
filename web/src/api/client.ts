@@ -1,4 +1,4 @@
-import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry, EffectSummaryResult, ExplainEffectsResult } from './types';
+import type { Request, Response, ApiError, QueryResult, SearchResult, ListEntry, SpecEntry, EffectSummaryResult, ExplainEffectsResult, GraphResult } from './types';
 
 export interface WebspecClient {
   request(req: Request): Promise<Response>;
@@ -142,6 +142,30 @@ const MOCK_HTML_HEADINGS: ListEntry[] = [
   { anchor: 'navigate', title: 'navigate', depth: 3, parent: 'browsing-the-web' },
   { anchor: 'beginning-navigation', title: 'Beginning navigation', depth: 3, parent: 'browsing-the-web', number: '7.4.2' },
 ];
+
+// --- Graph fixtures ---
+
+export const MOCK_GRAPH_NAVIGATE: GraphResult = {
+  root: { spec: 'HTML', anchor: 'navigate' },
+  direction: 'both',
+  max_depth: 1,
+  max_nodes: 60,
+  truncated: false,
+  nodes: [
+    { id: 'HTML#navigate', spec: 'HTML', anchor: 'navigate', title: 'navigate', type: 'algorithm' },
+    { id: 'DOM#concept-tree', spec: 'DOM', anchor: 'concept-tree', title: 'Trees' },
+    { id: 'FETCH#concept-fetch', spec: 'FETCH', anchor: 'concept-fetch', title: 'fetch' },
+    { id: 'HTML#the-a-element', spec: 'HTML', anchor: 'the-a-element', title: 'The a element' },
+    { id: 'HTML#form-submission-algorithm', spec: 'HTML', anchor: 'form-submission-algorithm', title: 'Form submission' },
+  ],
+  edges: [
+    { from: 'HTML#navigate', to: 'DOM#concept-tree', kind: 'reference' },
+    { from: 'HTML#navigate', to: 'FETCH#concept-fetch', kind: 'reference' },
+    { from: 'HTML#the-a-element', to: 'HTML#navigate', kind: 'reference' },
+    { from: 'HTML#form-submission-algorithm', to: 'HTML#navigate', kind: 'reference' },
+    { from: 'DOM#concept-tree', to: 'HTML#navigate', kind: 'reference' },
+  ],
+};
 
 // --- Effects fixtures ---
 
@@ -290,6 +314,14 @@ export class MockClient implements WebspecClient {
           return { type: 'effects_explain', result: MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE };
         }
         return { type: 'error', code: 'subject_not_found', message: 'No prepared analysis for this subject' };
+      }
+
+      case 'graph': {
+        const target = req.target;
+        if (target === 'HTML#navigate') {
+          return { type: 'graph', result: MOCK_GRAPH_NAVIGATE };
+        }
+        return { type: 'graph', result: { ...MOCK_GRAPH_NAVIGATE, root: { spec: 'HTML', anchor: target }, nodes: [], edges: [], truncated: false } };
       }
 
       default:

@@ -5,6 +5,7 @@ import { routeToHash } from '../router';
 import { useRequest } from '../hooks/useRequest';
 import { Loading, ErrorBanner } from './Status';
 import { EffectsPanel } from './EffectsPanel';
+import { RefsGraph } from './RefsGraph';
 import { remember } from '../trace/titles';
 import { annotateSteps } from '../content/steps';
 import { effectLabel } from '../effects/label';
@@ -18,8 +19,27 @@ interface Props {
   selectedStepPath?: number[];
 }
 
+const REFS_GRAPH_KEY = 'refsGraph';
+
+function readGraphPref(): boolean {
+  try {
+    return localStorage.getItem(REFS_GRAPH_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeGraphPref(v: boolean): void {
+  try {
+    localStorage.setItem(REFS_GRAPH_KEY, v ? 'true' : 'false');
+  } catch {
+    // ignore
+  }
+}
+
 export function Section({ client, spec, anchor, selectedStepPath }: Props) {
   const [stepFx, setStepFx] = useState<StepEffects | undefined>(undefined);
+  const [graphOn, setGraphOn] = useState(readGraphPref);
   const state = useRequest<{ type: 'query'; result: import('../api/types').QueryResult }>(
     client,
     { type: 'query', target: `${spec}#${anchor}`, render: 'html' },
@@ -128,6 +148,23 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         <pre class="section-content">{result.content}</pre>
       ) : null}
 
+      <div class="refs-graph-toggle-row">
+        <button
+          type="button"
+          class={`refs-graph-toggle${graphOn ? ' refs-graph-toggle--on' : ''}`}
+          aria-pressed={graphOn}
+          onClick={() => {
+            const next = !graphOn;
+            setGraphOn(next);
+            writeGraphPref(next);
+          }}
+        >
+          Graph
+        </button>
+      </div>
+      {graphOn && (
+        <RefsGraph client={client} spec={result.spec} anchor={result.anchor} />
+      )}
       <RefSection heading="Outgoing references" refs={result.outgoing_refs} />
       <RefSection heading="Incoming references" refs={result.incoming_refs} />
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useId } from 'preact/hooks';
+import { useEffect, useRef, useState, useId, useCallback } from 'preact/hooks';
 import type { DiagramGraph } from './model';
 import { layoutGraph } from './layout';
 import type { Layout, LayoutNode, LayoutEdge } from './layout';
@@ -320,13 +320,29 @@ export function Diagram({
 
   const { transform, fit, zoomBy } = useViewport(svgRef);
 
+  // Fit only on the first layout for this Diagram instance and when rankdir changes.
+  const fittedRef = useRef(false);
+  const prevRankdir = useRef(rankdir);
+
+  const fitOnce = useCallback(
+    (l: Layout) => {
+      const rankdirChanged = rankdir !== prevRankdir.current;
+      if (!fittedRef.current || rankdirChanged) {
+        fittedRef.current = true;
+        prevRankdir.current = rankdir;
+        fit(l);
+      }
+    },
+    [rankdir, fit]
+  );
+
   useEffect(() => {
     let cancelled = false;
     setLayout(null);
     layoutGraph(graph, { rankdir }).then((l) => {
       if (!cancelled) {
         setLayout(l);
-        fit(l);
+        fitOnce(l);
       }
     });
     return () => {

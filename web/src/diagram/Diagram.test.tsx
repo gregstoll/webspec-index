@@ -128,6 +128,40 @@ describe('Diagram', () => {
     expect(screen.getByText('Nothing to show')).toBeTruthy();
   });
 
+  it('adding a node to graph does not reset the viewport transform', async () => {
+    const { rerender } = render(<Diagram graph={graphWithHref} ariaLabel="Test" />);
+    // Wait for initial layout
+    await waitFor(() => {
+      expect(document.querySelector('svg[role="img"]')).toBeTruthy();
+      expect(document.querySelector('.diagram-loading')).toBeFalsy();
+    });
+
+    const svg = document.querySelector<SVGSVGElement>('svg[role="img"]')!;
+
+    // Simulate a wheel event to change the viewport transform
+    fireEvent.wheel(svg, { deltaY: -100, clientX: 400, clientY: 300 });
+
+    // Capture transform after wheel
+    const gEl = svg.querySelector('g[transform]');
+    const transformAfterWheel = gEl?.getAttribute('transform') ?? '';
+
+    // Add a new node (simulates expand)
+    const expandedGraph: DiagramGraph = {
+      nodes: [...graphWithHref.nodes, { id: 'd', label: 'New D', kind: 'section', href: '#/DOM/d' }],
+      edges: [...graphWithHref.edges, { from: 'a', to: 'd', kind: 'reference' }],
+    };
+    rerender(<Diagram graph={expandedGraph} ariaLabel="Test" />);
+
+    // Wait for re-layout
+    await waitFor(() => {
+      expect(document.querySelector('.diagram-loading')).toBeFalsy();
+    });
+
+    // Transform must be unchanged
+    const gElAfter = svg.querySelector('g[transform]');
+    expect(gElAfter?.getAttribute('transform')).toBe(transformAfterWheel);
+  });
+
   it('hovering a node adds is-hot to neighbours', async () => {
     render(<Diagram graph={graphWithHref} ariaLabel="Test" />);
     await waitFor(() => {
