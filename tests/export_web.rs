@@ -134,6 +134,18 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         .query_row("SELECT artifact_json FROM effect_runs", [], |r| r.get(0))
         .unwrap();
     assert_eq!(artifact, "");
+    let prepared_runs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM effect_runs
+             WHERE generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        prepared_runs, 1,
+        "pruning must not mark the prepared run stale"
+    );
     let has_index: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_refs_to'",

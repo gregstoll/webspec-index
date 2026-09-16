@@ -61,6 +61,10 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
     drop(source);
 
     let conn = Connection::open(&work)?;
+    // Pruning fires the effects invalidation triggers on specs and snapshots, which
+    // would mark the prepared run stale in the export. The run stays valid for the
+    // specs that remain, so the counter is put back afterwards.
+    let generation = crate::db::effects::generation(&conn)?;
     prune(&conn, &options.providers)?;
     conn.execute_batch(
         "DROP TABLE IF EXISTS effect_structures;
@@ -68,6 +72,10 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
          DROP TABLE IF EXISTS update_checks;
          UPDATE effect_runs SET artifact_json = '';
          INSERT INTO sections_fts(sections_fts) VALUES('optimize');",
+    )?;
+    conn.execute(
+        "UPDATE meta SET value = ?1 WHERE key = 'effects_generation'",
+        [generation],
     )?;
     let specs = exported_specs(&conn)?;
     conn.execute_batch(&format!(
