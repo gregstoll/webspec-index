@@ -180,18 +180,7 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
             ))}
           </ul>
         ) : null}
-        {issues.length > 0 && (
-          <ul class="effects-issues">
-            {issues.map((issue, i) => (
-              <li key={i} class="effects-issue">
-                {issue.code.replace(/_/g, ' ')}
-                {issue.site?.url && (
-                  <> — <a href={issue.site.url} target="_blank" rel="noopener">{issue.site.url}</a></>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        {issues.length > 0 && <IssueSummary issues={issues} />}
       </>
     );
   }
@@ -220,5 +209,43 @@ export function EffectsPanel({ client, spec, anchor, selectedStepPath, onClearSt
         </div>
       )}
     </section>
+  );
+}
+
+const ISSUE_LIST_CAP = 30;
+
+// The analysis reports one issue per unresolved site, which runs into the thousands
+// for large algorithms. Show the tally per code, and the first few details on demand.
+function IssueSummary({ issues }: { issues: EffectSummaryResult['issues'] }) {
+  const tally = new Map<string, number>();
+  for (const issue of issues) tally.set(issue.code, (tally.get(issue.code) ?? 0) + 1);
+  const parts = [...tally.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, n]) => `${code.replace(/_/g, ' ')} ×${n}`);
+  return (
+    <details class="effects-issues">
+      <summary>
+        {issues.length} analysis issue{issues.length === 1 ? '' : 's'}: {parts.join(', ')}
+      </summary>
+      <ul>
+        {issues.slice(0, ISSUE_LIST_CAP).map((issue, i) => (
+          <li key={i} class="effects-issue">
+            <code>{issue.code}</code>
+            {issue.message && <> — {issue.message}</>}
+            {issue.site?.url && (
+              <>
+                {' '}
+                <a href={issue.site.url} target="_blank" rel="noopener">
+                  site
+                </a>
+              </>
+            )}
+          </li>
+        ))}
+        {issues.length > ISSUE_LIST_CAP && (
+          <li class="effects-issue">… {issues.length - ISSUE_LIST_CAP} more</li>
+        )}
+      </ul>
+    </details>
   );
 }

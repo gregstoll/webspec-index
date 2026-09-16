@@ -510,8 +510,20 @@ code, pre, .mono {
   padding: var(--space-2) 0;
 }
 
-/* Step selection in content */
+/* Step selection in content: the button sits in the gutter left of the step number so
+   the step text keeps flowing on the number's line. */
+.section-content li[data-step-path] {
+  position: relative;
+}
+
+.section-content li[data-step-path] > p:first-of-type {
+  margin-top: 0;
+}
+
 .step-select-btn {
+  position: absolute;
+  left: -2.75em;
+  top: 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -522,7 +534,6 @@ code, pre, .mono {
   line-height: inherit;
   opacity: 0;
   transition: opacity 0.1s;
-  vertical-align: baseline;
   font-family: inherit;
 }
 
@@ -544,13 +555,21 @@ code, pre, .mono {
 }
 
 .effects-issues {
-  list-style: none;
   margin-top: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.effects-issues summary {
+  cursor: pointer;
+}
+.effects-issues ul {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.effects-issue {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
+.effects-issue code {
+  font-size: inherit;
 }

@@ -54,4 +54,12 @@ describe('EffectsPanel', () => {
       expect(screen.getByText('No prepared analysis for this subject')).toBeTruthy();
     });
   });
+
+  it('tallies analysis issues per code instead of listing them all up front', async () => {
+    render(<EffectsPanel client={new MockClient()} spec="HTML" anchor="navigate" />);
+    const summary = await screen.findByText(/3 analysis issues/);
+    expect(summary.textContent).toContain('unresolved invocation ×2');
+    expect(summary.textContent).toContain('missing spec ×1');
+    expect(summary.closest('details')?.open).toBe(false);
+  });
 });

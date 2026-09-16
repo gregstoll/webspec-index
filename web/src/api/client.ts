@@ -171,7 +171,11 @@ const MOCK_EFFECTS_HTML_NAVIGATE: EffectSummaryResult = {
     analysis_id: 'analysis-1',
   },
   defined_bodies: [],
-  issues: [],
+  issues: [
+    { code: 'unresolved_invocation', message: 'call to "fetch" could not be resolved' },
+    { code: 'unresolved_invocation', message: 'call to "queue a task" could not be resolved' },
+    { code: 'missing_spec', message: 'spec WEBDRIVER is not indexed' },
+  ],
 };
 
 const MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE: ExplainEffectsResult = {
