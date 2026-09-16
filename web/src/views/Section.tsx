@@ -8,6 +8,7 @@ import { EffectsPanel } from './EffectsPanel';
 import { remember } from '../trace/titles';
 import { annotateSteps } from '../content/steps';
 import { effectLabel } from '../effects/label';
+import { SectionNumber } from './SectionNumber';
 import type { StepEffects } from '../effects/inline';
 
 interface Props {
@@ -65,7 +66,10 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         </a>
       </div>
 
-      <h1 class="section-title">{result.title ?? result.anchor}</h1>
+      <h1 class="section-title">
+        <SectionNumber number={result.number} />
+        {result.title ?? result.anchor}
+      </h1>
       <p class="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
         {result.spec}#{result.anchor}
       </p>
@@ -74,19 +78,28 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         {nav.parent && (
           <span class="nav-strip-item">
             <span class="nav-label">parent</span>
-            <a href={`#/${result.spec}/${nav.parent.anchor}`}>{nav.parent.title ?? nav.parent.anchor}</a>
+            <a href={`#/${result.spec}/${nav.parent.anchor}`}>
+              <SectionNumber number={nav.parent.number} />
+              {nav.parent.title ?? nav.parent.anchor}
+            </a>
           </span>
         )}
         {nav.prev && (
           <span class="nav-strip-item">
             <span class="nav-label">← prev</span>
-            <a href={`#/${result.spec}/${nav.prev.anchor}`}>{nav.prev.title ?? nav.prev.anchor}</a>
+            <a href={`#/${result.spec}/${nav.prev.anchor}`}>
+              <SectionNumber number={nav.prev.number} />
+              {nav.prev.title ?? nav.prev.anchor}
+            </a>
           </span>
         )}
         {nav.next && (
           <span class="nav-strip-item">
             <span class="nav-label">next →</span>
-            <a href={`#/${result.spec}/${nav.next.anchor}`}>{nav.next.title ?? nav.next.anchor}</a>
+            <a href={`#/${result.spec}/${nav.next.anchor}`}>
+              <SectionNumber number={nav.next.number} />
+              {nav.next.title ?? nav.next.anchor}
+            </a>
           </span>
         )}
       </nav>
@@ -95,7 +108,10 @@ export function Section({ client, spec, anchor, selectedStepPath }: Props) {
         <ul class="children-list" aria-label="Child sections">
           {nav.children.map((c) => (
             <li key={c.anchor}>
-              <a href={`#/${result.spec}/${c.anchor}`}>{c.title ?? c.anchor}</a>
+              <a href={`#/${result.spec}/${c.anchor}`}>
+                <SectionNumber number={c.number} />
+                {c.title ?? c.anchor}
+              </a>
             </li>
           ))}
         </ul>
