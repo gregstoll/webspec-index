@@ -170,7 +170,12 @@ fn validate_case(
     let summary = artifact.summary(&case.subject, None, &artifact.sites)?;
     // These are product-level checks: the condensed explanation must retain a
     // connected route and its scheduling boundary, not just the right group name.
-    let explained = artifact.explain(&case.subject, None, &ExplanationOptions::default(), &artifact.sites)?;
+    let explained = artifact.explain(
+        &case.subject,
+        None,
+        &ExplanationOptions::default(),
+        &artifact.sites,
+    )?;
     anyhow::ensure!(
         explained.summary.effects == summary.effects,
         "explaining changed detected effects"

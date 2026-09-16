@@ -17,9 +17,77 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-pub const ANALYSIS_ENGINE_VERSION: u32 = 11;
+pub const ANALYSIS_ENGINE_VERSION: u32 = 12;
 
 pub type IssueId = u32;
+
+mod anchor_nodes_serde {
+    use super::*;
+    pub fn serialize<S: serde::Serializer>(
+        map: &BTreeMap<(String, String), String>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(map.len()))?;
+        for ((spec, anchor), id) in map {
+            seq.serialize_element(&(spec, anchor, id))?;
+        }
+        seq.end()
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<(String, String), String>, D::Error> {
+        let items: Vec<(String, String, String)> = Deserialize::deserialize(deserializer)?;
+        Ok(items
+            .into_iter()
+            .map(|(spec, anchor, id)| ((spec, anchor), id))
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Graph {
+    pub engine_version: u32,
+    pub environment: String,
+    pub catalog_digest: String,
+    pub nodes: BTreeMap<String, ExecutionNode>,
+    #[serde(with = "anchor_nodes_serde")]
+    pub anchor_nodes: BTreeMap<(String, String), String>,
+    pub edges: BTreeMap<String, ExecutionEdge>,
+    pub occurrences: BTreeMap<String, LocalOccurrence>,
+    pub issue_catalog: Vec<GraphIssue>,
+    pub issues: BTreeMap<String, Vec<IssueId>>,
+    pub definitions: BTreeMap<String, Vec<String>>,
+    pub sites: BTreeMap<String, SourceSite>,
+    pub effect_categories: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub edges_by_source: HashMap<String, Vec<String>>,
+    #[serde(skip)]
+    pub edges_by_target: HashMap<String, Vec<String>>,
+}
+
+impl Graph {
+    pub fn index_edges(&mut self) {
+        self.edges_by_source.clear();
+        self.edges_by_target.clear();
+        for (id, edge) in &self.edges {
+            self.edges_by_source
+                .entry(edge.from.clone())
+                .or_default()
+                .push(id.clone());
+            self.edges_by_target
+                .entry(edge.to.clone())
+                .or_default()
+                .push(id.clone());
+        }
+    }
+}
+
+pub struct GraphInput<'a> {
+    pub sources: &'a [SourceSpec],
+    pub catalog: &'a Catalog,
+    pub environment: &'a str,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -266,6 +334,74 @@ pub struct ArtifactExplanation {
     pub explanations: Vec<EffectExplanation>,
 }
 
+pub(crate) fn build_graph(
+    input: GraphInput<'_>,
+    local_matches: Option<&super::local::LocalMatches>,
+) -> Result<Graph, RequestError> {
+    if input.environment.is_empty() {
+        return Err(RequestError::invalid("environment must be non-empty"));
+    }
+    let mut builder = GraphBuilder::new(&input);
+    builder.local_matches = local_matches;
+    builder.index_sources();
+    builder.add_catalog_declarations();
+    builder.add_structural_relationships();
+    builder.mark_opaque_anchors();
+    let effect_categories: BTreeMap<String, String> = input
+        .catalog
+        .effects
+        .iter()
+        .map(|(kind, definition)| (kind.clone(), definition.category.clone()))
+        .collect();
+    let mut graph = Graph {
+        engine_version: ANALYSIS_ENGINE_VERSION,
+        environment: input.environment.to_owned(),
+        catalog_digest: input.catalog.content_digest.clone(),
+        nodes: builder.nodes,
+        anchor_nodes: builder.anchor_nodes,
+        edges: builder.edges,
+        occurrences: builder.occurrences,
+        issue_catalog: builder.issue_catalog,
+        issues: builder.issues,
+        definitions: builder.definitions,
+        sites: builder.sites,
+        effect_categories,
+        edges_by_source: HashMap::new(),
+        edges_by_target: HashMap::new(),
+    };
+    graph.index_edges();
+    Ok(graph)
+}
+
+pub fn analyze_graph(
+    graph: &Graph,
+    scope: AnalysisScope,
+    budgets: DiscoveryBudgets,
+) -> Result<AnalysisArtifact, RequestError> {
+    budgets.validate()?;
+    if graph.edges_by_source.is_empty() && !graph.edges.is_empty() {
+        return Err(RequestError::invalid(
+            "graph edge indices are empty; call index_edges() first",
+        ));
+    }
+    let mut analysis = Analysis {
+        graph,
+        scope,
+        budgets,
+        states: BTreeMap::new(),
+        selected: BTreeSet::new(),
+        active_relationships: BTreeSet::new(),
+        unprocessed: BTreeSet::new(),
+        fixed: true,
+        extra_issues: Vec::new(),
+        extra_issue_ids: BTreeMap::new(),
+        extra_issue_digests: HashMap::new(),
+    };
+    analysis.select_scope()?;
+    analysis.propagate();
+    Ok(analysis.finish())
+}
+
 pub fn analyze(input: AnalysisInput<'_>) -> Result<AnalysisArtifact, RequestError> {
     analyze_with_local_matches(input, None)
 }
@@ -275,86 +411,49 @@ pub(crate) fn analyze_with_local_matches(
     local_matches: Option<&super::local::LocalMatches>,
 ) -> Result<AnalysisArtifact, RequestError> {
     input.budgets.validate()?;
-    if input.environment.is_empty() {
-        return Err(RequestError::invalid("environment must be non-empty"));
-    }
-    let mut builder = Builder::new(&input);
-    builder.local_matches = local_matches;
-    builder.index_sources();
-    builder.add_catalog_declarations();
-    builder.add_structural_relationships();
-    builder.build_edge_indices();
-    builder.mark_opaque_anchors();
-    builder.select_scope()?;
-    builder.propagate();
-    Ok(builder.finish())
+    let graph = build_graph(
+        GraphInput {
+            sources: input.sources,
+            catalog: input.catalog,
+            environment: input.environment,
+        },
+        local_matches,
+    )?;
+    analyze_graph(&graph, input.scope, input.budgets)
 }
 
-struct Builder<'a> {
-    input: &'a AnalysisInput<'a>,
+struct GraphBuilder<'a> {
+    input: &'a GraphInput<'a>,
     local_matches: Option<&'a super::local::LocalMatches>,
     nodes: BTreeMap<String, ExecutionNode>,
     anchor_nodes: BTreeMap<(String, String), String>,
     edges: BTreeMap<String, ExecutionEdge>,
-    /// Edge IDs grouped by the node they originate from (`edge.from`).
-    /// Built once by [`Self::build_edge_indices`] after all edges are added.
-    edges_by_source: HashMap<String, Vec<String>>,
-    /// Edge IDs grouped by their target node (`edge.to`).
-    /// Built once by [`Self::build_edge_indices`] after all edges are added.
-    edges_by_target: HashMap<String, Vec<String>>,
+    edge_triples: HashSet<(String, String, Execution)>,
     occurrences: BTreeMap<String, LocalOccurrence>,
     issue_catalog: Vec<GraphIssue>,
     issue_ids: BTreeMap<String, IssueId>,
     issues: BTreeMap<String, Vec<IssueId>>,
     definitions: BTreeMap<String, Vec<String>>,
     sites: BTreeMap<String, SourceSite>,
-    states: BTreeMap<StateKey, PropagatedState>,
-    selected: BTreeSet<String>,
-    active_relationships: BTreeSet<String>,
-    unprocessed: BTreeSet<String>,
-    fixed: bool,
     order: u64,
 }
 
-impl<'a> Builder<'a> {
-    fn new(input: &'a AnalysisInput<'a>) -> Self {
+impl<'a> GraphBuilder<'a> {
+    fn new(input: &'a GraphInput<'a>) -> Self {
         Self {
             input,
             local_matches: None,
             nodes: BTreeMap::new(),
             anchor_nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
-            edges_by_source: HashMap::new(),
-            edges_by_target: HashMap::new(),
+            edge_triples: HashSet::new(),
             occurrences: BTreeMap::new(),
             issue_catalog: Vec::new(),
             issue_ids: BTreeMap::new(),
             issues: BTreeMap::new(),
             definitions: BTreeMap::new(),
             sites: BTreeMap::new(),
-            states: BTreeMap::new(),
-            selected: BTreeSet::new(),
-            active_relationships: BTreeSet::new(),
-            unprocessed: BTreeSet::new(),
-            fixed: true,
             order: 0,
-        }
-    }
-
-    /// Build reverse-lookup indices for `edges` so that callers can look up
-    /// incoming or outgoing edges for a node in O(degree) instead of O(|E|).
-    /// Must be called after all edges have been added (i.e. after
-    /// [`Self::add_structural_relationships`] and before [`Self::select_scope`]).
-    fn build_edge_indices(&mut self) {
-        for (id, edge) in &self.edges {
-            self.edges_by_source
-                .entry(edge.from.clone())
-                .or_default()
-                .push(id.clone());
-            self.edges_by_target
-                .entry(edge.to.clone())
-                .or_default()
-                .push(id.clone());
         }
     }
 
@@ -831,6 +930,28 @@ impl<'a> Builder<'a> {
             }
         }
         self.add_implementation_relationships();
+        let mut edges_by_site_anchor: HashMap<(String, String, String), Vec<String>> =
+            HashMap::new();
+        for (id, edge) in &self.edges {
+            if let Some(site) = self.sites.get(&edge.site_key) {
+                edges_by_site_anchor
+                    .entry((
+                        site.subject.spec.clone(),
+                        site.subject.anchor.clone(),
+                        site.subject.snapshot_sha.clone(),
+                    ))
+                    .or_default()
+                    .push(id.clone());
+            }
+        }
+        for source in self.input.sources {
+            let Some(structure) = &source.structure else {
+                continue;
+            };
+            for algorithm in &structure.algorithms {
+                self.attach_algorithm_context(algorithm, &edges_by_site_anchor);
+            }
+        }
     }
 
     fn add_algorithm_relationships(&mut self, algorithm: &StructuralAlgorithm) {
@@ -1081,9 +1202,8 @@ impl<'a> Builder<'a> {
             // unresolved transfers here, and add queued only if parsing could
             // not associate it with an operation.
             let already = self
-                .edges
-                .values()
-                .any(|edge| edge.from == owner && edge.to == *remainder && edge.execution == mode);
+                .edge_triples
+                .contains(&(owner.clone(), remainder.clone(), mode));
             if !already {
                 let site = self.site_for_identity(
                     algorithm,
@@ -1106,21 +1226,27 @@ impl<'a> Builder<'a> {
                 );
             }
         }
-        self.attach_algorithm_context(algorithm);
     }
 
-    fn attach_algorithm_context(&mut self, algorithm: &StructuralAlgorithm) {
-        let updates: Vec<_> = self
-            .edges
-            .values()
-            .filter_map(|edge| {
+    fn attach_algorithm_context(
+        &mut self,
+        algorithm: &StructuralAlgorithm,
+        edges_by_site_anchor: &HashMap<(String, String, String), Vec<String>>,
+    ) {
+        let key = (
+            algorithm.source.spec.clone(),
+            algorithm.source.section_anchor.clone(),
+            algorithm.source.snapshot_sha.clone(),
+        );
+        let edge_ids = match edges_by_site_anchor.get(&key) {
+            Some(ids) => ids,
+            None => return,
+        };
+        let updates: Vec<_> = edge_ids
+            .iter()
+            .filter_map(|id| {
+                let edge = self.edges.get(id)?;
                 let site = self.sites.get(&edge.site_key)?;
-                if site.subject.spec != algorithm.source.spec
-                    || site.subject.anchor != algorithm.source.section_anchor
-                    || site.subject.snapshot_sha != algorithm.source.snapshot_sha
-                {
-                    return None;
-                }
                 let mut context: Vec<(ContextKind, SourceSite)> = Vec::new();
                 let mut context_truncated = false;
                 let mut step_chain = Vec::new();
@@ -1392,311 +1518,6 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn select_scope(&mut self) -> Result<(), RequestError> {
-        let roots: Vec<String> = match &self.input.scope {
-            AnalysisScope::All => {
-                // Build O(1) lookup sets to avoid O(N×(O+E)) scans per node.
-                let nodes_with_occurrences: HashSet<&str> = self
-                    .occurrences
-                    .values()
-                    .map(|occ| occ.subject_id.as_str())
-                    .collect();
-                let nodes_with_implements: HashSet<&str> = self
-                    .edges
-                    .values()
-                    .filter(|edge| edge.relation == Relationship::Implements)
-                    .map(|edge| edge.from.as_str())
-                    .collect();
-                self.nodes
-                    .values()
-                    .filter(|node| {
-                        (node.is_body
-                            && node.subject.body_id.is_none()
-                            && !node.id.starts_with("anchor:"))
-                            || nodes_with_occurrences.contains(node.id.as_str())
-                            || nodes_with_implements.contains(node.id.as_str())
-                    })
-                    .map(|node| node.id.clone())
-                    .collect()
-            }
-            AnalysisScope::Subject { subject } => vec![self.resolve_selector(subject)?],
-        };
-        let mut queue: VecDeque<String> = roots.into();
-        let mut visited_relationships = BTreeSet::new();
-        let mut selected_body_count: u64 = 0;
-        while let Some(node) = queue.pop_front() {
-            if self.selected.contains(&node) {
-                continue;
-            }
-            let adding_body = self.nodes.get(&node).is_some_and(|node| node.is_body);
-            if adding_body && selected_body_count >= self.input.budgets.max_bodies {
-                self.fixed = false;
-                self.unprocessed.insert(node);
-                continue;
-            }
-            self.selected.insert(node.clone());
-            if adding_body {
-                selected_body_count += 1;
-            }
-            let outgoing: Vec<_> = self
-                .edges_by_source
-                .get(&node)
-                .into_iter()
-                .flatten()
-                .filter_map(|id| self.edges.get(id))
-                .cloned()
-                .collect();
-            for edge in outgoing {
-                if visited_relationships.len() as u64 >= self.input.budgets.max_relationships {
-                    self.fixed = false;
-                    self.unprocessed.insert(edge.to);
-                    continue;
-                }
-                visited_relationships.insert(edge.id.clone());
-                self.active_relationships.insert(edge.id.clone());
-                if edge.relation != Relationship::Mention {
-                    queue.push_back(edge.to);
-                }
-            }
-        }
-        if !self.fixed {
-            for subject in self.selected.clone() {
-                self.add_issue(
-                    &subject,
-                    IssueCode::AnalysisBudget,
-                    "analysis discovery budget was exhausted",
-                    None,
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn propagate(&mut self) {
-        let occurrences: Vec<_> = self
-            .occurrences
-            .values()
-            .filter(|occ| self.selected.contains(&occ.subject_id))
-            .cloned()
-            .collect();
-        let mut queue = VecDeque::new();
-        for occurrence in occurrences {
-            let key = StateKey {
-                subject_id: occurrence.subject_id.clone(),
-                occurrence_id: occurrence.id.clone(),
-                kind: occurrence.kind.clone(),
-                params: occurrence.params.clone(),
-                execution: Execution::Inline,
-            };
-            self.states.insert(
-                key.clone(),
-                PropagatedState {
-                    key: key.clone(),
-                    derivations: vec![Derivation::Local],
-                },
-            );
-            queue.push_back(key);
-        }
-        if self.states.len() as u64 > self.input.budgets.max_states {
-            self.fixed = false;
-            for subject in self.selected.clone() {
-                self.add_issue(
-                    &subject,
-                    IssueCode::AnalysisBudget,
-                    "local effects exceeded the propagation state budget; direct effects were retained",
-                    None,
-                );
-            }
-        }
-        while let Some(child) = queue.pop_front() {
-            let incoming: Vec<_> = self
-                .edges_by_target
-                .get(&child.subject_id)
-                .into_iter()
-                .flatten()
-                .filter_map(|id| self.edges.get(id))
-                .filter(|edge| {
-                    edge.relation != Relationship::Mention
-                        && self.selected.contains(&edge.from)
-                        && self.active_relationships.contains(&edge.id)
-                })
-                .cloned()
-                .collect();
-            for edge in incoming {
-                if self.same_site_specializes_intrinsic(&edge, &child) {
-                    continue;
-                }
-                let key = StateKey {
-                    subject_id: edge.from.clone(),
-                    occurrence_id: child.occurrence_id.clone(),
-                    kind: child.kind.clone(),
-                    params: child.params.clone(),
-                    execution: edge.execution.compose(child.execution),
-                };
-                let derivation = Derivation::Edge {
-                    edge_id: edge.id.clone(),
-                    child: child.clone(),
-                };
-                if let Some(existing) = self.states.get_mut(&key) {
-                    if !existing.derivations.contains(&derivation) {
-                        existing.derivations.push(derivation);
-                    }
-                    continue;
-                }
-                let containment = edge.relation == Relationship::Invoke && edge.site_id == edge.to;
-                if !containment && self.states.len() as u64 >= self.input.budgets.max_states {
-                    self.fixed = false;
-                    self.add_issue(
-                        &edge.from,
-                        IssueCode::AnalysisBudget,
-                        "propagation state budget was exhausted",
-                        None,
-                    );
-                    continue;
-                }
-                self.states.insert(
-                    key.clone(),
-                    PropagatedState {
-                        key: key.clone(),
-                        derivations: vec![derivation],
-                    },
-                );
-                queue.push_back(key);
-            }
-        }
-        // Issues follow the same possible-execution edges to callers.
-        // Pre-filter active edges once; the fixed-point loop body is then O(active_edges).
-        let issue_edges: Vec<_> = self
-            .active_relationships
-            .iter()
-            .filter_map(|id| self.edges.get(id))
-            .filter(|edge| {
-                edge.relation != Relationship::Mention
-                    && self.selected.contains(&edge.from)
-                    && self.selected.contains(&edge.to)
-            })
-            .collect();
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for edge in &issue_edges {
-                let inherited = self.issues.get(&edge.to).cloned().unwrap_or_default();
-                let target = self.issues.entry(edge.from.clone()).or_default();
-                for issue in inherited {
-                    if !target.contains(&issue) {
-                        target.push(issue);
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if !self.fixed {
-            for subject in self.selected.clone() {
-                self.add_issue(
-                    &subject,
-                    IssueCode::AnalysisBudget,
-                    "analysis stopped before every selected subject reached a fixed point",
-                    None,
-                );
-            }
-        }
-    }
-
-    fn same_site_specializes_intrinsic(&self, edge: &ExecutionEdge, child: &StateKey) -> bool {
-        let Some(origin) = self.occurrences.get(&child.occurrence_id) else {
-            return false;
-        };
-        if origin.subject_id != edge.to {
-            return false;
-        }
-        self.occurrences.values().any(|local| {
-            let shares_rule = local.evidence.iter().any(|left| {
-                origin
-                    .evidence
-                    .iter()
-                    .any(|right| left.rule_id == right.rule_id)
-            });
-            local.subject_id == edge.from
-                && local.kind == child.kind
-                && local
-                    .evidence
-                    .iter()
-                    .any(|evidence| evidence.site.id == edge.site_id)
-                && shares_rule
-                && (local.params == child.params || params_dominate(&local.params, &child.params))
-        })
-    }
-
-    fn finish(self) -> AnalysisArtifact {
-        let processed_subjects = self
-            .selected
-            .iter()
-            .filter_map(|id| self.nodes.get(id).map(|node| node.subject.clone()))
-            .collect();
-        let unprocessed_subjects = self
-            .unprocessed
-            .iter()
-            .filter_map(|id| self.nodes.get(id).map(|node| node.subject.clone()))
-            .collect();
-        let relationship_count = self.active_relationships.len() as u64;
-        let body_count = self
-            .selected
-            .iter()
-            .filter(|id| self.nodes.get(*id).is_some_and(|node| node.is_body))
-            .count() as u64;
-        let active_edges: Vec<ExecutionEdge> = self
-            .edges
-            .into_values()
-            .filter(|edge| self.active_relationships.contains(&edge.id))
-            .collect();
-        let mut referenced_keys: BTreeSet<String> = BTreeSet::new();
-        for edge in &active_edges {
-            referenced_keys.insert(edge.site_key.clone());
-            for ctx in &edge.context {
-                referenced_keys.insert(ctx.site_key.clone());
-            }
-        }
-        for issue in &self.issue_catalog {
-            if let Some(sk) = &issue.site_key {
-                referenced_keys.insert(sk.clone());
-            }
-        }
-        let sites: BTreeMap<String, SourceSite> = self
-            .sites
-            .into_iter()
-            .filter(|(k, _)| referenced_keys.contains(k))
-            .collect();
-        AnalysisArtifact {
-            engine_version: ANALYSIS_ENGINE_VERSION,
-            environment: self.input.environment.to_owned(),
-            catalog_digest: self.input.catalog.content_digest.clone(),
-            scope: self.input.scope.clone(),
-            reached_fixed_point: self.fixed,
-            counts: AnalysisCounts {
-                bodies: body_count,
-                relationships: relationship_count,
-                states: self.states.len() as u64,
-            },
-            processed_subjects,
-            unprocessed_subjects,
-            nodes: self.nodes.into_values().collect(),
-            relationships: active_edges,
-            occurrences: self.occurrences.into_values().collect(),
-            states: self.states.into_values().collect(),
-            issues: self.issue_catalog,
-            subject_issue_ids: self.issues,
-            effect_categories: self
-                .input
-                .catalog
-                .effects
-                .iter()
-                .map(|(kind, definition)| (kind.clone(), definition.category.clone()))
-                .collect(),
-            defined_body_ids: self.definitions,
-            sites,
-        }
-    }
-
     fn intern_site(&mut self, site: SourceSite) -> String {
         let key = site_key(&site);
         self.sites.entry(key.clone()).or_insert(site);
@@ -1719,18 +1540,22 @@ impl<'a> Builder<'a> {
         let site_id = site.id.clone();
         let id = format!("rel_{}", &digest_serializable(&json!({"from": from, "to": to, "relation": relation, "site": site_id, "execution": execution})).expect("JSON digest")[..20]);
         let sk = self.intern_site(site);
-        self.edges.entry(id.clone()).or_insert(ExecutionEdge {
-            id,
-            from: from.to_owned(),
-            to: to.to_owned(),
-            relation,
-            execution,
-            site_key: sk,
-            site_id,
-            context: Vec::new(),
-            context_truncated: false,
-            boundary,
-            source_order: self.order,
+        self.edges.entry(id.clone()).or_insert_with(|| {
+            self.edge_triples
+                .insert((from.to_owned(), to.to_owned(), execution));
+            ExecutionEdge {
+                id,
+                from: from.to_owned(),
+                to: to.to_owned(),
+                relation,
+                execution,
+                site_key: sk,
+                site_id,
+                context: Vec::new(),
+                context_truncated: false,
+                boundary,
+                source_order: self.order,
+            }
         });
         self.order += 1;
     }
@@ -1787,47 +1612,6 @@ impl<'a> Builder<'a> {
                 kind: occ.kind.clone(),
                 params: occ.params.clone(),
             })
-    }
-
-    fn resolve_selector(&self, selector: &SubjectSelector) -> Result<String, RequestError> {
-        let candidates: Vec<_> = self
-            .nodes
-            .values()
-            .filter(|node| {
-                node.subject.spec == selector.spec
-                    && node.subject.anchor == selector.anchor
-                    && selector
-                        .step_id
-                        .as_ref()
-                        .is_none_or(|id| node.subject.step_id.as_ref() == Some(id))
-                    && selector
-                        .step_path
-                        .as_ref()
-                        .is_none_or(|path| node.subject.step_path.as_ref() == Some(path))
-                    && selector
-                        .body_id
-                        .as_ref()
-                        .is_none_or(|id| node.subject.body_id.as_ref() == Some(id))
-                    && (selector.step_id.is_some()
-                        || selector.step_path.is_some()
-                        || selector.body_id.is_some()
-                        || node.subject.step_id.is_none() && node.subject.body_id.is_none())
-            })
-            .collect();
-        match candidates.as_slice() {
-            [node] => Ok(node.id.clone()),
-            [] => Err(request_error(
-                RequestErrorCode::SubjectNotFound,
-                format!(
-                    "subject {}#{} was not found",
-                    selector.spec, selector.anchor
-                ),
-            )),
-            _ => Err(request_error(
-                RequestErrorCode::AmbiguousSubject,
-                format!("subject {}#{} is ambiguous", selector.spec, selector.anchor),
-            )),
-        }
     }
 
     fn anchor_site(&self, anchor: &Anchor) -> Option<SourceSite> {
@@ -1934,6 +1718,439 @@ impl<'a> Builder<'a> {
             span: None,
             step_text: segment.map(|segment| segment.text.clone()),
         })
+    }
+}
+
+struct Analysis<'g> {
+    graph: &'g Graph,
+    scope: AnalysisScope,
+    budgets: DiscoveryBudgets,
+    states: BTreeMap<StateKey, PropagatedState>,
+    selected: BTreeSet<String>,
+    active_relationships: BTreeSet<String>,
+    unprocessed: BTreeSet<String>,
+    fixed: bool,
+    extra_issues: Vec<GraphIssue>,
+    extra_issue_ids: BTreeMap<String, Vec<IssueId>>,
+    extra_issue_digests: HashMap<String, IssueId>,
+}
+
+impl<'g> Analysis<'g> {
+    fn select_scope(&mut self) -> Result<(), RequestError> {
+        let roots: Vec<String> = match &self.scope {
+            AnalysisScope::All => {
+                let nodes_with_occurrences: HashSet<&str> = self
+                    .graph
+                    .occurrences
+                    .values()
+                    .map(|occ| occ.subject_id.as_str())
+                    .collect();
+                let nodes_with_implements: HashSet<&str> = self
+                    .graph
+                    .edges
+                    .values()
+                    .filter(|edge| edge.relation == Relationship::Implements)
+                    .map(|edge| edge.from.as_str())
+                    .collect();
+                self.graph
+                    .nodes
+                    .values()
+                    .filter(|node| {
+                        (node.is_body
+                            && node.subject.body_id.is_none()
+                            && !node.id.starts_with("anchor:"))
+                            || nodes_with_occurrences.contains(node.id.as_str())
+                            || nodes_with_implements.contains(node.id.as_str())
+                    })
+                    .map(|node| node.id.clone())
+                    .collect()
+            }
+            AnalysisScope::Subject { subject } => vec![self.resolve_selector(subject)?],
+        };
+        let mut queue: VecDeque<String> = roots.into();
+        let mut visited_relationships = BTreeSet::new();
+        let mut selected_body_count: u64 = 0;
+        while let Some(node) = queue.pop_front() {
+            if self.selected.contains(&node) {
+                continue;
+            }
+            let adding_body = self.graph.nodes.get(&node).is_some_and(|node| node.is_body);
+            if adding_body && selected_body_count >= self.budgets.max_bodies {
+                self.fixed = false;
+                self.unprocessed.insert(node);
+                continue;
+            }
+            self.selected.insert(node.clone());
+            if adding_body {
+                selected_body_count += 1;
+            }
+            let outgoing: Vec<_> = self
+                .graph
+                .edges_by_source
+                .get(&node)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| self.graph.edges.get(id))
+                .cloned()
+                .collect();
+            for edge in outgoing {
+                if visited_relationships.len() as u64 >= self.budgets.max_relationships {
+                    self.fixed = false;
+                    self.unprocessed.insert(edge.to);
+                    continue;
+                }
+                visited_relationships.insert(edge.id.clone());
+                self.active_relationships.insert(edge.id.clone());
+                if edge.relation != Relationship::Mention {
+                    queue.push_back(edge.to);
+                }
+            }
+        }
+        if !self.fixed {
+            for subject in self.selected.clone() {
+                self.add_issue(
+                    &subject,
+                    IssueCode::AnalysisBudget,
+                    "analysis discovery budget was exhausted",
+                    None,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn propagate(&mut self) {
+        let occurrences: Vec<_> = self
+            .graph
+            .occurrences
+            .values()
+            .filter(|occ| self.selected.contains(&occ.subject_id))
+            .cloned()
+            .collect();
+        let mut queue = VecDeque::new();
+        for occurrence in occurrences {
+            let key = StateKey {
+                subject_id: occurrence.subject_id.clone(),
+                occurrence_id: occurrence.id.clone(),
+                kind: occurrence.kind.clone(),
+                params: occurrence.params.clone(),
+                execution: Execution::Inline,
+            };
+            self.states.insert(
+                key.clone(),
+                PropagatedState {
+                    key: key.clone(),
+                    derivations: vec![Derivation::Local],
+                },
+            );
+            queue.push_back(key);
+        }
+        if self.states.len() as u64 > self.budgets.max_states {
+            self.fixed = false;
+            for subject in self.selected.clone() {
+                self.add_issue(
+                    &subject,
+                    IssueCode::AnalysisBudget,
+                    "local effects exceeded the propagation state budget; direct effects were retained",
+                    None,
+                );
+            }
+        }
+        while let Some(child) = queue.pop_front() {
+            let incoming: Vec<_> = self
+                .graph
+                .edges_by_target
+                .get(&child.subject_id)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| self.graph.edges.get(id))
+                .filter(|edge| {
+                    edge.relation != Relationship::Mention
+                        && self.selected.contains(&edge.from)
+                        && self.active_relationships.contains(&edge.id)
+                })
+                .cloned()
+                .collect();
+            for edge in incoming {
+                if self.same_site_specializes_intrinsic(&edge, &child) {
+                    continue;
+                }
+                let key = StateKey {
+                    subject_id: edge.from.clone(),
+                    occurrence_id: child.occurrence_id.clone(),
+                    kind: child.kind.clone(),
+                    params: child.params.clone(),
+                    execution: edge.execution.compose(child.execution),
+                };
+                let derivation = Derivation::Edge {
+                    edge_id: edge.id.clone(),
+                    child: child.clone(),
+                };
+                if let Some(existing) = self.states.get_mut(&key) {
+                    if !existing.derivations.contains(&derivation) {
+                        existing.derivations.push(derivation);
+                    }
+                    continue;
+                }
+                let containment = edge.relation == Relationship::Invoke && edge.site_id == edge.to;
+                if !containment && self.states.len() as u64 >= self.budgets.max_states {
+                    self.fixed = false;
+                    self.add_issue(
+                        &edge.from,
+                        IssueCode::AnalysisBudget,
+                        "propagation state budget was exhausted",
+                        None,
+                    );
+                    continue;
+                }
+                self.states.insert(
+                    key.clone(),
+                    PropagatedState {
+                        key: key.clone(),
+                        derivations: vec![derivation],
+                    },
+                );
+                queue.push_back(key);
+            }
+        }
+        let issue_edges: Vec<_> = self
+            .active_relationships
+            .iter()
+            .filter_map(|id| self.graph.edges.get(id))
+            .filter(|edge| {
+                edge.relation != Relationship::Mention
+                    && self.selected.contains(&edge.from)
+                    && self.selected.contains(&edge.to)
+            })
+            .collect();
+        let mut merged_issues: BTreeMap<String, Vec<IssueId>> = self.graph.issues.clone();
+        for (subject, ids) in &self.extra_issue_ids {
+            let target = merged_issues.entry(subject.clone()).or_default();
+            for &id in ids {
+                if !target.contains(&id) {
+                    target.push(id);
+                }
+            }
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for edge in &issue_edges {
+                let inherited = merged_issues.get(&edge.to).cloned().unwrap_or_default();
+                let target = merged_issues.entry(edge.from.clone()).or_default();
+                for issue in inherited {
+                    if !target.contains(&issue) {
+                        target.push(issue);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        self.extra_issue_ids = BTreeMap::new();
+        for (subject, ids) in merged_issues {
+            if self.graph.issues.get(&subject) != Some(&ids) {
+                self.extra_issue_ids.insert(subject, ids);
+            }
+        }
+        if !self.fixed {
+            for subject in self.selected.clone() {
+                self.add_issue(
+                    &subject,
+                    IssueCode::AnalysisBudget,
+                    "analysis stopped before every selected subject reached a fixed point",
+                    None,
+                );
+            }
+        }
+    }
+
+    fn same_site_specializes_intrinsic(&self, edge: &ExecutionEdge, child: &StateKey) -> bool {
+        let Some(origin) = self.graph.occurrences.get(&child.occurrence_id) else {
+            return false;
+        };
+        if origin.subject_id != edge.to {
+            return false;
+        }
+        self.graph.occurrences.values().any(|local| {
+            let shares_rule = local.evidence.iter().any(|left| {
+                origin
+                    .evidence
+                    .iter()
+                    .any(|right| left.rule_id == right.rule_id)
+            });
+            local.subject_id == edge.from
+                && local.kind == child.kind
+                && local
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.site.id == edge.site_id)
+                && shares_rule
+                && (local.params == child.params || params_dominate(&local.params, &child.params))
+        })
+    }
+
+    fn resolve_selector(&self, selector: &SubjectSelector) -> Result<String, RequestError> {
+        let candidates: Vec<_> = self
+            .graph
+            .nodes
+            .values()
+            .filter(|node| {
+                node.subject.spec == selector.spec
+                    && node.subject.anchor == selector.anchor
+                    && selector
+                        .step_id
+                        .as_ref()
+                        .is_none_or(|id| node.subject.step_id.as_ref() == Some(id))
+                    && selector
+                        .step_path
+                        .as_ref()
+                        .is_none_or(|path| node.subject.step_path.as_ref() == Some(path))
+                    && selector
+                        .body_id
+                        .as_ref()
+                        .is_none_or(|id| node.subject.body_id.as_ref() == Some(id))
+                    && (selector.step_id.is_some()
+                        || selector.step_path.is_some()
+                        || selector.body_id.is_some()
+                        || node.subject.step_id.is_none() && node.subject.body_id.is_none())
+            })
+            .collect();
+        match candidates.as_slice() {
+            [node] => Ok(node.id.clone()),
+            [] => Err(request_error(
+                RequestErrorCode::SubjectNotFound,
+                format!(
+                    "subject {}#{} was not found",
+                    selector.spec, selector.anchor
+                ),
+            )),
+            _ => Err(request_error(
+                RequestErrorCode::AmbiguousSubject,
+                format!("subject {}#{} is ambiguous", selector.spec, selector.anchor),
+            )),
+        }
+    }
+
+    fn add_issue(
+        &mut self,
+        subject: &str,
+        code: IssueCode,
+        message: impl Into<String>,
+        site: Option<SourceSite>,
+    ) {
+        let sk = site.map(|s| site_key(&s));
+        let issue = GraphIssue {
+            code,
+            message: message.into(),
+            site_key: sk,
+        };
+        let digest = digest_serializable(&issue).expect("serializable issue");
+        let base_len =
+            IssueId::try_from(self.graph.issue_catalog.len()).expect("issue catalog fits u32");
+        let issue_id = if let Some(&id) = self.graph.issues.values().flatten().find(|&&id| {
+            self.graph
+                .issue_catalog
+                .get(id as usize)
+                .is_some_and(|existing| *existing == issue)
+        }) {
+            id
+        } else if let Some(&id) = self.extra_issue_digests.get(&digest) {
+            assert_eq!(
+                self.extra_issues.get((id - base_len) as usize),
+                Some(&issue),
+                "issue digest collision in analysis overlay"
+            );
+            id
+        } else {
+            let id = base_len
+                + IssueId::try_from(self.extra_issues.len()).expect("extra issue catalog fits u32");
+            self.extra_issues.push(issue);
+            self.extra_issue_digests.insert(digest, id);
+            id
+        };
+        let issues = self.extra_issue_ids.entry(subject.to_owned()).or_default();
+        if !issues.contains(&issue_id) {
+            issues.push(issue_id);
+        }
+    }
+
+    fn finish(self) -> AnalysisArtifact {
+        let processed_subjects = self
+            .selected
+            .iter()
+            .filter_map(|id| self.graph.nodes.get(id).map(|node| node.subject.clone()))
+            .collect();
+        let unprocessed_subjects = self
+            .unprocessed
+            .iter()
+            .filter_map(|id| self.graph.nodes.get(id).map(|node| node.subject.clone()))
+            .collect();
+        let relationship_count = self.active_relationships.len() as u64;
+        let body_count = self
+            .selected
+            .iter()
+            .filter(|id| self.graph.nodes.get(*id).is_some_and(|node| node.is_body))
+            .count() as u64;
+        let active_edges: Vec<ExecutionEdge> = self
+            .graph
+            .edges
+            .values()
+            .filter(|edge| self.active_relationships.contains(&edge.id))
+            .cloned()
+            .collect();
+        let mut referenced_keys: BTreeSet<String> = BTreeSet::new();
+        for edge in &active_edges {
+            referenced_keys.insert(edge.site_key.clone());
+            for ctx in &edge.context {
+                referenced_keys.insert(ctx.site_key.clone());
+            }
+        }
+        let mut issue_catalog: Vec<GraphIssue> = self.graph.issue_catalog.clone();
+        issue_catalog.extend(self.extra_issues);
+        for issue in &issue_catalog {
+            if let Some(sk) = &issue.site_key {
+                referenced_keys.insert(sk.clone());
+            }
+        }
+        let mut subject_issue_ids: BTreeMap<String, Vec<IssueId>> = self.graph.issues.clone();
+        for (subject, ids) in self.extra_issue_ids {
+            let target = subject_issue_ids.entry(subject).or_default();
+            for id in ids {
+                if !target.contains(&id) {
+                    target.push(id);
+                }
+            }
+        }
+        let sites: BTreeMap<String, SourceSite> = self
+            .graph
+            .sites
+            .iter()
+            .filter(|(k, _)| referenced_keys.contains(*k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        AnalysisArtifact {
+            engine_version: self.graph.engine_version,
+            environment: self.graph.environment.clone(),
+            catalog_digest: self.graph.catalog_digest.clone(),
+            scope: self.scope,
+            reached_fixed_point: self.fixed,
+            counts: AnalysisCounts {
+                bodies: body_count,
+                relationships: relationship_count,
+                states: self.states.len() as u64,
+            },
+            processed_subjects,
+            unprocessed_subjects,
+            nodes: self.graph.nodes.values().cloned().collect(),
+            relationships: active_edges,
+            occurrences: self.graph.occurrences.values().cloned().collect(),
+            states: self.states.into_values().collect(),
+            issues: issue_catalog,
+            subject_issue_ids,
+            effect_categories: self.graph.effect_categories.clone(),
+            defined_body_ids: self.graph.definitions.clone(),
+            sites,
+        }
     }
 }
 
@@ -4377,5 +4594,66 @@ rules:
         b.step_text = Some("full\u{2026}".into());
         assert_eq!(site_key(&a), site_key(&a.clone()));
         assert_ne!(site_key(&a), site_key(&b));
+    }
+
+    fn fixture_sources() -> (Vec<SourceSpec>, Catalog) {
+        let html = include_str!("../../tests/fixtures/effects/engine/acceptance.html");
+        let catalog_yaml = include_str!("../../tests/fixtures/effects/engine/catalog.yaml");
+        let package = load_package_files(&[("catalog.yaml", catalog_yaml)]).unwrap();
+        let catalog = load_catalog([package]).unwrap();
+        let structure =
+            extract_step_structure(html, "TEST", "https://example.test/spec", &"a".repeat(64));
+        let anchors = structure
+            .algorithms
+            .iter()
+            .map(|algorithm| IndexedAnchor {
+                anchor: algorithm.source.section_anchor.clone(),
+                url: algorithm.source.url.clone(),
+                text: algorithm
+                    .segments
+                    .iter()
+                    .map(|segment| segment.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            })
+            .chain(
+                ["fire", "queue", "consume", "host-operation"]
+                    .into_iter()
+                    .map(|anchor| IndexedAnchor {
+                        anchor: anchor.to_string(),
+                        url: format!("https://example.test/spec#{anchor}"),
+                        text: anchor.to_string(),
+                    }),
+            )
+            .collect();
+        let sources = vec![SourceSpec {
+            spec: "TEST".to_string(),
+            snapshot_sha: "a".repeat(64),
+            base_url: "https://example.test/spec".to_string(),
+            structure: Some(structure),
+            anchors,
+        }];
+        (sources, catalog)
+    }
+
+    #[test]
+    fn graph_roundtrips_through_json_and_analyzes_identically() {
+        let (sources, catalog) = fixture_sources();
+        let graph = build_graph(
+            GraphInput {
+                sources: &sources,
+                catalog: &catalog,
+                environment: "web",
+            },
+            None,
+        )
+        .unwrap();
+        let text = serde_json::to_string(&graph).unwrap();
+        let mut back: Graph = serde_json::from_str(&text).unwrap();
+        back.index_edges();
+        let scope = AnalysisScope::All;
+        let a = analyze_graph(&graph, scope.clone(), DiscoveryBudgets::default()).unwrap();
+        let b = analyze_graph(&back, scope, DiscoveryBudgets::default()).unwrap();
+        assert_eq!(a, b);
     }
 }
