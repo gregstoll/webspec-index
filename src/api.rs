@@ -129,6 +129,12 @@ pub enum Request {
     EffectsExplain {
         subject: effects::SubjectSelector,
     },
+    EffectsPaths {
+        subject: effects::SubjectSelector,
+        effect_id: String,
+        #[serde(default = "default_effect_paths_limit")]
+        limit: u64,
+    },
     Flow {
         target: String,
     },
@@ -154,6 +160,7 @@ pub enum Response {
     Idl(model::IdlResult),
     Effects(effects::EffectSummaryResult),
     EffectsExplain(effects::ExplainEffectsResult),
+    EffectsPaths(effects::ExplainEffectsResult),
     Flow(model::FlowResult),
 }
 
@@ -363,6 +370,10 @@ fn cached_effects_request(
     }
 }
 
+fn default_effect_paths_limit() -> u64 {
+    8
+}
+
 fn with_cached_effects(conn: &Connection, query: model::QueryResult) -> effects::QueryWithEffects {
     let request = cached_effects_request(
         effects::SubjectSelector {
@@ -539,6 +550,43 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
             effects::service::prepared_effect_details_on(conn, &request)
                 .map(Response::EffectsExplain)
                 .map_err(ApiError::from)
+        }
+        Request::EffectsPaths {
+            subject,
+            effect_id,
+            limit,
+        } => {
+            if effect_id.is_empty() || !(1..=128).contains(&limit) {
+                return Err(ApiError::invalid(
+                    "effect_id must be non-empty and limit must be between 1 and 128",
+                ));
+            }
+            let request = effects::ExplainEffectsRequest {
+                schema_version: effects::EFFECTS_SCHEMA_VERSION,
+                subject,
+                options: effects::EffectsOptions {
+                    mode: effects::EffectsMode::Cached,
+                    ..effects::EffectsOptions::default()
+                },
+                filter: Some(effects::EffectFilter {
+                    effect_id: Some(effect_id.clone()),
+                    ..effects::EffectFilter::default()
+                }),
+                explanation: effects::ExplanationOptions {
+                    limit,
+                    ..effects::ExplanationOptions::default()
+                },
+            };
+            let result =
+                effects::service::explain_effects_on(conn, &request).map_err(ApiError::from)?;
+            if result.effects.is_empty() {
+                return Err(ApiError::from(effects::RequestError {
+                    code: effects::RequestErrorCode::EffectNotFound,
+                    message: format!("effect {effect_id} is not present in this subject"),
+                    details: None,
+                }));
+            }
+            Ok(Response::EffectsPaths(result))
         }
         Request::Flow { target } => {
             let (spec, anchor) = resolve_target(&target)?;

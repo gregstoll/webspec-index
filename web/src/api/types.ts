@@ -447,6 +447,7 @@ export type Request =
   | { type: 'idl'; query: string; spec?: string; limit?: number }
   | { type: 'effects'; subject: SubjectSelector; filter?: EffectFilter }
   | { type: 'effects_explain'; subject: SubjectSelector }
+  | { type: 'effects_paths'; subject: SubjectSelector; effect_id: string; limit?: number }
   | { type: 'flow'; target: string };
 
 // --- Error (flat, no result wrapper) ---
@@ -474,4 +475,5 @@ export type Response =
   | { type: 'idl'; result: IdlResult }
   | { type: 'effects'; result: EffectSummaryResult }
   | { type: 'effects_explain'; result: ExplainEffectsResult }
+  | { type: 'effects_paths'; result: ExplainEffectsResult }
   | { type: 'flow'; result: FlowResult };

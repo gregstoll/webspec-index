@@ -510,6 +510,18 @@ code, pre, .mono {
   color: var(--color-text-muted);
   font-style: italic;
 }
+.effects-witness-details { margin-top: var(--space-2); }
+.effects-witness-details pre {
+  max-height: 30rem;
+  overflow: auto;
+  font-size: var(--text-xs);
+}
+.effects-defined-bodies {
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+}
+.effects-defined-bodies summary { cursor: pointer; }
+.effects-defined-bodies li { margin-top: var(--space-2); }
 .effects-witnesses-loading,
 .effects-witnesses-error,
 .effects-no-witnesses {

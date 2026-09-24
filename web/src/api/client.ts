@@ -273,6 +273,30 @@ const MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE: ExplainEffectsResult = {
       witnesses_truncated: false,
       issues: [],
     },
+    {
+      effect_id: 'effect-2',
+      witnesses: [
+        {
+          hops: [{
+            from: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123', step_path: [2] },
+            to: { spec: 'HTML', anchor: 'queue-a-task', snapshot_sha: 'abc123' },
+            relation: 'schedule_body',
+            site: {
+              id: 'site-3',
+              subject: { spec: 'HTML', anchor: 'navigate', snapshot_sha: 'abc123', step_path: [2] },
+              url: 'https://html.spec.whatwg.org/#navigate',
+              step_text: 'Queue a networking task',
+            },
+            context: [],
+          }],
+          terminal_evidence: [],
+          path_feasibility: 'unchecked',
+          issues: [],
+        },
+      ],
+      witnesses_truncated: false,
+      issues: [],
+    },
   ],
   issues: [],
 };
@@ -336,6 +360,26 @@ export class MockClient implements WebspecClient {
         const { spec, anchor } = req.subject;
         if (spec === 'HTML' && anchor === 'navigate') {
           return { type: 'effects_explain', result: MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE };
+        }
+        return { type: 'error', code: 'subject_not_found', message: 'No prepared analysis for this subject' };
+      }
+
+      case 'effects_paths': {
+        const { spec, anchor } = req.subject;
+        if (spec === 'HTML' && anchor === 'navigate') {
+          const effect = MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE.effects.find((item) => item.id === req.effect_id);
+          const explanation = MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE.explanations.find((item) => item.effect_id === req.effect_id);
+          if (effect && explanation) {
+            return {
+              type: 'effects_paths',
+              result: {
+                ...MOCK_EFFECTS_EXPLAIN_HTML_NAVIGATE,
+                effects: [effect],
+                explanations: [explanation],
+              },
+            };
+          }
+          return { type: 'error', code: 'effects_effect_not_found', message: `No paths for ${req.effect_id}` };
         }
         return { type: 'error', code: 'subject_not_found', message: 'No prepared analysis for this subject' };
       }

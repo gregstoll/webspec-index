@@ -1061,10 +1061,17 @@ pub fn prepared_effect_details_on(
 pub fn explain_effects(
     request: &ExplainEffectsRequest,
 ) -> Result<ExplainEffectsResult, RequestError> {
-    request.validate()?;
     let conn = db::open_or_create_db().map_err(failure)?;
+    explain_effects_on(&conn, request)
+}
+
+pub fn explain_effects_on(
+    conn: &Connection,
+    request: &ExplainEffectsRequest,
+) -> Result<ExplainEffectsResult, RequestError> {
+    request.validate()?;
     let summary = get_effect_summary_on(
-        &conn,
+        conn,
         &EffectsRequest {
             schema_version: request.schema_version,
             subject: request.subject.clone(),
@@ -1072,11 +1079,13 @@ pub fn explain_effects(
             filter: request.filter.clone(),
         },
     )?;
-    let explanations = if let EffectsStatus::Ready { .. } = &summary.effects_status {
+    let explanations = if summary.effects.is_empty() {
+        Vec::new()
+    } else if let EffectsStatus::Ready { .. } = &summary.effects_status {
         let mut selected = request.subject.clone();
         selected.spec = summary.subject.spec.clone();
         let catalog = default_catalog(&request.options.rule_paths)?;
-        let Some((meta, graph)) = graph_for(&conn, &catalog, &request.options)? else {
+        let Some((meta, graph)) = graph_for(conn, &catalog, &request.options)? else {
             return Ok(ExplainEffectsResult {
                 schema_version: summary.schema_version,
                 subject: summary.subject,
@@ -1090,7 +1099,7 @@ pub fn explain_effects(
         };
         let scope = owning_scope(&selected);
         let artifact = artifact_for(&graph, &meta.semantic_key, scope, &request.options.budgets)?;
-        let site_store = storage::SqlSiteStore(&conn);
+        let site_store = storage::SqlSiteStore(conn);
         artifact
             .explain(
                 &selected,
@@ -1206,6 +1215,89 @@ mod tests {
             .is_none());
         storage::invalidate(&conn).unwrap();
         assert!(get_cached_effect_preview_on(&conn, &req).unwrap().is_none());
+    }
+
+    #[test]
+    fn on_demand_explanation_returns_multiple_witness_examples() {
+        let conn = db::open_test_db().unwrap();
+        seed(
+            &conn,
+            "DOM",
+            "<p>To <dfn id=concept-event-fire>fire an event</dfn>, dispatch it.</p>",
+        );
+        seed(
+            &conn,
+            "TEST",
+            "<div class=algorithm><p>To <dfn id=R>R</dfn>:</p><ol>
+             <li><a href='https://dom.spec.whatwg.org/#concept-event-fire'>Fire an event</a> named <code>hello</code>.</li>
+             <li><a href='https://dom.spec.whatwg.org/#concept-event-fire'>Fire an event</a> named <code>hello</code>.</li>
+             </ol></div>",
+        );
+        let options = EffectsOptions::default();
+        build_and_store_graph(&conn, &default_catalog(&[]).unwrap(), &options, Some(1)).unwrap();
+        let subject = request("TEST", "R").subject;
+        let summary = get_effect_summary_on(&conn, &request("TEST", "R")).unwrap();
+        assert_eq!(summary.effects.len(), 1);
+        let effect_id = summary.effects[0].id.clone();
+        let make_request = |limit| ExplainEffectsRequest {
+            schema_version: EFFECTS_SCHEMA_VERSION,
+            subject: subject.clone(),
+            options: EffectsOptions {
+                mode: EffectsMode::Cached,
+                ..EffectsOptions::default()
+            },
+            filter: Some(EffectFilter {
+                effect_id: Some(effect_id.clone()),
+                ..EffectFilter::default()
+            }),
+            explanation: ExplanationOptions {
+                limit,
+                ..ExplanationOptions::default()
+            },
+        };
+        let one = explain_effects_on(&conn, &make_request(1)).unwrap();
+        let more = explain_effects_on(&conn, &make_request(8)).unwrap();
+        assert_eq!(one.explanations[0].witnesses.len(), 1);
+        assert!(one.explanations[0].witnesses_truncated);
+        assert_eq!(more.explanations[0].witnesses.len(), 2);
+        assert!(!more.explanations[0].witnesses_truncated);
+        assert_eq!(more.effects, summary.effects);
+
+        let response: serde_json::Value = serde_json::from_str(&crate::api::handle_json(
+            &conn,
+            &json!({
+                "type": "effects_paths",
+                "subject": {"spec": "TEST", "anchor": "R"},
+                "effect_id": effect_id,
+                "limit": 8
+            })
+            .to_string(),
+        ))
+        .unwrap();
+        assert_eq!(response["type"], "effects_paths", "{response}");
+        assert_eq!(response["result"]["effects"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            response["result"]["explanations"][0]["witnesses"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        for limit in [0, 129] {
+            let response: serde_json::Value = serde_json::from_str(&crate::api::handle_json(
+                &conn,
+                &json!({
+                    "type": "effects_paths",
+                    "subject": {"spec": "TEST", "anchor": "R"},
+                    "effect_id": summary.effects[0].id,
+                    "limit": limit
+                })
+                .to_string(),
+            ))
+            .unwrap();
+            assert_eq!(response["type"], "error", "{response}");
+            assert_eq!(response["code"], "invalid_request", "{response}");
+        }
     }
 
     #[test]
