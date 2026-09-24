@@ -21,6 +21,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --verbose
+      - name: Check prepared effects query and record offline measurements
+        run: cargo run --quiet --example benchmark_effects -- tests/fixtures/effects/performance/corpus.json > effects-benchmark.json
+      - name: Upload effects measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: effects-benchmark
+          path: effects-benchmark.json
 
   fmt:
     name: Rustfmt

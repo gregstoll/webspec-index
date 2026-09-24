@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, path::PathBuf, time::Instant};
-use webspec_index::{db, effects::*, parse};
+use std::{collections::BTreeMap, path::PathBuf, process::Command, time::Instant};
+use webspec_index::{db, effects::*, export, parse};
 
 #[derive(Deserialize)]
 struct Input {
@@ -35,8 +35,27 @@ fn peak() -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let path = std::env::args_os()
-        .nth(1)
+    let args: Vec<_> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|arg| arg == "--query-only") {
+        let db_path = args.get(2).context("--query-only needs a database path")?;
+        let subject = args.get(3).context("--query-only needs a subject")?;
+        std::env::set_var("SPEC_INDEX_TEST_DB", db_path);
+        let started = Instant::now();
+        let result =
+            query_section_with_effects(&subject.to_string_lossy(), None, EffectsOptions::default())
+                .await?;
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "query_ms": ms(started),
+                "effects": result.effects,
+                "effects_status": result.effects_status,
+            }))?
+        );
+        return Ok(());
+    }
+    let path = args
+        .get(1)
         .map(PathBuf::from)
         .context("usage: cargo run --release --example benchmark_effects -- corpus.json")?;
     let input: Input = serde_json::from_slice(&std::fs::read(&path)?)?;
@@ -144,6 +163,12 @@ async fn main() -> Result<()> {
     let started = Instant::now();
     let cold = query_section_with_effects(&subject, None, EffectsOptions::default()).await?;
     let cold_ms = ms(started);
+    anyhow::ensure!(
+        cold.effects
+            .as_ref()
+            .is_some_and(|effects| !effects.is_empty()),
+        "benchmark subject produced no effects"
+    );
     eprintln!("cold memory {}", peak());
     let mut warm = Vec::new();
     for _ in 0..20 {
@@ -167,12 +192,46 @@ async fn main() -> Result<()> {
         options: EffectsOptions::default(),
     })?;
     let all_ms = ms(started);
+    let mut prepared_warm = Vec::new();
+    for _ in 0..20 {
+        let started = Instant::now();
+        let result = query_section_with_effects(&subject, None, EffectsOptions::default()).await?;
+        anyhow::ensure!(result.effects == cold.effects, "prepared effects differ");
+        prepared_warm.push(ms(started));
+    }
+    let started = Instant::now();
+    let fresh = Command::new(std::env::current_exe()?)
+        .arg("--query-only")
+        .arg(temporary.path().join("index.db"))
+        .arg(&subject)
+        .output()
+        .context("running fresh-process effects query")?;
+    anyhow::ensure!(
+        fresh.status.success(),
+        "fresh-process query failed: {}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    let fresh_process_ms = ms(started);
+    let fresh_result: serde_json::Value = serde_json::from_slice(&fresh.stdout)?;
+    anyhow::ensure!(
+        fresh_result["effects"] == serde_json::to_value(&cold.effects)?,
+        "fresh-process effects differ"
+    );
+    let export_dir = temporary.path().join("export");
+    let started = Instant::now();
+    let exported = export::export_web(
+        &temporary.path().join("index.db"),
+        &export_dir,
+        &export::ExportOptions::default(),
+    )?;
+    let export_ms = ms(started);
     let mut sizes = BTreeMap::new();
     for (table, column) in [
         ("effect_structures", "structure_json"),
         ("effect_graph", "topology"),
         ("effect_sites", "json"),
         ("effect_local_matches", "payload_json"),
+        ("effect_summary_cache", "payload"),
     ] {
         let size: i64 = conn.query_row(
             &format!("SELECT coalesce(sum(length({column})),0) FROM {table}"),
@@ -181,7 +240,29 @@ async fn main() -> Result<()> {
         )?;
         sizes.insert(table, size);
     }
+    // A prepared compact query must not deserialize the graph. Corrupt the
+    // topology only after exporting, then repeat the query in a new process so
+    // an in-memory graph cache cannot hide a regression.
+    conn.execute("UPDATE effect_graph SET topology = X'00' WHERE id = 1", [])?;
+    let prepared = Command::new(std::env::current_exe()?)
+        .arg("--query-only")
+        .arg(temporary.path().join("index.db"))
+        .arg(&subject)
+        .output()
+        .context("checking prepared query without graph topology")?;
+    anyhow::ensure!(
+        prepared.status.success(),
+        "prepared query failed without graph topology: {}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared_result: serde_json::Value = serde_json::from_slice(&prepared.stdout)?;
+    anyhow::ensure!(
+        prepared_result["effects"] == fresh_result["effects"]
+            && prepared_result["effects_status"] == fresh_result["effects_status"],
+        "prepared query changed when graph topology was unavailable"
+    );
     warm.sort_by(f64::total_cmp);
+    prepared_warm.sort_by(f64::total_cmp);
     let rss = std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| {
@@ -192,10 +273,18 @@ async fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
+            "benchmark_schema_version":1,
+            "build_profile":if cfg!(debug_assertions) { "debug" } else { "release" },
             "storage_bytes":sizes,"corpus_bytes":bytes,"algorithms":algorithm_count,"steps":step_count,
             "indexing_ms":indexing_ms,"query_effects_off_ms":off_ms,"cold_query_ms":cold_ms,
             "warm_query_median_ms":warm[10],"warm_query_p95_ms":warm[18],"bounded_explanation_ms":explanation_ms,
+            "prepared_query_median_ms":prepared_warm[10],"prepared_query_p95_ms":prepared_warm[18],
             "indexed_corpus_recompute_ms":all_ms,"peak_memory":rss,
+            "fresh_process_ms":fresh_process_ms,"fresh_process_query_ms":fresh_result["query_ms"],
+            "export_ms":export_ms,"export_bytes":exported.size,
+            "index_db_bytes":std::fs::metadata(temporary.path().join("index.db"))?.len(),
+            "effects_threads":std::env::var("WEBSPEC_EFFECTS_THREADS").unwrap_or_else(|_| "default".into()),
+            "prepared_query_without_topology":true,
             "effects":cold.effects,"effects_status":cold.effects_status,
             "explanation_groups":explained.explanations.len(),"input_manifest":all.input_manifest,
             "bodies":all.body_count,"relationships":all.relationship_count,"issues":all.issue_count

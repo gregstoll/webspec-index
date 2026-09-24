@@ -40,6 +40,13 @@ pub fn initialize(conn: &Connection) -> Result<()> {
             opaque_anchor_issue_id INTEGER
         );
         CREATE TABLE IF NOT EXISTS effect_sites (key TEXT PRIMARY KEY, json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS effect_summary_cache (
+            subject_key TEXT PRIMARY KEY,
+            spec TEXT NOT NULL,
+            semantic_key TEXT NOT NULL,
+            budget_key TEXT NOT NULL,
+            payload BLOB NOT NULL
+        );
         DROP TABLE IF EXISTS effect_witnesses;
         DROP TABLE IF EXISTS effect_issues;
         DROP TABLE IF EXISTS effect_subjects;
@@ -413,6 +420,7 @@ pub fn store_graph(conn: &Connection, meta: &StoredGraphMeta, graph: &Graph) -> 
             rusqlite::params![meta.generation, meta.semantic_key, meta.manifest_json, blob, opaque_id],
         )?;
         conn.execute("DELETE FROM effect_sites", [])?;
+        conn.execute("DELETE FROM effect_summary_cache", [])?;
         let mut insert = conn.prepare("INSERT INTO effect_sites(key, json) VALUES (?1, ?2)")?;
         for (key, site) in &graph.sites {
             let site_json = serde_json::to_string(site)
@@ -421,6 +429,49 @@ pub fn store_graph(conn: &Connection, meta: &StoredGraphMeta, graph: &Graph) -> 
         }
         Ok(())
     })
+}
+
+pub fn store_summary_cache(
+    conn: &Connection,
+    semantic_key: &str,
+    budget_key: &str,
+    rows: impl IntoIterator<Item = (String, String, String)>,
+) -> Result<()> {
+    super::write::atomic_write(conn, |conn| {
+        conn.execute("DELETE FROM effect_summary_cache", [])?;
+        let mut insert = conn.prepare(
+            "INSERT INTO effect_summary_cache(subject_key,spec,semantic_key,budget_key,payload)
+             VALUES (?1,?2,?3,?4,?5)",
+        )?;
+        for (spec, subject_key, json) in rows {
+            insert.execute((
+                subject_key,
+                spec,
+                semantic_key,
+                budget_key,
+                encode_payload(&json),
+            ))?;
+        }
+        Ok(())
+    })
+}
+
+pub fn load_summary_cache(
+    conn: &Connection,
+    subject_key: &str,
+    semantic_key: &str,
+    budget_key: &str,
+) -> Result<Option<String>> {
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT payload FROM effect_summary_cache
+         WHERE subject_key=?1 AND semantic_key=?2 AND budget_key=?3",
+            (subject_key, semantic_key, budget_key),
+            |row| row.get(0),
+        )
+        .optional()?;
+    blob.map(|blob| decode_payload(ValueRef::Blob(&blob)))
+        .transpose()
 }
 
 pub fn load_graph_meta(conn: &Connection) -> Result<Option<StoredGraphMeta>> {

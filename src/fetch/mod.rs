@@ -13,9 +13,13 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 #[cfg(feature = "native")]
+use std::collections::BTreeMap;
+#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 
 const CHECK_INTERVAL_HOURS: i64 = 24;
+#[cfg(feature = "native")]
+const UPDATE_PARALLELISM: usize = 8;
 
 // ── HTML cache ────────────────────────────────────────────────────────────────
 
@@ -203,11 +207,57 @@ fn sync_from_html(
         }
     }
 
+    let prepared = parse_html(html, spec_name, base_url, content_hash)?;
+    write_parsed_html(
+        conn,
+        spec_id,
+        spec_name,
+        base_url,
+        provider_name,
+        prepared,
+        now,
+    )
+}
+
+struct ParsedHtml {
+    content_hash: String,
+    parsed: crate::model::ParsedSpec,
+    structure_json: String,
+}
+
+fn parse_html(
+    html: String,
+    spec_name: &str,
+    base_url: &str,
+    content_hash: String,
+) -> Result<ParsedHtml> {
     let parsed = parse::parse_spec(&html, spec_name, base_url)?;
     let synthetic_sha = format!("hash:{content_hash}");
     let structure =
         parse::steps::extract_step_structure(&html, spec_name, base_url, &synthetic_sha);
-    let structure_json = serde_json::to_string(&structure)?;
+    Ok(ParsedHtml {
+        content_hash,
+        parsed,
+        structure_json: serde_json::to_string(&structure)?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_parsed_html(
+    conn: &Connection,
+    spec_id: i64,
+    spec_name: &str,
+    base_url: &str,
+    provider_name: &str,
+    prepared: ParsedHtml,
+    now: &DateTime<Utc>,
+) -> Result<(i64, bool)> {
+    let ParsedHtml {
+        content_hash,
+        parsed,
+        structure_json,
+    } = prepared;
+    let synthetic_sha = format!("hash:{content_hash}");
     write::atomic_write(conn, |conn| {
         write::delete_spec_data(conn, spec_id)?;
 
@@ -250,7 +300,8 @@ async fn render_via_spec_generator(url: &str) -> Result<String> {
 }
 
 pub(crate) async fn fetch_raw_html(url: &str) -> Result<String> {
-    let client = reqwest::Client::new();
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(reqwest::Client::new);
     let response = client
         .get(url)
         .header(
@@ -535,14 +586,209 @@ pub async fn update_all_specs(
     force: bool,
     refetch: bool,
 ) -> Vec<(String, Result<Option<i64>>)> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(specs.len());
+    let mut cursor = 0;
+    while cursor < specs.len() {
+        // The PDF path has a separate parser and cache policy. Keep it on its
+        // existing path, between bounded HTML batches.
+        if specs[cursor].2 == "itu" {
+            let (name, base_url, provider) = &specs[cursor];
+            let result = update_if_needed(conn, name, base_url, provider, force, refetch).await;
+            results.push((name.clone(), result));
+            cursor += 1;
+            continue;
+        }
 
-    for (name, base_url, provider) in specs {
-        let result = update_if_needed(conn, name, base_url, provider, force, refetch).await;
-        results.push((name.clone(), result));
+        let end = (cursor + UPDATE_PARALLELISM).min(specs.len());
+        let end = (cursor..end).find(|&i| specs[i].2 == "itu").unwrap_or(end);
+        let batch = &specs[cursor..end];
+        let mut jobs = Vec::new();
+        let mut prepared = BTreeMap::new();
+
+        for (index, (name, base_url, provider)) in batch.iter().enumerate() {
+            match plan_html_update(conn, name, base_url, provider, force, refetch) {
+                Ok(HtmlUpdatePlan::Current) => {
+                    prepared.insert(index, Ok(None));
+                }
+                Ok(HtmlUpdatePlan::NeedsWork(plan)) => {
+                    let handle = tokio::spawn(async move {
+                        let result = prepare_html_update(&plan).await;
+                        (plan, result)
+                    });
+                    jobs.push((index, handle));
+                }
+                Err(e) => {
+                    prepared.insert(index, Err(e));
+                }
+            }
+        }
+
+        for (index, handle) in jobs {
+            let result = match handle.await {
+                Ok((plan, result)) => {
+                    result.and_then(|update| commit_html_update(conn, *plan, update))
+                }
+                Err(e) => Err(anyhow::anyhow!("update worker failed: {e}")),
+            };
+            prepared.insert(index, result);
+        }
+        for (index, (name, _, _)) in batch.iter().enumerate() {
+            let result = prepared
+                .remove(&index)
+                .expect("every spec has an update result");
+            results.push((name.clone(), result));
+        }
+        cursor = end;
+    }
+    results
+}
+
+struct HtmlUpdateWork {
+    spec_id: i64,
+    spec_name: String,
+    base_url: String,
+    provider_name: String,
+    previous_snapshot_id: Option<i64>,
+    state: Option<queries::UpdateCheckState>,
+    now: DateTime<Utc>,
+    force: bool,
+    cached_html: Option<String>,
+    can_reuse_unchanged: bool,
+}
+
+enum HtmlUpdatePlan {
+    Current,
+    NeedsWork(Box<HtmlUpdateWork>),
+}
+
+enum PreparedHtmlUpdate {
+    Unchanged(String),
+    Parsed(ParsedHtml),
+}
+
+fn plan_html_update(
+    conn: &Connection,
+    spec_name: &str,
+    base_url: &str,
+    provider_name: &str,
+    force: bool,
+    refetch: bool,
+) -> Result<HtmlUpdatePlan> {
+    let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
+    let previous_snapshot_id = queries::get_snapshot(conn, spec_name)?;
+    let state = queries::get_update_check(conn, spec_id)?;
+    let now = Utc::now();
+    let has_structure = match previous_snapshot_id {
+        Some(snapshot_id) => {
+            crate::db::effects::has_structure(conn, snapshot_id, parse::steps::STRUCTURE_VERSION)?
+        }
+        None => false,
+    };
+    if !force
+        && has_structure
+        && state
+            .as_ref()
+            .is_some_and(|state| cache_is_current(state, &now))
+    {
+        return Ok(HtmlUpdatePlan::Current);
     }
 
-    results
+    let cached_html = if force && !refetch {
+        match state
+            .as_ref()
+            .and_then(|state| state.content_hash.as_deref())
+        {
+            Some(hash) if html_cache_path(&db_dir(), spec_name, hash).exists() => Some(
+                read_html_cache(&db_dir(), spec_name, hash)
+                    .ok_or_else(|| anyhow::anyhow!("cache file disappeared unexpectedly"))?,
+            ),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if cached_html.is_some() {
+        eprintln!(
+            "note: {spec_name}: re-parsing from on-disk cache (use --refetch to download fresh)"
+        );
+    }
+    Ok(HtmlUpdatePlan::NeedsWork(Box::new(HtmlUpdateWork {
+        spec_id,
+        spec_name: spec_name.to_string(),
+        base_url: base_url.to_string(),
+        provider_name: provider_name.to_string(),
+        previous_snapshot_id,
+        state,
+        now,
+        force,
+        cached_html,
+        can_reuse_unchanged: has_structure,
+    })))
+}
+
+async fn prepare_html_update(plan: &HtmlUpdateWork) -> Result<PreparedHtmlUpdate> {
+    let html = if let Some(html) = plan.cached_html.as_ref() {
+        html.clone()
+    } else {
+        let html = fetch_live_html(&plan.base_url).await?;
+        let hash = hash_html(&html);
+        if let Err(e) = write_html_cache(&db_dir(), &plan.spec_name, &hash, &html) {
+            eprintln!(
+                "warning: {}: could not write HTML cache: {e}",
+                plan.spec_name
+            );
+        }
+        html
+    };
+    let content_hash = hash_html(&html);
+    if !plan.force
+        && plan.can_reuse_unchanged
+        && plan.previous_snapshot_id.is_some()
+        && plan.state.as_ref().is_some_and(|state| {
+            state.content_hash.as_deref() == Some(content_hash.as_str()) && index_is_current(state)
+        })
+    {
+        return Ok(PreparedHtmlUpdate::Unchanged(content_hash));
+    }
+    let spec_name = plan.spec_name.clone();
+    let base_url = plan.base_url.clone();
+    Ok(PreparedHtmlUpdate::Parsed(
+        tokio::task::spawn_blocking(move || parse_html(html, &spec_name, &base_url, content_hash))
+            .await??,
+    ))
+}
+
+fn commit_html_update(
+    conn: &Connection,
+    plan: HtmlUpdateWork,
+    update: PreparedHtmlUpdate,
+) -> Result<Option<i64>> {
+    match update {
+        PreparedHtmlUpdate::Unchanged(content_hash) => {
+            store_update_check(
+                conn,
+                plan.spec_id,
+                &plan.now,
+                plan.state
+                    .as_ref()
+                    .and_then(|state| state.last_indexed.as_ref()),
+                Some(&content_hash),
+            )?;
+            Ok(None)
+        }
+        PreparedHtmlUpdate::Parsed(parsed) => {
+            let (snapshot_id, _) = write_parsed_html(
+                conn,
+                plan.spec_id,
+                &plan.spec_name,
+                &plan.base_url,
+                &plan.provider_name,
+                parsed,
+                &plan.now,
+            )?;
+            Ok(Some(snapshot_id))
+        }
+    }
 }
 
 /// Re-parse one or all indexed specs from the on-disk HTML cache, writing
@@ -626,6 +872,93 @@ mod tests {
         DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc)
+    }
+
+    #[cfg(feature = "native")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn update_all_fetches_a_bounded_batch_concurrently_and_keeps_result_order() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(error) => panic!("could not bind test listener: {error}"),
+        };
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut peers = Vec::new();
+            for _ in 0..3 {
+                let (mut peer, _) = listener.accept().await.unwrap();
+                let mut request = [0u8; 1024];
+                let _ = peer.read(&mut request).await.unwrap();
+                peers.push(peer);
+            }
+            // The response is deliberately withheld until all three requests
+            // arrive. A serial update cannot complete this batch.
+            for mut peer in peers {
+                peer.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+        });
+        let specs: Vec<_> = ["FIRST", "SECOND", "THIRD"]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    format!("http://{address}/{name}"),
+                    "test".to_string(),
+                )
+            })
+            .collect();
+        let conn = db::open_test_db().unwrap();
+        let results = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            update_all_specs(&conn, &specs, false, false),
+        )
+        .await
+        .expect("all requests should be in flight together");
+        server.await.unwrap();
+        assert_eq!(
+            results
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["FIRST", "SECOND", "THIRD"]
+        );
+        assert!(results.iter().all(|(_, result)| result.is_err()));
+    }
+
+    #[cfg(feature = "native")]
+    #[tokio::test]
+    async fn prepared_html_commits_snapshot_and_structure() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "PREPARED", "https://example.test", "test").unwrap();
+        let plan = HtmlUpdateWork {
+            spec_id,
+            spec_name: "PREPARED".to_string(),
+            base_url: "https://example.test".to_string(),
+            provider_name: "test".to_string(),
+            previous_snapshot_id: None,
+            state: None,
+            now: fixed_now(),
+            force: true,
+            cached_html: Some("<h2 id=\"prepared\">Prepared</h2>".to_string()),
+            can_reuse_unchanged: false,
+        };
+        let parsed = prepare_html_update(&plan).await.unwrap();
+        let snapshot_id = commit_html_update(&conn, plan, parsed).unwrap().unwrap();
+        assert_eq!(
+            queries::get_snapshot(&conn, "PREPARED").unwrap(),
+            Some(snapshot_id)
+        );
+        assert!(crate::db::effects::has_structure(
+            &conn,
+            snapshot_id,
+            parse::steps::STRUCTURE_VERSION,
+        )
+        .unwrap());
     }
 
     // ── cache decision ────────────────────────────────────────────────────────

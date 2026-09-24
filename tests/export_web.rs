@@ -41,7 +41,11 @@ fn seeded_db(path: &Path) -> rusqlite::Connection {
          INSERT INTO effect_local_matches(input_key, payload_json) VALUES ('k', '{}');
          INSERT INTO update_checks(spec_id, last_checked) VALUES (1, 'now');
          INSERT INTO effect_graph(id, generation, semantic_key, manifest_json, topology, opaque_anchor_issue_id)
-           VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), 's', '{}', X'00', NULL);",
+           VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), 's', '{}', X'00', NULL);
+         INSERT INTO effect_summary_cache(subject_key,spec,semantic_key,budget_key,payload)
+           VALUES ('html', 'HTML', 's', '{}', X'00'),
+                  ('rfc', 'RFC9110', 's', '{}', X'00'),
+                  ('__effect_summary_complete__', '', 's', '{}', X'00');",
     )
     .unwrap();
     conn
@@ -118,6 +122,14 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         .query_row("SELECT COUNT(*) FROM specs", [], |r| r.get(0))
         .unwrap();
     assert_eq!(specs, 1);
+    let cached_specs: Vec<String> = conn
+        .prepare("SELECT spec FROM effect_summary_cache ORDER BY spec")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(cached_specs, ["", "HTML"]);
     let sections: i64 = conn
         .query_row("SELECT COUNT(*) FROM sections", [], |r| r.get(0))
         .unwrap();

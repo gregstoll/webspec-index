@@ -1,0 +1,18 @@
+{
+  "sources": [
+    {
+      "spec": "HTML",
+      "file": "../engine/acceptance.html",
+      "base_url": "https://html.spec.whatwg.org/multipage/benchmark.html"
+    },
+    {
+      "spec": "HTML",
+      "file": "chain.html",
+      "base_url": "https://html.spec.whatwg.org/multipage/benchmark-chain.html"
+    }
+  ],
+  "subject": {
+    "spec": "HTML",
+    "anchor": "bench-a"
+  }
+}

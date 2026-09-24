@@ -374,7 +374,13 @@ fn with_cached_effects(conn: &Connection, query: model::QueryResult) -> effects:
         },
         None,
     );
-    match effects::service::get_effect_summary_on(conn, &request) {
+    let summary =
+        effects::service::get_cached_effect_preview_on(conn, &request).and_then(|cached| {
+            cached
+                .map(Ok)
+                .unwrap_or_else(|| effects::service::get_effect_summary_on(conn, &request))
+        });
+    match summary {
         Ok(result) => effects::query::attach_summary(query, result),
         Err(_) => effects::QueryWithEffects {
             query,

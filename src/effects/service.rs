@@ -1,7 +1,7 @@
 //! Snapshot-consistent analysis orchestration, persisted summaries, and cache policy.
 use super::bundled::default_catalog;
 use super::catalog::Catalog;
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", test))]
 use super::engine::IssueId;
 use super::engine::{
     self, AnalysisArtifact, ArtifactSummary, GraphInput, IndexedAnchor, SourceSpec,
@@ -13,8 +13,11 @@ use crate::db;
 use crate::db::effects as storage;
 use crate::parse::steps::{StructuralSpec, STRUCTURE_VERSION};
 use rusqlite::{Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
+#[cfg(any(feature = "native", test))]
+use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
@@ -25,6 +28,8 @@ fn failure(error: impl std::fmt::Display) -> RequestError {
         details: None,
     }
 }
+
+const COMPLETE_CACHE_KEY: &str = "__effect_summary_complete__";
 
 fn unavailable(message: impl Into<String>) -> RequestError {
     RequestError {
@@ -215,6 +220,159 @@ fn issue_codes(issues: &[Issue]) -> Vec<IssueCode> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+#[derive(Serialize, Deserialize)]
+struct CompactSummary {
+    subject: Subject,
+    effects: Vec<EffectSummary>,
+    coverage: Coverage,
+    issue_codes: Vec<IssueCode>,
+    defined_bodies: Vec<CompactBody>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CompactBody {
+    subject: Subject,
+    effects: Vec<EffectSummary>,
+    issue_codes: Vec<IssueCode>,
+}
+
+fn selector_key(subject: &SubjectSelector) -> Result<String, RequestError> {
+    canonical_json(
+        &serde_json::to_value((
+            &subject.spec,
+            &subject.anchor,
+            &subject.step_id,
+            &subject.step_path,
+            &subject.body_id,
+        ))
+        .map_err(failure)?,
+    )
+    .map_err(failure)
+}
+
+#[cfg(any(feature = "native", test))]
+fn record_selector(subject: &Subject) -> SubjectSelector {
+    SubjectSelector {
+        spec: subject.spec.clone(),
+        anchor: subject.anchor.clone(),
+        step_id: subject.step_id.clone(),
+        step_path: subject.step_path.clone(),
+        body_id: subject.body_id.clone(),
+    }
+}
+
+#[cfg(any(feature = "native", test))]
+fn codes_for_ids(artifact: &AnalysisArtifact, ids: &[IssueId]) -> Vec<IssueCode> {
+    ids.iter()
+        .filter_map(|id| artifact.issue(*id).map(|issue| issue.code))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+#[cfg(any(feature = "native", test))]
+fn store_compact_summaries(
+    conn: &Connection,
+    graph: &engine::Graph,
+    artifact: &AnalysisArtifact,
+    meta: &storage::StoredGraphMeta,
+    budgets: &DiscoveryBudgets,
+) -> Result<(), RequestError> {
+    // A bounded global run is not interchangeable with a scoped run: the latter
+    // may reach a subject that the former did not. Publish only a complete run.
+    if !artifact.reached_fixed_point || !artifact.unprocessed_subjects.is_empty() {
+        return Ok(());
+    }
+    let budget_key =
+        canonical_json(&serde_json::to_value(budgets).map_err(failure)?).map_err(failure)?;
+    let mut rows = artifact
+        .summary_records(None)?
+        .into_iter()
+        .map(|record| {
+            let compact = CompactSummary {
+                subject: record.subject.clone(),
+                effects: record.effects,
+                coverage: record.coverage,
+                issue_codes: codes_for_ids(artifact, &record.issue_ids),
+                defined_bodies: record
+                    .defined_bodies
+                    .into_iter()
+                    .map(|body| CompactBody {
+                        subject: body.subject,
+                        effects: body.effects,
+                        issue_codes: codes_for_ids(artifact, &body.issue_ids),
+                    })
+                    .collect(),
+            };
+            Ok((
+                compact.subject.spec.clone(),
+                selector_key(&record_selector(&compact.subject))?,
+                serde_json::to_string(&compact).map_err(failure)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, RequestError>>()?;
+    let mut stored_keys: HashSet<String> = rows.iter().map(|(_, key, _)| key.clone()).collect();
+    // A missing top-level row can be synthesized only if the graph has no
+    // matching anchor. Keep tiny miss markers for graph anchors not emitted by
+    // summary_records, so the lookup can distinguish those cases.
+    for (spec, anchor) in graph.anchor_nodes.keys() {
+        let key = selector_key(&SubjectSelector {
+            spec: spec.clone(),
+            anchor: anchor.clone(),
+            step_id: None,
+            step_path: None,
+            body_id: None,
+        })?;
+        if stored_keys.insert(key.clone()) {
+            rows.push((spec.clone(), key, "null".into()));
+        }
+    }
+    // This row certifies that an absent key means an ordinary indexed anchor
+    // outside the graph, rather than an incompletely populated cache.
+    rows.push((String::new(), COMPLETE_CACHE_KEY.into(), "{}".into()));
+    let tx = conn.unchecked_transaction().map_err(failure)?;
+    if storage::generation(&tx).map_err(failure)? != meta.generation {
+        return Err(unavailable(
+            "snapshot changed while preparing effect summaries",
+        ));
+    }
+    storage::store_summary_cache(&tx, &meta.semantic_key, &budget_key, rows).map_err(failure)?;
+    tx.commit().map_err(failure)
+}
+
+fn compact_envelope(
+    summary: CompactSummary,
+    manifest: InputManifest,
+    id: &str,
+) -> EffectSummaryResult {
+    EffectSummaryResult {
+        schema_version: EFFECTS_SCHEMA_VERSION,
+        subject: summary.subject,
+        effects: summary.effects,
+        effects_status: EffectsStatus::ready(summary.coverage, summary.issue_codes, 0, id.into()),
+        defined_bodies: summary
+            .defined_bodies
+            .into_iter()
+            .map(|body| DefinedBody {
+                subject: body.subject,
+                effects: body.effects,
+                effects_status: EffectsStatus::ready(
+                    if body.issue_codes.is_empty() {
+                        Coverage::Complete
+                    } else {
+                        Coverage::Partial
+                    },
+                    body.issue_codes,
+                    0,
+                    id.into(),
+                ),
+            })
+            .collect(),
+        issues: Vec::new(),
+        input_manifest: Some(manifest),
+    }
 }
 
 fn envelope(summary: ArtifactSummary, manifest: &InputManifest, id: &str) -> EffectSummaryResult {
@@ -485,6 +643,7 @@ pub fn recompute_effects(
 
     let artifact =
         engine::analyze_graph(&graph, AnalysisScope::All, request.options.budgets.clone())?;
+    store_compact_summaries(&conn, &graph, &artifact, &meta, &request.options.budgets)?;
     let site_store = storage::SqlSiteStore(&conn);
     let all_issue_ids: Vec<_> = (0..artifact.issues.len() as IssueId).collect();
     let all_issues = artifact.materialize_issues(&all_issue_ids, &site_store)?;
@@ -650,6 +809,95 @@ fn synthesise_anchor(
 pub fn get_effect_summary(request: &EffectsRequest) -> Result<EffectSummaryResult, RequestError> {
     let conn = db::open_or_create_db().map_err(failure)?;
     get_effect_summary_on(&conn, request)
+}
+
+/// Returns the prepared compact summary without loading the topology or running analysis.
+/// A missing row is a cache miss; callers can retain their existing analysis fallback.
+#[cfg(feature = "native")]
+pub fn get_cached_effect_preview(
+    request: &EffectsRequest,
+) -> Result<Option<EffectSummaryResult>, RequestError> {
+    let conn = db::open_or_create_db().map_err(failure)?;
+    get_cached_effect_preview_on(&conn, request)
+}
+
+#[cfg(feature = "native")]
+pub fn get_effect_preview(request: &EffectsRequest) -> Result<EffectSummaryResult, RequestError> {
+    match get_cached_effect_preview(request)? {
+        Some(summary) => Ok(summary),
+        None => get_effect_summary(request),
+    }
+}
+
+pub fn get_cached_effect_preview_on(
+    conn: &Connection,
+    request: &EffectsRequest,
+) -> Result<Option<EffectSummaryResult>, RequestError> {
+    request.validate()?;
+    if request.options.mode == EffectsMode::Off || request.filter.is_some() {
+        return Ok(None);
+    }
+    let subject = resolve_subject(conn, &request.subject)?;
+    let mut selector = request.subject.clone();
+    selector.spec = subject.spec.clone();
+    let Some(meta) = storage::load_graph_meta(conn).map_err(failure)? else {
+        return Ok(None);
+    };
+    if meta.generation != storage::generation(conn).map_err(failure)? {
+        return Ok(None);
+    }
+    let manifest: InputManifest = serde_json::from_str(&meta.manifest_json).map_err(failure)?;
+    let catalog = default_catalog(&request.options.rule_paths)?;
+    if manifest.catalog_digest != catalog.content_digest
+        || manifest.environment != request.options.environment
+    {
+        return Ok(None);
+    }
+    let budget_key =
+        canonical_json(&serde_json::to_value(&request.options.budgets).map_err(failure)?)
+            .map_err(failure)?;
+    let key = selector_key(&selector)?;
+    let payload = storage::load_summary_cache(conn, &key, &meta.semantic_key, &budget_key)
+        .map_err(failure)?;
+    let Some(payload) = payload else {
+        if selector.step_id.is_some() || selector.step_path.is_some() || selector.body_id.is_some()
+        {
+            return Ok(None);
+        }
+        if storage::load_summary_cache(conn, COMPLETE_CACHE_KEY, &meta.semantic_key, &budget_key)
+            .map_err(failure)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let issue_codes = if meta.opaque_anchor_issue.is_some() {
+            vec![IssueCode::UnsupportedStructure]
+        } else {
+            Vec::new()
+        };
+        let compact = CompactSummary {
+            subject,
+            effects: Vec::new(),
+            coverage: if issue_codes.is_empty() {
+                Coverage::Complete
+            } else {
+                Coverage::Partial
+            },
+            issue_codes,
+            defined_bodies: Vec::new(),
+        };
+        let id = format!("an_{}", &meta.semantic_key[..16]);
+        return Ok(Some(compact_envelope(compact, manifest, &id)));
+    };
+    if payload == "null" {
+        return Ok(None);
+    }
+    let compact: CompactSummary = serde_json::from_str(&payload).map_err(failure)?;
+    if compact.subject != subject {
+        return Ok(None);
+    }
+    let id = format!("an_{}", &meta.semantic_key[..16]);
+    Ok(Some(compact_envelope(compact, manifest, &id)))
 }
 
 pub fn get_effect_summary_on(
@@ -915,6 +1163,49 @@ mod tests {
         let result = get_effect_summary_on(&conn, &request("TEST", "R")).unwrap();
         assert!(matches!(result.effects_status, EffectsStatus::Ready { .. }));
         assert_eq!(result.effects.len(), 1);
+    }
+
+    #[test]
+    fn compact_preview_uses_prepared_row_without_loading_topology() {
+        let (conn, _) = setup();
+        seed(
+            &conn,
+            "EMPTY",
+            "<p id=ordinary-anchor>No algorithm here.</p>",
+        );
+        let catalog = default_catalog(&[]).unwrap();
+        let options = EffectsOptions::default();
+        let meta = build_and_store_graph(&conn, &catalog, &options, Some(1)).unwrap();
+        let graph = storage::load_graph(&conn).unwrap().unwrap();
+        assert!(!graph
+            .anchor_nodes
+            .contains_key(&("EMPTY".into(), "ordinary-anchor".into())));
+        let artifact =
+            engine::analyze_graph(&graph, AnalysisScope::All, options.budgets.clone()).unwrap();
+        store_compact_summaries(&conn, &graph, &artifact, &meta, &options.budgets).unwrap();
+        let req = request("TEST", "R");
+        let full = get_effect_summary_on(&conn, &req).unwrap();
+        conn.execute("UPDATE effect_graph SET topology=x'00' WHERE id=1", [])
+            .unwrap();
+        let compact = get_cached_effect_preview_on(&conn, &req).unwrap().unwrap();
+        assert_eq!(compact.effects, full.effects);
+        assert_eq!(compact.effects_status, full.effects_status);
+        assert_eq!(compact.defined_bodies, full.defined_bodies);
+        assert!(compact.issues.is_empty());
+
+        let empty = get_cached_effect_preview_on(&conn, &request("EMPTY", "ordinary-anchor"))
+            .unwrap()
+            .unwrap();
+        assert!(empty.effects.is_empty());
+        assert!(matches!(empty.effects_status, EffectsStatus::Ready { .. }));
+
+        let mut other_budget = req.clone();
+        other_budget.options.budgets.max_states += 1;
+        assert!(get_cached_effect_preview_on(&conn, &other_budget)
+            .unwrap()
+            .is_none());
+        storage::invalidate(&conn).unwrap();
+        assert!(get_cached_effect_preview_on(&conn, &req).unwrap().is_none());
     }
 
     #[test]

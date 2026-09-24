@@ -378,6 +378,24 @@ pub fn analyze_graph(
     scope: AnalysisScope,
     budgets: DiscoveryBudgets,
 ) -> Result<AnalysisArtifact, RequestError> {
+    let threads = std::env::var("WEBSPEC_EFFECTS_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|count| *count > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|count| count.get().min(8))
+                .unwrap_or(1)
+        });
+    analyze_graph_with_threads(graph, scope, budgets, threads)
+}
+
+fn analyze_graph_with_threads(
+    graph: &Graph,
+    scope: AnalysisScope,
+    budgets: DiscoveryBudgets,
+    threads: usize,
+) -> Result<AnalysisArtifact, RequestError> {
     budgets.validate()?;
     if graph.edges_by_source.is_empty() && !graph.edges.is_empty() {
         return Err(RequestError::invalid(
@@ -398,7 +416,7 @@ pub fn analyze_graph(
         extra_issue_digests: HashMap::new(),
     };
     analysis.select_scope()?;
-    analysis.propagate();
+    analysis.propagate(threads);
     Ok(analysis.finish())
 }
 
@@ -1825,7 +1843,7 @@ impl<'g> Analysis<'g> {
         Ok(())
     }
 
-    fn propagate(&mut self) {
+    fn propagate(&mut self, threads: usize) {
         let occurrences_by_site: HashMap<&str, Vec<&LocalOccurrence>> = {
             let mut map: HashMap<&str, Vec<&LocalOccurrence>> = HashMap::new();
             for occ in self.graph.occurrences.values() {
@@ -1840,8 +1858,150 @@ impl<'g> Analysis<'g> {
             .occurrences
             .values()
             .filter(|occ| self.selected.contains(&occ.subject_id))
-            .cloned()
             .collect();
+        #[cfg(feature = "native")]
+        let parallel = if threads > 1
+            && self.fixed
+            && matches!(&self.scope, AnalysisScope::All)
+            && occurrences.len() > 1
+        {
+            self.propagate_parallel(&occurrences, &occurrences_by_site, threads)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "native"))]
+        let parallel: Option<BTreeMap<StateKey, PropagatedState>> = {
+            let _ = threads;
+            None
+        };
+        if let Some(states) = parallel {
+            self.states = states;
+        } else {
+            self.propagate_effects_serial(&occurrences, &occurrences_by_site);
+        }
+        self.propagate_issues();
+    }
+
+    #[cfg(feature = "native")]
+    fn propagate_parallel(
+        &self,
+        occurrences: &[&LocalOccurrence],
+        occurrences_by_site: &HashMap<&str, Vec<&LocalOccurrence>>,
+        threads: usize,
+    ) -> Option<BTreeMap<StateKey, PropagatedState>> {
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads.min(occurrences.len()))
+            .build()
+            .ok()?;
+        let count = AtomicU64::new(0);
+        let exceeded = AtomicBool::new(false);
+        let budget = self.budgets.max_states;
+        let parts: Vec<Option<BTreeMap<StateKey, PropagatedState>>> = pool.install(|| {
+            occurrences
+                .par_iter()
+                .map(|occurrence| {
+                    if exceeded.load(Ordering::Relaxed)
+                        || count.fetch_add(1, Ordering::Relaxed) >= budget
+                    {
+                        exceeded.store(true, Ordering::Relaxed);
+                        return None;
+                    }
+                    let seed = StateKey {
+                        subject_id: occurrence.subject_id.clone(),
+                        occurrence_id: occurrence.id.clone(),
+                        kind: occurrence.kind.clone(),
+                        params: occurrence.params.clone(),
+                        execution: Execution::Inline,
+                    };
+                    let mut states = BTreeMap::new();
+                    states.insert(
+                        seed.clone(),
+                        PropagatedState {
+                            key: seed.clone(),
+                            derivations: vec![Derivation::Local],
+                        },
+                    );
+                    let mut queue = VecDeque::from([seed]);
+                    while let Some(child) = queue.pop_front() {
+                        if exceeded.load(Ordering::Relaxed) {
+                            return None;
+                        }
+                        for edge in self
+                            .graph
+                            .edges_by_target
+                            .get(&child.subject_id)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|id| self.graph.edges.get(id))
+                            .filter(|edge| {
+                                edge.relation != Relationship::Mention
+                                    && self.selected.contains(&edge.from)
+                                    && self.active_relationships.contains(&edge.id)
+                            })
+                        {
+                            if self.same_site_specializes_intrinsic(
+                                edge,
+                                &child,
+                                occurrences_by_site,
+                            ) {
+                                continue;
+                            }
+                            let key = StateKey {
+                                subject_id: edge.from.clone(),
+                                occurrence_id: child.occurrence_id.clone(),
+                                kind: child.kind.clone(),
+                                params: child.params.clone(),
+                                execution: edge.execution.compose(child.execution),
+                            };
+                            let derivation = Derivation::Edge {
+                                edge_id: edge.id.clone(),
+                                child: child.clone(),
+                            };
+                            if let Some(existing) = states.get_mut(&key) {
+                                if !existing.derivations.contains(&derivation) {
+                                    existing.derivations.push(derivation);
+                                }
+                                continue;
+                            }
+                            if count.fetch_add(1, Ordering::Relaxed) >= budget {
+                                exceeded.store(true, Ordering::Relaxed);
+                                return None;
+                            }
+                            states.insert(
+                                key.clone(),
+                                PropagatedState {
+                                    key: key.clone(),
+                                    derivations: vec![derivation],
+                                },
+                            );
+                            queue.push_back(key);
+                        }
+                    }
+                    Some(states)
+                })
+                .collect()
+        });
+        if exceeded.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut merged = BTreeMap::new();
+        for states in parts.into_iter().flatten() {
+            for (key, state) in states {
+                debug_assert!(!merged.contains_key(&key));
+                merged.insert(key, state);
+            }
+        }
+        Some(merged)
+    }
+
+    fn propagate_effects_serial(
+        &mut self,
+        occurrences: &[&LocalOccurrence],
+        occurrences_by_site: &HashMap<&str, Vec<&LocalOccurrence>>,
+    ) {
         let mut queue = VecDeque::new();
         for occurrence in occurrences {
             let key = StateKey {
@@ -1887,7 +2047,7 @@ impl<'g> Analysis<'g> {
                 .cloned()
                 .collect();
             for edge in incoming {
-                if self.same_site_specializes_intrinsic(&edge, &child, &occurrences_by_site) {
+                if self.same_site_specializes_intrinsic(&edge, &child, occurrences_by_site) {
                     continue;
                 }
                 let key = StateKey {
@@ -1928,7 +2088,11 @@ impl<'g> Analysis<'g> {
                 queue.push_back(key);
             }
         }
-        let issue_edges: Vec<_> = self
+    }
+
+    fn propagate_issues(&mut self) {
+        let mut issue_parents: HashMap<&str, Vec<&str>> = HashMap::new();
+        for edge in self
             .active_relationships
             .iter()
             .filter_map(|id| self.graph.edges.get(id))
@@ -1937,7 +2101,16 @@ impl<'g> Analysis<'g> {
                     && self.selected.contains(&edge.from)
                     && self.selected.contains(&edge.to)
             })
-            .collect();
+        {
+            issue_parents
+                .entry(edge.to.as_str())
+                .or_default()
+                .push(edge.from.as_str());
+        }
+        for parents in issue_parents.values_mut() {
+            parents.sort_unstable();
+            parents.dedup();
+        }
         let mut merged_issues: BTreeMap<String, Vec<IssueId>> = self.graph.issues.clone();
         for (subject, ids) in &self.extra_issue_ids {
             let target = merged_issues.entry(subject.clone()).or_default();
@@ -1947,17 +2120,50 @@ impl<'g> Analysis<'g> {
                 }
             }
         }
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for edge in &issue_edges {
-                let inherited = merged_issues.get(&edge.to).cloned().unwrap_or_default();
-                let target = merged_issues.entry(edge.from.clone()).or_default();
-                for issue in inherited {
-                    if !target.contains(&issue) {
-                        target.push(issue);
-                        changed = true;
+        // Carry only newly discovered issue IDs to callers. The previous
+        // fixed-point loop rescanned every selected relationship and searched
+        // growing Vecs on every round, even when neither endpoint changed.
+        let mut seen: HashMap<String, Vec<u64>> = HashMap::new();
+        let mut pending: HashMap<String, Vec<IssueId>> = HashMap::new();
+        let mut queue = VecDeque::new();
+        let mut queued = HashSet::new();
+        for (subject, ids) in &merged_issues {
+            if !self.selected.contains(subject) || ids.is_empty() {
+                continue;
+            }
+            let bits = seen.entry(subject.clone()).or_default();
+            for &id in ids {
+                let word = (id / 64) as usize;
+                if bits.len() <= word {
+                    bits.resize(word + 1, 0);
+                }
+                bits[word] |= 1 << (id % 64);
+            }
+            pending.insert(subject.clone(), ids.clone());
+            queued.insert(subject.clone());
+            queue.push_back(subject.clone());
+        }
+        while let Some(child) = queue.pop_front() {
+            queued.remove(&child);
+            let delta = pending.remove(&child).unwrap_or_default();
+            for &parent in issue_parents.get(child.as_str()).into_iter().flatten() {
+                let bits = seen.entry(parent.to_owned()).or_default();
+                let target = merged_issues.entry(parent.to_owned()).or_default();
+                let parent_pending = pending.entry(parent.to_owned()).or_default();
+                for &id in &delta {
+                    let word = (id / 64) as usize;
+                    if bits.len() <= word {
+                        bits.resize(word + 1, 0);
                     }
+                    let mask = 1 << (id % 64);
+                    if bits[word] & mask == 0 {
+                        bits[word] |= mask;
+                        target.push(id);
+                        parent_pending.push(id);
+                    }
+                }
+                if !parent_pending.is_empty() && queued.insert(parent.to_owned()) {
+                    queue.push_back(parent.to_owned());
                 }
             }
         }
@@ -4703,6 +4909,35 @@ rules:
         let a = analyze_graph(&graph, scope.clone(), DiscoveryBudgets::default()).unwrap();
         let b = analyze_graph(&back, scope, DiscoveryBudgets::default()).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn parallel_backward_propagation_matches_serial_and_budget_fallback() {
+        let (sources, catalog) = fixture_sources();
+        let graph = build_graph(
+            GraphInput {
+                sources: &sources,
+                catalog: &catalog,
+                environment: "web",
+            },
+            None,
+        )
+        .unwrap();
+        assert!(graph.occurrences.len() > 1);
+        for budgets in [
+            DiscoveryBudgets::default(),
+            DiscoveryBudgets {
+                max_states: 1,
+                ..DiscoveryBudgets::default()
+            },
+        ] {
+            let serial =
+                analyze_graph_with_threads(&graph, AnalysisScope::All, budgets.clone(), 1).unwrap();
+            let parallel =
+                analyze_graph_with_threads(&graph, AnalysisScope::All, budgets, 4).unwrap();
+            assert_eq!(parallel, serial);
+        }
     }
 
     #[test]

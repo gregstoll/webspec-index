@@ -1200,12 +1200,17 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             });
             let catalog = effects::default_catalog(&rules)?;
             if summary_only || compact {
-                let mut result = effects::get_effect_summary(&effects::EffectsRequest {
+                let request = effects::EffectsRequest {
                     schema_version: effects::EFFECTS_SCHEMA_VERSION,
                     subject: selector,
                     options,
                     filter,
-                })?;
+                };
+                let mut result = if compact {
+                    effects::get_effect_preview(&request)?
+                } else {
+                    effects::get_effect_summary(&request)?
+                };
                 if compact {
                     result = effects::query::compact_summary(result);
                 }

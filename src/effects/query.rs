@@ -154,7 +154,12 @@ pub async fn query_section_with_effects(
         filter: None,
     };
 
-    match super::get_effect_summary(&request) {
+    let summary = super::service::get_cached_effect_preview(&request).and_then(|cached| {
+        cached
+            .map(Ok)
+            .unwrap_or_else(|| super::get_effect_summary(&request))
+    });
+    match summary {
         Ok(result) => Ok(attach_summary(query, result)),
         Err(_) => Ok(QueryWithEffects {
             query,

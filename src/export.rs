@@ -138,6 +138,7 @@ fn prune(conn: &Connection, providers: &[String], specs: &[String]) -> Result<()
          DELETE FROM effect_structures WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM snapshots WHERE id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM specs WHERE id NOT IN (SELECT spec_id FROM snapshots);
+         DELETE FROM effect_summary_cache WHERE spec <> '' AND spec NOT IN (SELECT name FROM specs);
          DROP TABLE doomed_snapshots;",
     )?;
     Ok(())
