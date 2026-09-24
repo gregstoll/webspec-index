@@ -1301,6 +1301,37 @@ mod tests {
     }
 
     #[test]
+    fn aoid_call_propagates_callee_effect_to_caller() {
+        let conn = db::open_test_db().unwrap();
+        seed(
+            &conn,
+            "DOM",
+            "<p>To <dfn id=concept-event-fire>fire an event</dfn>, dispatch it.</p>",
+        );
+        seed(
+            &conn,
+            "TEST",
+            "<emu-clause id=caller><h1>Caller</h1><emu-alg><ol><li>Run <emu-xref aoid=Called>Called</emu-xref>.</li></ol></emu-alg></emu-clause>
+             <emu-clause id=callee aoid=Called><h1>Called</h1><emu-alg><ol><li><a href='https://dom.spec.whatwg.org/#concept-event-fire'>Fire an event</a> named <code>hello</code>.</li></ol></emu-alg></emu-clause>",
+        );
+        build_and_store_graph(
+            &conn,
+            &default_catalog(&[]).unwrap(),
+            &EffectsOptions::default(),
+            Some(1),
+        )
+        .unwrap();
+        let summary = get_effect_summary_on(&conn, &request("TEST", "caller")).unwrap();
+        assert!(
+            summary
+                .effects
+                .iter()
+                .any(|effect| effect.kind == "event.fire"),
+            "{summary:?}"
+        );
+    }
+
+    #[test]
     fn prepared_details_come_from_the_stored_graph() {
         let (conn, _) = setup();
         let catalog = default_catalog(&[]).unwrap();

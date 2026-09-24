@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use super::algorithms::step_number;
 
 /// Version of the serialized structural parse format.
-pub const STRUCTURE_VERSION: &str = "6";
+pub const STRUCTURE_VERSION: &str = "7";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuralSpec {
@@ -327,6 +327,8 @@ pub fn extract_step_structure(
         }
     }
 
+    resolve_aoid_links(&document, spec, &mut algorithms);
+
     StructuralSpec {
         version: STRUCTURE_VERSION.to_string(),
         spec: spec.to_string(),
@@ -339,6 +341,52 @@ pub fn extract_step_structure(
             .collect(),
         algorithms,
         issues,
+    }
+}
+
+fn resolve_aoid_links(document: &Html, spec: &str, algorithms: &mut [StructuralAlgorithm]) {
+    // Source-form Ecmarkup uses aoid references without href fragments. Resolve
+    // only names with one target in this snapshot; ambiguous names stay unknown.
+    let mut anchors: HashMap<String, Option<String>> = HashMap::new();
+    let selector = Selector::parse("[aoid][id]").expect("valid selector");
+    for element in document.select(&selector) {
+        let (Some(aoid), Some(id)) = (element.value().attr("aoid"), element.value().id()) else {
+            continue;
+        };
+        anchors
+            .entry(aoid.to_string())
+            .and_modify(|known| {
+                if known.as_deref() != Some(id) {
+                    *known = None;
+                }
+            })
+            .or_insert_with(|| Some(id.to_string()));
+    }
+    for algorithm in algorithms {
+        let mut resolved = HashMap::new();
+        for segment in &mut algorithm.segments {
+            for link in &mut segment.links {
+                let Some(aoid) = link.href.strip_prefix("aoid:") else {
+                    continue;
+                };
+                let Some(Some(anchor)) = anchors.get(aoid) else {
+                    continue;
+                };
+                let target = AnchorTarget {
+                    spec: spec.to_string(),
+                    anchor: anchor.clone(),
+                };
+                link.target = Some(target.clone());
+                resolved.insert((segment.source.node_id.clone(), link.id.clone()), target);
+            }
+        }
+        for operation in &mut algorithm.operation_sites {
+            if let Some(target) =
+                resolved.get(&(operation.segment_id.clone(), operation.link_id.clone()))
+            {
+                operation.target = Some(target.clone());
+            }
+        }
     }
 }
 
@@ -2644,6 +2692,34 @@ mod tests {
             .as_ref()
             .map(|target| target.anchor.as_str())
             != Some("note-target")));
+    }
+
+    #[test]
+    fn ecmarkup_aoid_links_resolve_only_unique_local_targets() {
+        let html = r#"
+            <emu-clause id="source"><h1>Source</h1><emu-alg><ol><li>
+              Perform <emu-xref aoid="Called">Called</emu-xref>.
+              Perform <emu-xref aoid="Ambiguous">Ambiguous</emu-xref>.
+              Perform <emu-xref aoid="Unknown">Unknown</emu-xref>.
+            </li></ol></emu-alg></emu-clause>
+            <emu-clause id="called" aoid="Called"><h1>Called</h1><emu-alg><ol><li>Return.</li></ol></emu-alg></emu-clause>
+            <emu-clause id="ambiguous-one" aoid="Ambiguous"><h1>First</h1></emu-clause>
+            <emu-clause id="ambiguous-two" aoid="Ambiguous"><h1>Second</h1></emu-clause>
+        "#;
+        let spec = extract_step_structure(html, "ECMA-262", "https://tc39.es/ecma262/", "sha");
+        let source = algorithm(&spec, "source");
+        let operations = &source.operation_sites;
+        assert_eq!(operations.len(), 3);
+        assert_eq!(
+            operations[0]
+                .target
+                .as_ref()
+                .map(|target| target.anchor.as_str()),
+            Some("called")
+        );
+        assert!(operations[1].target.is_none());
+        assert!(operations[2].target.is_none());
+        assert_eq!(source.segments[0].links[0].target, operations[0].target);
     }
 
     #[test]
