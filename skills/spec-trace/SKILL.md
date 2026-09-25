@@ -70,7 +70,8 @@ route whether it is taken, from what each hop already carries:
   previous* ongoing navigation does not report *this* one.
 
 Read the whole section when a hop's own text and guards are not enough:
-`webspec-index query '<SPEC#anchor>' --format markdown`.
+`webspec-index query '<SPEC#anchor>' --format markdown`
+(links default to `short` — `SPEC#anchor` — which you can feed back into `query`; use `--links full` for absolute URLs).
 
 **A NOT REACHED verdict needs the step where the chain stops, and that step is never in the
 output.** `trace` enumerates routes that reach the target, so the step that ends a chain instead —

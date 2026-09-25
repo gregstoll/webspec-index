@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use moz_cli_version_check::VersionChecker;
 
-use webspec_index::{format, model};
+use webspec_index::{content_filter, format, model};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -72,6 +72,27 @@ enum AnalyzeFormat {
 enum FlowOutputFormat {
     Json,
     Mermaid,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum LinksArg {
+    /// Rewrite known-spec URLs to SPEC#anchor (e.g. HTML#navigate); keeps others as full URLs
+    #[default]
+    Short,
+    /// Keep full absolute URLs
+    Full,
+    /// Emit link text only; remove all bracket and URL markup
+    None,
+}
+
+impl From<LinksArg> for content_filter::LinksMode {
+    fn from(v: LinksArg) -> Self {
+        match v {
+            LinksArg::Short => Self::Short,
+            LinksArg::Full => Self::Full,
+            LinksArg::None => Self::None,
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,6 +232,11 @@ enum Command {
         The argument can be SPEC#anchor or a full spec URL:\n  \
         webspec-index query HTML#navigate\n  \
         webspec-index query \"https://html.spec.whatwg.org/#navigate\"\n\n\
+        Link rendering (--links):\n  \
+        short (default) — rewrite known-spec URLs to SPEC#anchor (e.g. HTML#navigate)\n  \
+        full            — keep absolute URLs\n  \
+        none            — emit link text only, no URL or bracket markup\n\n\
+        Use --no-notes to drop Note / Example / Warning / Issue advisement blocks.\n\n\
         Use --pr to query against a PR preview — WHATWG specs (via whatpr.org) or\n\
         TC39 proposals (via the PR's built index.html). Sections not modified by\n\
         the PR fall back to the merge base.\n\
@@ -231,6 +257,20 @@ enum Command {
 
         #[arg(long, help = "Force re-fetch of PR preview data")]
         force_update: bool,
+
+        #[arg(
+            long,
+            value_enum,
+            default_value = "short",
+            help = "Link rendering: short (SPEC#anchor), full (absolute URLs), or none (text only)"
+        )]
+        links: LinksArg,
+
+        #[arg(
+            long,
+            help = "Strip Note / Example / Warning / Issue advisement blocks from content"
+        )]
+        no_notes: bool,
 
         #[command(flatten)]
         effect_options: QueryEffectsArgs,
@@ -744,7 +784,7 @@ fn is_llm_environment() -> bool {
 fn print_llm_help() {
     print!(
         r#"webspec-index: Query WHATWG/W3C/TC39 web specifications
-query <SPEC#anchor|URL> [--effects auto|cached|off] [--rules PATH] [--environment NAME] [--pr N] [--diff] [--format json|markdown]
+query <SPEC#anchor|URL> [--links short(default)|full|none] [--no-notes] [--effects auto|cached|off] [--rules PATH] [--environment NAME] [--pr N] [--diff] [--format json|markdown]
 search <Q> [-s SPEC] [-l N(20)] [--pr N (requires -s)] [--format json|markdown]
 exists <SPEC#anchor|URL> [--pr N] exit:0=found,1=not
 anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
@@ -821,6 +861,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             pr,
             diff,
             force_update,
+            links,
+            no_notes,
             effect_options,
         } => {
             let pr_opts = pr.map(|n| model::PrOpts {
@@ -845,12 +887,21 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 environment: effect_options.environment,
                 ..Default::default()
             };
-            let result = webspec_index::effects::query_section_with_effects(
+            let mut result = webspec_index::effects::query_section_with_effects(
                 &spec_anchor,
                 pr_opts.as_ref(),
                 options,
             )
             .await?;
+            let links_mode: content_filter::LinksMode = links.into();
+            if links_mode != content_filter::LinksMode::Full || no_notes {
+                let registry = webspec_index::spec_registry::SpecRegistry::new();
+                if let Some(content) = result.query.content.as_deref() {
+                    result.query.content = Some(content_filter::transform_content(
+                        content, links_mode, no_notes, &registry,
+                    ));
+                }
+            }
             let catalog = if result.effects.is_some() {
                 webspec_index::effects::default_catalog(&effect_options.rules).ok()
             } else {
@@ -1573,5 +1624,53 @@ mod cli_effect_tests {
     fn parses_dotted_step_path() {
         assert_eq!(parse_step_path("14.12.3").unwrap(), vec![14, 12, 3]);
         assert!(parse_step_path("14..3").is_err());
+    }
+
+    #[test]
+    fn query_links_default_is_short() {
+        let cli = Cli::try_parse_from(["webspec-index", "query", "HTML#navigate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query {
+                links: LinksArg::Short,
+                no_notes: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn query_links_full_is_accepted() {
+        let cli =
+            Cli::try_parse_from(["webspec-index", "query", "HTML#navigate", "--links", "full"])
+                .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query {
+                links: LinksArg::Full,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn query_links_none_is_accepted() {
+        let cli =
+            Cli::try_parse_from(["webspec-index", "query", "HTML#navigate", "--links", "none"])
+                .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query {
+                links: LinksArg::None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn query_no_notes_flag_is_accepted() {
+        let cli =
+            Cli::try_parse_from(["webspec-index", "query", "HTML#navigate", "--no-notes"]).unwrap();
+        assert!(matches!(cli.command, Command::Query { no_notes: true, .. }));
     }
 }

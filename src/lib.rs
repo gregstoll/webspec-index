@@ -6,6 +6,7 @@
 #[cfg(feature = "native")]
 pub mod analyze;
 pub mod api;
+pub mod content_filter;
 pub mod db;
 pub mod effects;
 #[cfg(feature = "native")]

@@ -68,6 +68,12 @@ webspec-index query "HTML#navigate"
 webspec-index query "HTML#navigate" --effects cached
 webspec-index query "HTML#navigate" --effects off  # original JSON shape
 
+# Link rendering in content: SPEC#anchor by default, which `query` accepts directly
+webspec-index query "HTML#navigate" --links short    # SPEC#anchor links (default)
+webspec-index query "HTML#navigate" --links full     # full absolute URLs
+webspec-index query "HTML#navigate" --links none     # link text only, no URLs
+webspec-index query "HTML#navigate" --no-notes       # drop Note/Example/Warning blocks
+
 # Inspect effect evidence for an algorithm or one of its steps
 webspec-index effects "HTML#navigate"
 webspec-index effects "HTML#navigate" --step 20 --kind event.fire
