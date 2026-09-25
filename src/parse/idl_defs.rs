@@ -1,7 +1,7 @@
 use crate::model::ParsedIdlDefinition;
 use scraper::Html;
 
-fn normalize_owner(raw_owner: &str) -> String {
+pub(crate) fn normalize_owner(raw_owner: &str) -> String {
     raw_owner
         .split('/')
         .next()

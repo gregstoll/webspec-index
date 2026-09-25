@@ -48,7 +48,7 @@ fn is_callout(e: &ElementRef<'_>) -> bool {
         .any(|c| matches!(c, "note" | "example" | "warning" | "advisement"))
 }
 
-fn norm(text: &str) -> String {
+pub(crate) fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
