@@ -2129,6 +2129,7 @@ impl<'g> Analysis<'g> {
                 .or_default()
                 .push(edge.from.as_str());
         }
+        #[allow(clippy::iter_over_hash_type)] // order-free: sorts each list in place
         for parents in issue_parents.values_mut() {
             parents.sort_unstable();
             parents.dedup();
@@ -5181,5 +5182,50 @@ rules:
             resolved.err()
         );
         assert_eq!(resolved.unwrap(), "bA");
+    }
+
+    #[test]
+    fn graph_build_is_byte_identical_across_runs() {
+        let html = include_str!("../../tests/fixtures/effects/engine/acceptance.html");
+        let package = load_package_files(&[(
+            "catalog.yaml",
+            include_str!("../../tests/fixtures/effects/engine/catalog.yaml"),
+        )])
+        .unwrap();
+        let catalog = load_catalog([package]).unwrap();
+        let build = || {
+            let structure =
+                extract_step_structure(html, "TEST", "https://example.test/spec", "hash:t");
+            let sources = [SourceSpec {
+                spec: "TEST".into(),
+                snapshot_sha: "hash:t".into(),
+                base_url: "https://example.test/spec".into(),
+                anchors: structure
+                    .anchors
+                    .iter()
+                    .map(|a| IndexedAnchor {
+                        anchor: a.clone(),
+                        url: format!("https://example.test/spec#{a}"),
+                        text: String::new(),
+                        idl_kind: None,
+                    })
+                    .collect(),
+                structure: Some(structure),
+            }];
+            let graph = build_graph(
+                GraphInput {
+                    sources: &sources,
+                    catalog: &catalog,
+                    environment: "generic",
+                },
+                None,
+            )
+            .unwrap();
+            serde_json::to_string(&graph).unwrap()
+        };
+        let first = build();
+        for _ in 0..4 {
+            assert_eq!(first, build());
+        }
     }
 }

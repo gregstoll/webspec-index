@@ -9,7 +9,7 @@ use regex::Regex;
 use scraper::{ElementRef, Html, Node, Selector};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 
 use super::algorithms::step_number;
@@ -298,7 +298,7 @@ struct ExtractContext<'a> {
 struct AlgorithmBuilder<'a> {
     ctx: ExtractContext<'a>,
     algorithm: StructuralAlgorithm,
-    body_bindings: HashMap<(String, String), Vec<String>>,
+    body_bindings: BTreeMap<(String, String), Vec<String>>,
     pending_continuations: Vec<usize>,
 }
 
@@ -612,7 +612,7 @@ fn extract_algorithm(
             continuations: Vec::new(),
             issues: Vec::new(),
         },
-        body_bindings: HashMap::new(),
+        body_bindings: BTreeMap::new(),
         pending_continuations: Vec::new(),
     };
 
@@ -1617,11 +1617,15 @@ impl AlgorithmBuilder<'_> {
 
     fn visible_binding_entries(&self, scope_body_id: &str) -> Vec<(String, String)> {
         let mut result = Vec::new();
-        let mut seen_names = HashSet::new();
+        let mut seen_names = BTreeSet::new();
         let mut current = Some(scope_body_id);
         while let Some(body_id) = current {
-            for ((binding_body_id, name), ids) in &self.body_bindings {
-                if binding_body_id == body_id && seen_names.insert(name.clone()) {
+            let start = (body_id.to_string(), String::new());
+            for ((binding_body_id, name), ids) in self.body_bindings.range(start..) {
+                if binding_body_id != body_id {
+                    break;
+                }
+                if seen_names.insert(name.clone()) {
                     result.extend(ids.iter().map(|id| (name.clone(), id.clone())));
                 }
             }
@@ -3249,5 +3253,28 @@ mod tests {
             "hash:x",
         );
         assert_eq!(s.algorithms[0].source.node_id, expected);
+    }
+
+    #[test]
+    fn streams_extraction_is_deterministic_within_one_process() {
+        let html =
+            include_str!("../../tests/fixtures/fuzz/new-29-ir-nondeterministic-body-ids.html");
+        let extract = || {
+            serde_json::to_string(&extract_step_structure(
+                html,
+                "STREAMS",
+                "https://streams.spec.whatwg.org",
+                "hash:t",
+            ))
+            .unwrap()
+        };
+        let first = extract();
+        for _ in 0..8 {
+            assert_eq!(
+                first,
+                extract(),
+                "every HashMap gets its own seed, so repeats expose #29"
+            );
+        }
     }
 }

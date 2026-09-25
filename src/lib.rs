@@ -8,6 +8,7 @@ pub mod analyze;
 pub mod api;
 pub mod content_filter;
 pub mod db;
+#[deny(clippy::iter_over_hash_type)]
 pub mod effects;
 #[cfg(feature = "native")]
 pub mod export;
@@ -21,6 +22,7 @@ pub mod itu;
 #[cfg(feature = "native")]
 pub mod lsp;
 pub mod model;
+#[deny(clippy::iter_over_hash_type)]
 pub mod parse;
 pub mod render;
 #[cfg(feature = "native")]
