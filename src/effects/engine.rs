@@ -2562,14 +2562,15 @@ impl AnalysisArtifact {
     ) -> Result<ArtifactSummary, RequestError> {
         selector.validate()?;
         let node_id = self.resolve_selector(selector)?;
-        self.summary_records(filter)?
+        let records = self.summary_records(filter)?;
+        let subject = self
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id)
+            .map(|node| &node.subject);
+        records
             .into_iter()
-            .find(|record| {
-                self.nodes
-                    .iter()
-                    .find(|node| node.id == node_id)
-                    .is_some_and(|node| node.subject == record.subject)
-            })
+            .find(|record| Some(&record.subject) == subject)
             .map(|record| self.materialize_record(record, sites))
             .transpose()?
             .ok_or_else(|| {
