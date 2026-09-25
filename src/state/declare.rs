@@ -3,7 +3,7 @@ use crate::parse::idl_defs::normalize_owner;
 use crate::parse::sections::is_inside_algorithm_content;
 use crate::parse::steps::StructuralSpec;
 use crate::state::block::{
-    flatten, innermost_block, norm, pattern, plain_text, sentences, BlockToken,
+    flatten, innermost_block, list_item, norm, pattern, plain_text, sentences, BlockToken,
 };
 use crate::state::model::{
     AnchorTarget, DeclarationSite, FieldBasis, FieldDef, ModelIssue, Owner, OwnerBasis, OwnerRef,
@@ -38,6 +38,185 @@ const AUXILIARIES: [&str; 13] = [
 
 fn regex(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(source).unwrap())
+}
+
+/// Result of applying R3/R4/R5 to the list the dfn lives in (§6.3).
+#[allow(dead_code)]
+enum ListCandidate<'a> {
+    /// R3: the intro paragraph matches `R2` — the dfn is a property of the named owner(s).
+    Property {
+        owners: Vec<OwnerPhrase>,
+        intro_initial: Option<String>,
+    },
+    /// R4: the intro links to `INFRA#struct` or says "following items" and contains a dfn.
+    Struct {
+        owner_dfn: ElementRef<'a>,
+        intro_initial: Option<String>,
+    },
+    /// R5: "A/An D is a set of … the following" — the dfn is a set member, never a field.
+    SetOf { set_dfn: ElementRef<'a> },
+}
+
+/// True if an element is a spec callout (note/example/warning/advisement) to skip when
+/// searching for an intro paragraph.
+fn is_list_callout(e: &ElementRef<'_>) -> bool {
+    e.value()
+        .classes()
+        .any(|c| matches!(c, "note" | "example" | "warning" | "advisement"))
+}
+
+/// Extract `initially <word>` or `all initially <word>` from an intro plain-text string.
+fn extract_intro_initial(intro_text: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(&RE, r"(?:all )?initially (\w+)")
+        .captures(intro_text)
+        .map(|caps| caps[1].to_string())
+}
+
+/// Apply the R2 pattern to `text` (a single sentence from a pattern string) using `slots`
+/// as the token-index table for placeholder resolution. Returns the matched owner phrases.
+fn parse_r2_owners(text: &str, slots: &[usize]) -> Option<Vec<OwnerPhrase>> {
+    static R2_RE: OnceLock<Regex> = OnceLock::new();
+    static R2_ALT_RE: OnceLock<Regex> = OnceLock::new();
+    static SEPARATOR: OnceLock<Regex> = OnceLock::new();
+    static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
+    let caps = regex(&R2_RE, R2)
+        .captures(text)
+        .or_else(|| regex(&R2_ALT_RE, R2_ALT).captures(text))?;
+    let placeholder = regex(&PLACEHOLDER, r"^⟦[LDC](\d+)⟧$");
+    let mut owners = Vec::new();
+    for part in regex(&SEPARATOR, r", and |, | and ").split(&caps["owners"]) {
+        if let Some(n) = placeholder.captures(part) {
+            owners.push(OwnerPhrase::Slot(slots[n[1].parse::<usize>().ok()?]));
+        } else if part.split(' ').any(|w| AUXILIARIES.contains(&w)) {
+            return None;
+        } else {
+            owners.push(OwnerPhrase::Words(part.to_string()));
+        }
+    }
+    Some(owners)
+}
+
+/// Try to identify the intro paragraph before a list, apply R5/R4/R3, and return the candidate.
+fn list_candidate<'a>(
+    dfn: &ElementRef<'a>,
+    spec: &str,
+    base_url: &str,
+) -> Option<(ListCandidate<'a>, Vec<BlockToken>)> {
+    let (_item, list) = list_item(dfn)?;
+
+    // Walk backwards from the list, skipping whitespace text nodes, comments and callouts.
+    let intro_el = {
+        let mut found: Option<ElementRef<'a>> = None;
+        let mut cursor = list.prev_sibling();
+        while let Some(node) = cursor {
+            match node.value() {
+                Node::Text(t) if t.trim().is_empty() => {}
+                Node::Comment(_) => {}
+                Node::Element(_) => {
+                    let el = ElementRef::wrap(node).expect("element node wraps");
+                    if is_list_callout(&el) {
+                        // skip callouts, keep looking
+                    } else {
+                        found = Some(el);
+                        break;
+                    }
+                }
+                _ => break,
+            }
+            cursor = node.prev_sibling();
+        }
+        found?
+    };
+
+    if intro_el.value().name() != "p" {
+        return None;
+    }
+
+    let intro_tokens = flatten(&intro_el, spec, base_url);
+    let intro_pat = pattern(&intro_tokens);
+
+    if !intro_pat.text.ends_with(':') {
+        return None;
+    }
+
+    let intro_sents = sentences(&intro_pat);
+    let last_sent = intro_sents.last()?;
+    let last_sent_text = &intro_pat.text[last_sent.start..];
+
+    // Build a map from dfn id → ElementRef for dfns inside the intro paragraph.
+    let intro_dfn_map: HashMap<&str, ElementRef<'a>> = {
+        static SEL: OnceLock<Selector> = OnceLock::new();
+        let sel = SEL.get_or_init(|| Selector::parse("dfn[id]").unwrap());
+        intro_el
+            .select(sel)
+            .filter_map(|d| d.value().attr("id").map(|id| (id, d)))
+            .collect()
+    };
+
+    let intro_text = plain_text(&intro_tokens);
+
+    // R5: "A/An ⟦D(N)⟧ is a set of (zero or more of )the following"
+    {
+        static R5_RE: OnceLock<Regex> = OnceLock::new();
+        let r5 = regex(
+            &R5_RE,
+            r"^(?:A|An) ⟦D(\d+)⟧ is a set of (?:zero or more of )?the following ",
+        );
+        if let Some(caps) = r5.captures(last_sent_text) {
+            let slot_idx: usize = caps[1].parse().ok()?;
+            let token_idx = *intro_pat.slots.get(slot_idx)?;
+            if let BlockToken::Dfn { id, .. } = &intro_tokens[token_idx] {
+                if let Some(&set_dfn) = intro_dfn_map.get(id.as_str()) {
+                    return Some((ListCandidate::SetOf { set_dfn }, intro_tokens));
+                }
+            }
+            return None;
+        }
+    }
+
+    // R4: intro links to INFRA#struct, or contains "following items", and has a dfn.
+    {
+        let has_struct_link = intro_tokens.iter().any(|t| {
+            matches!(t, BlockToken::Link { target: Some(target), .. }
+                if target.spec == "INFRA" && target.anchor == "struct")
+        });
+        let has_following_items = intro_text.contains("following items");
+        if has_struct_link || has_following_items {
+            // Find the first dfn in document order from the intro tokens.
+            let owner_dfn = intro_tokens.iter().find_map(|t| {
+                if let BlockToken::Dfn { id, .. } = t {
+                    intro_dfn_map.get(id.as_str()).copied()
+                } else {
+                    None
+                }
+            });
+            if let Some(owner_dfn) = owner_dfn {
+                let intro_initial = extract_intro_initial(&intro_text);
+                return Some((
+                    ListCandidate::Struct {
+                        owner_dfn,
+                        intro_initial,
+                    },
+                    intro_tokens,
+                ));
+            }
+        }
+    }
+
+    // R3: last sentence matches R2.
+    if let Some(owners) = parse_r2_owners(last_sent_text, &intro_pat.slots) {
+        let intro_initial = extract_intro_initial(&intro_text);
+        return Some((
+            ListCandidate::Property {
+                owners,
+                intro_initial,
+            },
+            intro_tokens,
+        ));
+    }
+
+    None
 }
 
 fn is_concept_dfn(dfn: &ElementRef<'_>) -> bool {
@@ -498,8 +677,49 @@ pub(crate) fn declare_fields(
         let declared = phrases
             .map(|phrases| resolver.owner(&phrases, &tokens, OwnerBasis::DeclarationSentence));
 
-        let (owner, rule) = match (r1, &declared) {
-            (Some((name, r1)), _) => {
+        // R5 check (set member) → always wins; R3/R4 pass through for field handling.
+        let list_r34 = match list_candidate(dfn, spec, base_url) {
+            Some((ListCandidate::SetOf { set_dfn }, _)) => {
+                let set_id = set_dfn.value().attr("id").unwrap_or_default();
+                let set_name = norm(&set_dfn.text().collect::<String>());
+                let set_key =
+                    resolver
+                        .table
+                        .add_concept(spec, set_id, &set_name, TypeKind::Concept);
+                let (name, names) = dfn_names(dfn);
+                out.members.push(SetMember {
+                    anchor: AnchorTarget {
+                        spec: spec.to_string(),
+                        anchor: id.to_string(),
+                    },
+                    name,
+                    names,
+                    set: set_key,
+                    declaration: DeclarationSite {
+                        section_anchor: section_anchor.clone(),
+                        text: plain_text(&tokens),
+                    },
+                });
+                out.counters.set_members += 1;
+                continue;
+            }
+            other => other,
+        };
+
+        // R4: always register the InfraStruct type even when R1 wins the field's owner.
+        if let Some((ListCandidate::Struct { owner_dfn, .. }, _)) = &list_r34 {
+            let struct_id = owner_dfn.value().attr("id").unwrap_or_default();
+            let struct_name = norm(&owner_dfn.text().collect::<String>());
+            resolver
+                .table
+                .add_concept(spec, struct_id, &struct_name, TypeKind::InfraStruct);
+        }
+
+        let has_list = list_r34.is_some();
+
+        let (owner, rule) = match (r1, &declared, list_r34) {
+            // R1 wins over R2/R3/R4 for the field owner.
+            (Some((name, r1)), _, _) => {
                 let owner = match r1 {
                     Some(owner) => Owner::Known {
                         types: vec![owner],
@@ -531,8 +751,40 @@ pub(crate) fn declare_fields(
                 }
                 (owner, OwnerBasis::DfnFor)
             }
-            (None, Some(owner)) => (owner.clone(), OwnerBasis::DeclarationSentence),
-            (None, None) => continue,
+            // No R1: R4 (struct items) owns the field.
+            (None, _, Some((ListCandidate::Struct { owner_dfn, .. }, _))) => {
+                let struct_id = owner_dfn.value().attr("id").unwrap_or_default();
+                let key = resolver
+                    .table
+                    .by_anchor
+                    .get(struct_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        TypeKey::Anchor(AnchorTarget {
+                            spec: spec.to_string(),
+                            anchor: struct_id.to_string(),
+                        })
+                    });
+                let owner = Owner::Known {
+                    types: vec![OwnerRef {
+                        key,
+                        via: OwnerVia::DfnName,
+                    }],
+                    basis: OwnerBasis::StructItems,
+                };
+                (owner, OwnerBasis::StructItems)
+            }
+            // No R1: R3 (property list) owns the field.
+            (None, _, Some((ListCandidate::Property { owners, .. }, intro_tokens))) => {
+                let owner = resolver.owner(&owners, &intro_tokens, OwnerBasis::PropertyList);
+                (owner, OwnerBasis::PropertyList)
+            }
+            // No R1, no list: R2 (declaration sentence).
+            (None, Some(owner), None) => (owner.clone(), OwnerBasis::DeclarationSentence),
+            // No owner source at all.
+            (None, None, None) => continue,
+            // SetOf was already handled above with `continue`; this arm is unreachable.
+            (None, _, Some((ListCandidate::SetOf { .. }, _))) => unreachable!(),
         };
 
         out.counters.owner_candidates += 1;
@@ -544,7 +796,7 @@ pub(crate) fn declare_fields(
             out.counters.owner_resolved += 1;
         }
 
-        let field_basis = if declared.is_some() {
+        let field_basis = if declared.is_some() || has_list {
             FieldBasis::Declared
         } else if is_algorithm_section(dfn, block.as_ref(), &tokens, &algorithm_anchors) {
             continue;
@@ -581,6 +833,36 @@ pub(crate) fn declare_fields(
             }),
         });
     }
+
+    // Rewrite same-spec TypeKey::Anchor owner keys through table.by_anchor.
+    // alias_concept() can remove a Concept entry and reroute its anchor to an IDL key;
+    // fields emitted before that alias is established must be updated here.
+    for field in &mut out.fields {
+        if let Owner::Known { types, .. } = &mut field.owner {
+            let mut seen = HashSet::new();
+            types.retain_mut(|owner_ref| {
+                if let TypeKey::Anchor(ref target) = owner_ref.key {
+                    if target.spec == spec {
+                        if let Some(new_key) = resolver.table.by_anchor.get(&target.anchor).cloned()
+                        {
+                            owner_ref.key = new_key;
+                        }
+                    }
+                }
+                seen.insert(owner_ref.key.clone())
+            });
+        }
+    }
+    for member in &mut out.members {
+        if let TypeKey::Anchor(ref target) = member.set {
+            if target.spec == spec {
+                if let Some(new_key) = resolver.table.by_anchor.get(&target.anchor).cloned() {
+                    member.set = new_key;
+                }
+            }
+        }
+    }
+
     out
 }
 
@@ -810,5 +1092,109 @@ mod tests {
         assert!(
             matches!(&field(&out, "w").owner, Owner::Known { types, .. } if types[0].key == TypeKey::Idl("Window".into()) && types[0].via == OwnerVia::IdlName)
         );
+    }
+
+    // A6: R3 property lists, R4 struct items, R5 set members.
+
+    #[test]
+    fn property_list_items_are_owned_by_the_intro_owner() {
+        let out = run(
+            r##"<p>A <dfn id="navigable">navigable</dfn> presents a document. Each navigable has:</p><ul>
+      <li><p>An <dfn id="nav-id">id</dfn>, a new unique internal value.</p></li>
+      <li><p>A <dfn data-dfn-for="navigable" id="nav-parent">parent</dfn>, a <a href="#navigable">navigable</a> or null.</p></li></ul>"##,
+            "HTML",
+        );
+        assert_eq!(owner_keys(field(&out, "nav-id")), ["HTML#navigable"]);
+        assert!(matches!(
+            &field(&out, "nav-id").owner,
+            Owner::Known {
+                basis: OwnerBasis::PropertyList,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &field(&out, "nav-parent").owner,
+            Owner::Known {
+                basis: OwnerBasis::DfnFor,
+                ..
+            }
+        ));
+        assert_eq!(field(&out, "nav-parent").field_basis, FieldBasis::Declared);
+    }
+
+    #[test]
+    fn struct_items_make_an_infra_struct_owner() {
+        let doc_html = r##"<p>The <dfn id="dlti">document load timing info</dfn> <a href="https://infra.spec.whatwg.org/#struct">struct</a> has the following items:</p><dl>
+      <dt><dfn data-dfn-for="document load timing info" id="nst">navigation start time</dfn> (default 0)</dt><dd>A number</dd></dl>"##;
+        let out = run(doc_html, "HTML");
+        assert_eq!(owner_keys(field(&out, "nst")), ["HTML#dlti"]);
+    }
+
+    #[test]
+    fn event_flags_list_is_owned_by_event() {
+        let out = run(
+            r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="event">Event</dfn> {};</pre>
+      <p>An <dfn data-dfn-type="dfn" id="concept-event">event</dfn> is …</p>
+      <p>Each <a href="#concept-event">event</a> has the following associated flags that are all initially unset:</p>
+      <ul><li><dfn data-dfn-for="Event" data-dfn-type="dfn" id="stop-propagation-flag">stop propagation flag</dfn></li>
+      <li><dfn data-dfn-for="Event" data-dfn-type="dfn" id="canceled-flag">canceled flag</dfn></li></ul>"##,
+            "DOM",
+        );
+        assert_eq!(
+            owner_keys(field(&out, "stop-propagation-flag")),
+            ["idl:Event"]
+        );
+        assert_eq!(owner_keys(field(&out, "canceled-flag")), ["idl:Event"]);
+    }
+
+    #[test]
+    fn sandboxing_flags_are_set_members_not_fields() {
+        let out = run(
+            r##"<p>A <dfn id="sfs">sandboxing flag set</dfn> is a set of zero or more of the following flags, which are used to restrict abilities:</p>
+      <dl><dt>The <dfn id="snf">sandboxed navigation browsing context flag</dfn></dt><dd><p>This flag prevents content from navigating.</p></dd></dl>"##,
+            "HTML",
+        );
+        assert!(out.fields.iter().all(|f| f.anchor.anchor != "snf"));
+        let m = out
+            .members
+            .iter()
+            .find(|m| m.anchor.anchor == "snf")
+            .unwrap();
+        assert_eq!(m.set.to_string(), "HTML#sfs");
+    }
+
+    #[test]
+    fn owner_key_rewritten_after_concept_aliases_to_idl() {
+        // tid's R2 owner resolves to concept-thing (TypeKey::Anchor(HTML#concept-thing)).
+        // ttype comes later and aliases concept-thing to idl:FancyType via data-dfn-for.
+        // Post-processing must rewrite tid's owner to idl:FancyType, and every owner key
+        // must have a TypeDef in the table.
+        let out = run(
+            r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="fancytype-iface">FancyType</dfn> {};</pre>
+      <p>A <dfn data-dfn-type="dfn" id="concept-thing">document thing</dfn> is …</p>
+      <p>Each <a href="#concept-thing">document thing</a> has a <dfn id="tid">thing id</dfn>.</p>
+      <p>A <a href="#concept-thing">document thing</a> has an associated <dfn data-dfn-for="FancyType" data-dfn-type="dfn" id="ttype">type</dfn>.</p>"##,
+            "HTML",
+        );
+        assert_eq!(owner_keys(field(&out, "tid")), ["idl:FancyType"]);
+        let (_, table) = run_with_table(
+            r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="fancytype-iface">FancyType</dfn> {};</pre>
+      <p>A <dfn data-dfn-type="dfn" id="concept-thing">document thing</dfn> is …</p>
+      <p>Each <a href="#concept-thing">document thing</a> has a <dfn id="tid">thing id</dfn>.</p>
+      <p>A <a href="#concept-thing">document thing</a> has an associated <dfn data-dfn-for="FancyType" data-dfn-type="dfn" id="ttype">type</dfn>.</p>"##,
+            "HTML",
+        );
+        for f in &out.fields {
+            if let Owner::Known { types, .. } = &f.owner {
+                for t in types {
+                    assert!(
+                        table.types.contains_key(&t.key),
+                        "no TypeDef for {:?} (field {})",
+                        t.key,
+                        f.anchor.anchor
+                    );
+                }
+            }
+        }
     }
 }
