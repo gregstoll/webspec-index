@@ -1,5 +1,5 @@
 // Query operations on the database
-use crate::model::{ParsedSection, PrDiffEntry, RefKind, SectionType};
+use crate::model::{ListEntry, ParsedSection, PrDiffEntry, RefKind, SectionType};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -525,40 +525,27 @@ pub fn find_anchors(
 }
 
 /// List all headings in a spec
-pub fn list_headings(conn: &Connection, snapshot_id: i64) -> Result<Vec<ParsedSection>> {
+pub fn list_headings(conn: &Connection, snapshot_id: i64) -> Result<Vec<ListEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number
+        "SELECT anchor, title, depth, parent_anchor, number
          FROM sections
          WHERE snapshot_id = ?1 AND section_type = 'heading'
          ORDER BY rowid",
     )?;
 
-    let sections = stmt
+    let headings = stmt
         .query_map([snapshot_id], |row| {
-            Ok(ParsedSection {
+            Ok(ListEntry {
                 anchor: row.get(0)?,
                 title: row.get(1)?,
-                content_text: row.get(2)?,
-                section_type: row
-                    .get::<_, String>(3)?
-                    .parse::<SectionType>()
-                    .map_err(|_| {
-                        rusqlite::Error::InvalidColumnType(
-                            3,
-                            "section_type".to_string(),
-                            rusqlite::types::Type::Text,
-                        )
-                    })?,
-                parent_anchor: row.get(4)?,
-                prev_anchor: row.get(5)?,
-                next_anchor: row.get(6)?,
-                depth: row.get(7)?,
-                number: row.get(8)?,
+                depth: row.get::<_, Option<u8>>(2)?.unwrap_or(0),
+                parent: row.get(3)?,
+                number: row.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(sections)
+    Ok(headings)
 }
 
 fn normalize_content(s: &str) -> String {

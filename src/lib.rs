@@ -271,26 +271,13 @@ pub fn query_section_from_conn(
     )?))
 }
 
-fn heading_to_list_entry(h: &model::ParsedSection) -> model::ListEntry {
-    model::ListEntry {
-        anchor: h.anchor.clone(),
-        title: h.title.clone(),
-        depth: h.depth.unwrap_or(0),
-        parent: h.parent_anchor.clone(),
-        number: h.number.clone(),
-    }
-}
-
 pub fn list_headings_from_conn(
     conn: &Connection,
     spec_name: &str,
 ) -> Result<Vec<model::ListEntry>> {
     let snapshot_id = db::queries::get_snapshot(conn, spec_name)?
         .with_context(|| format!("spec {spec_name} is not indexed"))?;
-    Ok(db::queries::list_headings(conn, snapshot_id)?
-        .iter()
-        .map(heading_to_list_entry)
-        .collect())
+    db::queries::list_headings(conn, snapshot_id)
 }
 
 pub fn check_exists_from_conn(
@@ -725,10 +712,7 @@ pub async fn list_headings(
             pr_opts.force_update,
         )
         .await?;
-        Ok(db::queries::list_headings(&conn, pr_snap)?
-            .iter()
-            .map(heading_to_list_entry)
-            .collect())
+        db::queries::list_headings(&conn, pr_snap)
     } else {
         let (_, name) = ensure_indexed_for_spec_name(&conn, &registry, spec, None).await?;
         list_headings_from_conn(&conn, &name)
