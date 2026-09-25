@@ -5,5 +5,6 @@
 pub(crate) mod block;
 pub mod ir;
 pub mod model;
+pub(crate) mod types;
 
 pub use model::*;

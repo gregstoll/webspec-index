@@ -84,8 +84,18 @@ pub struct TypeAnchor {
 pub enum AnchorRole {
     Defining,
     Partial,
-    ConceptAlias,
+    ConceptAlias(ConceptAliasBasis),
     ElementDefinition,
+}
+
+/// How a concept-dfn alias to an IDL type was established (§6.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConceptAliasBasis {
+    /// Normalized name (lowercase, spaces removed) matched an IDL interface name in the same spec.
+    NameMatch,
+    /// Established by an explicit link, `data-dfn-for`, or a reviewed YAML declaration.
+    Evidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
