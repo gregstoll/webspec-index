@@ -2,6 +2,158 @@
 use htmd::element_handler::Handlers;
 use htmd::{Element, HtmlToMarkdown};
 
+// ── Memo types ────────────────────────────────────────────────────────────────
+
+pub type MemoKey = [u8; 16];
+pub type MarkdownMemo = std::collections::BTreeMap<MemoKey, String>;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MemoStats {
+    pub hits: usize,
+    pub misses: usize,
+}
+
+#[derive(Default)]
+struct MemoState {
+    previous: MarkdownMemo,
+    used: MarkdownMemo,
+    stats: MemoStats,
+}
+
+/// Wrapper around `HtmlToMarkdown` that memoizes conversions keyed on
+/// (base_url, html_input). The key is the first 16 bytes of SHA-256.
+pub struct Converter {
+    html: HtmlToMarkdown,
+    base_url: String,
+    state: std::cell::RefCell<MemoState>,
+}
+
+impl Converter {
+    pub fn new(base_url: &str) -> Self {
+        Self::with_memo(base_url, MarkdownMemo::new())
+    }
+
+    pub fn with_memo(base_url: &str, previous: MarkdownMemo) -> Self {
+        Self {
+            html: build_converter(base_url),
+            base_url: base_url.to_string(),
+            state: std::cell::RefCell::new(MemoState {
+                previous,
+                ..Default::default()
+            }),
+        }
+    }
+
+    fn key(&self, html: &str) -> MemoKey {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.base_url.as_bytes());
+        hasher.update([0]);
+        hasher.update(html.as_bytes());
+        hasher.finalize()[..16].try_into().expect("16 bytes")
+    }
+
+    /// Convert `html` to markdown. Returns the cached result when the exact
+    /// (base_url, html) pair was seen in the previous or current parse.
+    ///
+    /// Repeat calls within the same parse return from `used` without counting
+    /// additional hits or misses. This ensures `finish().1.hits` equals the
+    /// number of distinct keys that were satisfied from `previous`.
+    pub fn convert(&self, html: &str) -> String {
+        let key = self.key(html);
+        let mut state = self.state.borrow_mut();
+        // Repeat call within this parse — return silently without counting.
+        if let Some(seen) = state.used.get(&key).cloned() {
+            return seen;
+        }
+        if let Some(hit) = state.previous.get(&key).cloned() {
+            state.stats.hits += 1;
+            state.used.insert(key, hit.clone());
+            return hit;
+        }
+        drop(state);
+        let output = self.html.convert(html).unwrap_or_default();
+        let mut state = self.state.borrow_mut();
+        state.stats.misses += 1;
+        state.used.insert(key, output.clone());
+        output
+    }
+
+    /// Consume the converter and return the memo of all (key, output) pairs
+    /// used by this parse, together with hit/miss counts.
+    pub fn finish(self) -> (MarkdownMemo, MemoStats) {
+        let state = self.state.into_inner();
+        (state.used, state.stats)
+    }
+}
+
+// ── Memo encoding / decoding ──────────────────────────────────────────────────
+
+/// Encode a memo as a raw-deflate (level 1) byte blob.
+///
+/// Wire format (before compression): for each entry in key order,
+/// 16 key bytes · u32 LE length · UTF-8 value bytes.
+pub fn encode_memo(memo: &MarkdownMemo) -> Vec<u8> {
+    use flate2::{write::DeflateEncoder, Compression};
+    use std::io::Write;
+
+    let mut raw: Vec<u8> = Vec::new();
+    for (key, value) in memo {
+        raw.extend_from_slice(key);
+        let bytes = value.as_bytes();
+        raw.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        raw.extend_from_slice(bytes);
+    }
+
+    let mut enc = DeflateEncoder::new(Vec::new(), Compression::new(1));
+    enc.write_all(&raw).expect("deflate write");
+    enc.finish().expect("deflate finish")
+}
+
+/// Decode a memo previously produced by `encode_memo`.
+pub fn decode_memo(bytes: &[u8]) -> anyhow::Result<MarkdownMemo> {
+    use flate2::read::DeflateDecoder;
+    use std::io::Read;
+
+    let mut dec = DeflateDecoder::new(bytes);
+    let mut raw = Vec::new();
+    dec.read_to_end(&mut raw)?;
+
+    let mut memo = MarkdownMemo::new();
+    let mut pos = 0usize;
+    while pos < raw.len() {
+        if pos + 16 > raw.len() {
+            return Err(anyhow::anyhow!(
+                "truncated memo: missing key bytes at offset {pos}"
+            ));
+        }
+        let key: MemoKey = raw[pos..pos + 16].try_into().expect("16 bytes");
+        pos += 16;
+
+        if pos + 4 > raw.len() {
+            return Err(anyhow::anyhow!(
+                "truncated memo: missing length bytes at offset {pos}"
+            ));
+        }
+        let len = u32::from_le_bytes(raw[pos..pos + 4].try_into().expect("4 bytes")) as usize;
+        pos += 4;
+
+        if pos + len > raw.len() {
+            return Err(anyhow::anyhow!(
+                "truncated memo: missing value bytes at offset {pos}"
+            ));
+        }
+        let value = std::str::from_utf8(&raw[pos..pos + len])
+            .map_err(|e| anyhow::anyhow!("invalid UTF-8 in memo value: {e}"))?
+            .to_string();
+        pos += len;
+
+        memo.insert(key, value);
+    }
+
+    Ok(memo)
+}
+
 /// Build an htmd converter configured for spec content extraction.
 /// `base_url` is used to absolutize relative `#anchor` links.
 pub fn build_converter(base_url: &str) -> HtmlToMarkdown {
@@ -215,27 +367,17 @@ pub fn build_converter(base_url: &str) -> HtmlToMarkdown {
 /// Convert an HTML string to markdown with absolute URLs.
 #[cfg(test)]
 pub fn html_to_markdown(html: &str, base_url: &str) -> String {
-    let converter = build_converter(base_url);
-    converter.convert(html).unwrap_or_default()
+    Converter::new(base_url).convert(html)
 }
 
 /// Convert a scraper ElementRef's outer HTML to markdown.
-pub fn element_to_markdown(element: &scraper::ElementRef, converter: &HtmlToMarkdown) -> String {
-    let html = element.html();
-    converter
-        .convert(&html)
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+pub fn element_to_markdown(element: &scraper::ElementRef, converter: &Converter) -> String {
+    converter.convert(&element.html()).trim().to_string()
 }
 
 /// Convert raw HTML string to markdown.
-pub fn element_to_markdown_from_html(html: &str, converter: &HtmlToMarkdown) -> String {
-    converter
-        .convert(html)
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+pub fn element_to_markdown_from_html(html: &str, converter: &Converter) -> String {
+    converter.convert(html).trim().to_string()
 }
 
 fn has_class(attr_value: &str, class: &str) -> bool {
@@ -366,6 +508,18 @@ fn to_blockquote(content: &str, prefix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memo_encoding_round_trips() {
+        let mut memo = MarkdownMemo::new();
+        memo.insert([1; 16], "**a**".into());
+        memo.insert([2; 16], String::new());
+        assert_eq!(decode_memo(&encode_memo(&memo)).unwrap(), memo);
+        assert_eq!(
+            decode_memo(&encode_memo(&MarkdownMemo::new())).unwrap(),
+            MarkdownMemo::new()
+        );
+    }
 
     #[test]
     fn test_basic_text() {

@@ -1,6 +1,6 @@
+use super::markdown::Converter;
 use crate::model::{ParsedSection, SectionType};
 use anyhow::Result;
-use htmd::HtmlToMarkdown;
 #[cfg(test)]
 use scraper::{Html, Selector};
 
@@ -9,7 +9,7 @@ use scraper::{Html, Selector};
 fn extract_heading_content(
     heading: &scraper::ElementRef,
     current_depth: u8,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Option<String> {
     use super::markdown;
 
@@ -124,7 +124,7 @@ fn heading_depth(tag: &str) -> Option<u8> {
 /// Parse a single heading element into a ParsedSection
 pub fn parse_heading_element(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Result<Option<ParsedSection>> {
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
@@ -156,7 +156,7 @@ pub fn parse_heading_element(
 /// Determines whether it's a Definition, Algorithm, or IDL based on context
 pub fn parse_dfn_element(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Result<Option<ParsedSection>> {
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
@@ -223,7 +223,7 @@ pub fn parse_dfn_element(
 /// Finds the enclosing block-level element and converts to markdown
 fn extract_definition_content(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Option<String> {
     use super::markdown;
 
@@ -277,7 +277,7 @@ fn sole_definition_of_list_item<'a>(
 /// Handles both Bikeshed (div.algorithm) and Wattsi (sibling ol) patterns
 fn extract_algorithm_content(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Option<String> {
     use super::{algorithms, markdown};
 
@@ -330,10 +330,7 @@ fn extract_algorithm_content(
 
 /// Extract algorithm content from a div.algorithm or div[data-algorithm] container.
 /// Properly separates the intro paragraph(s) from the list body (<ol>, <ul>, or <dl>).
-fn extract_from_algorithm_div(
-    div: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
-) -> Option<String> {
+fn extract_from_algorithm_div(div: &scraper::ElementRef, converter: &Converter) -> Option<String> {
     use super::{algorithms, markdown};
 
     // Find the first list element (<ol>, <ul>, or <dl>)
@@ -354,11 +351,7 @@ fn extract_from_algorithm_div(
         }
     }
 
-    let intro = converter
-        .convert(&intro_html)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let intro = converter.convert(&intro_html).trim().to_string();
 
     match list_tag {
         Some(list_elem) => {
@@ -408,10 +401,7 @@ fn extract_idl_content(element: &scraper::ElementRef) -> Option<String> {
 /// Convert an element's full HTML to trimmed markdown, or `None` if it renders
 /// empty. Shared by the anchor and grammar-production parsers, which both use
 /// the element's own HTML as its content.
-fn element_content_text(
-    element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
-) -> Option<String> {
+fn element_content_text(element: &scraper::ElementRef, converter: &Converter) -> Option<String> {
     let md = super::markdown::element_to_markdown_from_html(&element.html(), converter);
     let trimmed = md.trim();
     if trimmed.is_empty() {
@@ -423,7 +413,7 @@ fn element_content_text(
 
 pub fn parse_anchor_element(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Result<Option<ParsedSection>> {
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
@@ -469,7 +459,7 @@ pub fn parse_anchor_element(
 /// The section ID is on the emu-clause, with an `<h1>` child containing the title.
 pub fn parse_emu_clause_element(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Result<Option<ParsedSection>> {
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
@@ -521,7 +511,7 @@ pub fn parse_emu_clause_element(
 /// nonterminal's name. The production's right-hand side becomes the content.
 pub fn parse_emu_production_element(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Result<Option<ParsedSection>> {
     let anchor = match element.value().attr("id") {
         Some(id) => id.to_string(),
@@ -587,7 +577,7 @@ fn extract_secnum_depth(heading: &scraper::ElementRef) -> Option<u8> {
 /// emu-clause/emu-annex elements (sub-sections).
 fn extract_emu_clause_content(
     element: &scraper::ElementRef,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> Option<String> {
     use super::{algorithms, markdown};
 
@@ -650,7 +640,7 @@ fn extract_emu_clause_content(
 #[cfg(test)]
 pub fn collect_headings(html: &str) -> Result<Vec<ParsedSection>> {
     let document = Html::parse_document(html);
-    let converter = crate::parse::markdown::build_converter("https://test.example.com");
+    let converter = crate::parse::markdown::Converter::new("https://test.example.com");
     let mut sections = Vec::new();
 
     // Select all headings with an id attribute (h2, h3, h4, h5, h6)
@@ -1200,7 +1190,7 @@ mod tests {
     }
 
     fn first_emu_production(html: &str) -> Option<ParsedSection> {
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-production").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -1383,7 +1373,7 @@ mod tests {
         // Test Wattsi-style algorithm: <p>To <dfn>foo</dfn>:</p><ol>...</ol>
         // (as opposed to Bikeshed's <div class="algorithm"><p>To <dfn>foo</dfn>:</p><ol>...</ol></div>)
         let html = include_str!("../../tests/fixtures/algorithms/wattsi_navigate.html");
-        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+        let converter = crate::parse::markdown::Converter::new("https://html.spec.whatwg.org");
 
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
@@ -1425,7 +1415,7 @@ mod tests {
         // Regression test: this pattern was previously misclassified as a plain definition,
         // returning only the intro sentence.
         let html = include_str!("../../tests/fixtures/algorithms/wattsi_dl_switch.html");
-        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+        let converter = crate::parse::markdown::Converter::new("https://html.spec.whatwg.org");
 
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
@@ -1485,7 +1475,7 @@ mod tests {
             <p>The <dfn id="outside-def">outside definition</dfn> is separate.</p>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://test.example.com");
+        let converter = crate::parse::markdown::Converter::new("https://test.example.com");
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
 
@@ -1534,7 +1524,7 @@ mod tests {
             <p>A <dfn id="external-term">external term</dfn> here.</p>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://test.example.com");
+        let converter = crate::parse::markdown::Converter::new("https://test.example.com");
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
 
@@ -1575,7 +1565,7 @@ mod tests {
             <p>A standalone <dfn id="regular-def">definition</dfn>.</p>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://test.example.com");
+        let converter = crate::parse::markdown::Converter::new("https://test.example.com");
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
 
@@ -1627,7 +1617,7 @@ mod tests {
             which is an ordered set of objects.</p>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://test.example.com");
+        let converter = crate::parse::markdown::Converter::new("https://test.example.com");
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
 
@@ -1654,7 +1644,7 @@ mod tests {
     }
 
     fn collect_dfn_sections(html: &str, base_url: &str) -> Vec<ParsedSection> {
-        let converter = crate::parse::markdown::build_converter(base_url);
+        let converter = crate::parse::markdown::Converter::new(base_url);
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
         document
@@ -1789,7 +1779,7 @@ mod tests {
             </pre>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://test.example.com");
+        let converter = crate::parse::markdown::Converter::new("https://test.example.com");
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
 
@@ -1838,7 +1828,7 @@ mod tests {
         // Regression: render-blocked was classified as Definition and only returned
         // the intro <p>, losing the <ul> conditions.
         let html = include_str!("../../tests/fixtures/algorithms/wattsi_ul_algorithm.html");
-        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+        let converter = crate::parse::markdown::Converter::new("https://html.spec.whatwg.org");
 
         let document = Html::parse_document(html);
         let selector = Selector::parse("dfn[id]").unwrap();
@@ -1912,7 +1902,7 @@ mod tests {
             </emu-clause>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -1949,7 +1939,7 @@ mod tests {
             </emu-clause>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -1984,7 +1974,7 @@ mod tests {
             </emu-clause>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
 
@@ -2033,7 +2023,7 @@ mod tests {
             </emu-clause>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -2065,7 +2055,7 @@ mod tests {
             </emu-annex>
         "#;
 
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-annex[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -2087,7 +2077,7 @@ mod tests {
     #[test]
     fn test_ecmarkup_fixture_tostring_algorithm() {
         let html = include_str!("../../tests/fixtures/ecmarkup/tostring.html");
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -2162,7 +2152,7 @@ mod tests {
     #[test]
     fn test_ecmarkup_fixture_undefined_type_prose() {
         let html = include_str!("../../tests/fixtures/ecmarkup/undefined_type.html");
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let element = document.select(&selector).next().unwrap();
@@ -2243,7 +2233,7 @@ mod tests {
     fn parse_heading_element_carries_number() {
         // A heading with a secno should have its number extracted.
         let html = r#"<h2 id="browsing"><span class="secno">7.4. </span>Browsing the web</h2>"#;
-        let converter = crate::parse::markdown::build_converter("https://html.spec.whatwg.org");
+        let converter = crate::parse::markdown::Converter::new("https://html.spec.whatwg.org");
         let document = Html::parse_document(html);
         let selector = Selector::parse("h2[id]").unwrap();
         let elem = document.select(&selector).next().unwrap();
@@ -2259,7 +2249,7 @@ mod tests {
           <h1><span class="secnum">7.1.17</span>ToString(<var>argument</var>)</h1>
           <p>Converts argument to a String value.</p>
         </emu-clause>"#;
-        let converter = crate::parse::markdown::build_converter("https://tc39.es/ecma262");
+        let converter = crate::parse::markdown::Converter::new("https://tc39.es/ecma262");
         let document = Html::parse_document(html);
         let selector = Selector::parse("emu-clause[id]").unwrap();
         let elem = document.select(&selector).next().unwrap();

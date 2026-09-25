@@ -1,11 +1,11 @@
 // Algorithm rendering: convert <ol>/<li> to numbered markdown text
-use htmd::HtmlToMarkdown;
+use super::markdown::Converter;
 use scraper::{ElementRef, Node};
 
 /// Render an algorithm's `<dl>` element (e.g. `<dl class="switch">`) as markdown.
 /// Each `<dt>` is a condition and each `<dd>` is the corresponding action.
 /// `<ol>` elements inside `<dd>` are rendered with `render_algorithm_ol` for consistency.
-pub fn render_algorithm_dl(dl_element: &ElementRef, converter: &HtmlToMarkdown) -> String {
+pub fn render_algorithm_dl(dl_element: &ElementRef, converter: &Converter) -> String {
     let mut result = String::new();
 
     for child in dl_element.children() {
@@ -17,7 +17,6 @@ pub fn render_algorithm_dl(dl_element: &ElementRef, converter: &HtmlToMarkdown) 
             "dt" => {
                 let md = converter
                     .convert(&child_element.inner_html())
-                    .unwrap_or_default()
                     .trim()
                     .to_string();
                 if !md.is_empty() {
@@ -33,11 +32,7 @@ pub fn render_algorithm_dl(dl_element: &ElementRef, converter: &HtmlToMarkdown) 
                         let content = if dd_elem.value().name() == "ol" {
                             render_algorithm_ol(&dd_elem, converter)
                         } else {
-                            converter
-                                .convert(&dd_elem.html())
-                                .unwrap_or_default()
-                                .trim()
-                                .to_string()
+                            converter.convert(&dd_elem.html()).trim().to_string()
                         };
                         if !content.is_empty() {
                             if !result.is_empty() {
@@ -121,7 +116,7 @@ pub fn step_number(item: &ElementRef) -> Option<usize> {
 /// Render an algorithm's `<ol>` element with markdown-style numbering.
 /// Nested lists use simple numbering (1., 2., etc.) with indentation - markdown handles visual hierarchy.
 /// Inline content is converted to markdown using the provided converter.
-pub fn render_algorithm_ol(ol_element: &ElementRef, converter: &HtmlToMarkdown) -> String {
+pub fn render_algorithm_ol(ol_element: &ElementRef, converter: &Converter) -> String {
     let mut result = String::new();
 
     for child in ol_element.children() {
@@ -134,11 +129,7 @@ pub fn render_algorithm_ol(ol_element: &ElementRef, converter: &HtmlToMarkdown) 
                 result.push_str(&step_text);
             } else {
                 // Handle other elements between list items (notes, examples, etc.)
-                let elem_md = converter
-                    .convert(&child_element.html())
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
+                let elem_md = converter.convert(&child_element.html()).trim().to_string();
 
                 if !elem_md.is_empty() {
                     result.push_str("\n\n");
@@ -162,7 +153,7 @@ fn render_li_recursive(
     li: &ElementRef,
     numbering: &[usize],
     indent: usize,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) -> String {
     let mut result = String::new();
 
@@ -254,18 +245,14 @@ fn flush_content_html(
     content_html: &mut String,
     first_chunk: &mut bool,
     indent: usize,
-    converter: &HtmlToMarkdown,
+    converter: &Converter,
 ) {
     if content_html.trim().is_empty() {
         content_html.clear();
         return;
     }
 
-    let md = converter
-        .convert(content_html)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let md = converter.convert(content_html).trim().to_string();
     content_html.clear();
 
     if md.is_empty() {
@@ -309,7 +296,7 @@ fn indent_lines(text: &str, indent: usize) -> String {
 }
 
 /// Render a `<ul>` element with proper indentation
-pub fn render_ul(ul: &ElementRef, indent: usize, converter: &HtmlToMarkdown) -> String {
+pub fn render_ul(ul: &ElementRef, indent: usize, converter: &Converter) -> String {
     let mut result = String::new();
 
     for child in ul.children() {
@@ -325,11 +312,7 @@ pub fn render_ul(ul: &ElementRef, indent: usize, converter: &HtmlToMarkdown) -> 
 
                 // Extract and convert the li content to markdown
                 let li_html = li_element.html();
-                let li_content = converter
-                    .convert(&li_html)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
+                let li_content = converter.convert(&li_html).trim().to_string();
 
                 // Remove the outer <li> tags that the converter might leave
                 let li_content = li_content.strip_prefix("*").unwrap_or(&li_content).trim();
@@ -346,11 +329,10 @@ pub fn render_ul(ul: &ElementRef, indent: usize, converter: &HtmlToMarkdown) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::markdown;
     use scraper::{Html, Selector};
 
-    fn test_converter() -> HtmlToMarkdown {
-        markdown::build_converter("https://test.example.com")
+    fn test_converter() -> Converter {
+        Converter::new("https://test.example.com")
     }
 
     #[test]

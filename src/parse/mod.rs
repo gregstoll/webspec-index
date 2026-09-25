@@ -10,7 +10,7 @@ pub mod steps;
 
 use crate::model::{ParsedSection, ParsedSpec, SectionType};
 use anyhow::Result;
-use htmd::HtmlToMarkdown;
+use markdown::{Converter, MarkdownMemo, MemoStats};
 use scraper::{Html, Selector};
 
 /// Version stamped onto every indexed spec, tied to the crate version so that
@@ -61,7 +61,7 @@ fn ietf_extract_title(heading: &scraper::ElementRef) -> Option<String> {
 /// - Nested `<section>` sub-elements (each gets its own indexed entry)
 ///
 /// This ensures each section's content is its own prose, not its children's.
-fn extract_ietf_prose(section: &scraper::ElementRef, converter: &HtmlToMarkdown) -> Option<String> {
+fn extract_ietf_prose(section: &scraper::ElementRef, converter: &Converter) -> Option<String> {
     let mut content_html = String::new();
     for node in section.children() {
         if let Some(child) = scraper::ElementRef::wrap(node) {
@@ -94,7 +94,7 @@ fn extract_ietf_prose(section: &scraper::ElementRef, converter: &HtmlToMarkdown)
 /// Skipped section id prefixes:
 /// - `section-boilerplate` — Status of This Memo, Copyright Notice
 /// - `section-toc`         — Table of Contents
-fn parse_ietf_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec<ParsedSection>> {
+fn parse_ietf_html(document: &Html, converter: &Converter) -> Result<Vec<ParsedSection>> {
     let section_sel =
         Selector::parse("section[id]").map_err(|e| anyhow::anyhow!("Selector error: {:?}", e))?;
     let heading_sel = Selector::parse("h2, h3, h4, h5, h6")
@@ -157,7 +157,7 @@ fn parse_ietf_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec<Pa
 ///
 /// Selects headings (h2–h6 with id), definitions (dfn with id), and
 /// TC39/ecmarkup clause elements (emu-clause, emu-annex with id).
-fn parse_generic_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec<ParsedSection>> {
+fn parse_generic_html(document: &Html, converter: &Converter) -> Result<Vec<ParsedSection>> {
     let mut sections = Vec::new();
 
     // Collect all potential section elements in a single pass to preserve document order.
@@ -225,14 +225,29 @@ fn parse_generic_html(document: &Html, converter: &HtmlToMarkdown) -> Result<Vec
 /// `base_url` is used to absolutize relative links in content markdown.
 pub fn parse_spec(html: &str, spec_name: &str, base_url: &str) -> Result<ParsedSpec> {
     let document = Html::parse_document(html);
-    let converter = markdown::build_converter(base_url);
+    parse_spec_document_memo(&document, spec_name, base_url, MarkdownMemo::new())
+        .map(|(parsed, _, _)| parsed)
+}
+
+/// Parse a pre-parsed spec HTML document, reusing `previous` markdown conversion
+/// results from a prior parse of the same spec.
+///
+/// Returns the parsed spec together with the memo of all conversions performed
+/// (for caching between indexing runs) and hit/miss statistics.
+pub fn parse_spec_document_memo(
+    document: &Html,
+    spec_name: &str,
+    base_url: &str,
+    previous: MarkdownMemo,
+) -> Result<(ParsedSpec, MarkdownMemo, MemoStats)> {
+    let converter = Converter::with_memo(base_url, previous);
 
     // IETF RFC HTML (xml2rfc format) uses a fundamentally different structure:
     // canonical anchors are on `<section id="section-N">` elements, not headings.
-    let sections = if is_ietf_html(&document) {
-        parse_ietf_html(&document, &converter)?
+    let sections = if is_ietf_html(document) {
+        parse_ietf_html(document, &converter)?
     } else {
-        parse_generic_html(&document, &converter)?
+        parse_generic_html(document, &converter)?
     };
 
     // Drop duplicate anchors (first occurrence wins) before building navigation so
@@ -246,18 +261,28 @@ pub fn parse_spec(html: &str, spec_name: &str, base_url: &str) -> Result<ParsedS
     // Build tree relationships (parent, prev, next)
     let sections = sections::build_section_tree(sections);
 
+    // Serialize the outer HTML once so both the reference extractor and IDL
+    // extractor see the same string without reparsing the document.
+    let html = document.html();
+
     // Extract references
     // Note: We need a SpecRegistry to resolve cross-spec URLs
     // For now, create an empty one (will be passed in later for full functionality)
     let registry = crate::spec_registry::SpecRegistry::new();
-    let references = references::extract_references(html, spec_name, &sections, &registry);
-    let idl_definitions = idl_defs::extract_idl_definitions(html);
+    let references = references::extract_references(&html, spec_name, &sections, &registry);
+    let idl_definitions = idl_defs::extract_idl_definitions(&html);
 
-    Ok(ParsedSpec {
-        sections,
-        references,
-        idl_definitions,
-    })
+    let (memo, stats) = converter.finish();
+
+    Ok((
+        ParsedSpec {
+            sections,
+            references,
+            idl_definitions,
+        },
+        memo,
+        stats,
+    ))
 }
 
 /// Check if a dfn element is inside an emu-clause (TC39/ecmarkup spec).
@@ -281,6 +306,55 @@ fn is_inside_emu_clause(element: &scraper::ElementRef) -> bool {
 mod tests {
     use super::*;
     use crate::model::SectionType;
+    use markdown::MarkdownMemo;
+
+    fn xorshift(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn warm_memo_output_equals_cold_output() {
+        let html = concat!(
+            include_str!("../../tests/fixtures/effects/structure/wattsi.html"),
+            include_str!("../../tests/fixtures/effects/structure/bikeshed.html"),
+        );
+        let document = Html::parse_document(html);
+        let base = "https://example.test/";
+        let (cold, full_memo, cold_stats) =
+            parse_spec_document_memo(&document, "T", base, MarkdownMemo::new()).unwrap();
+        assert_eq!(cold_stats.hits, 0);
+        for seed in 1..=16u64 {
+            let mut state = seed;
+            let partial: MarkdownMemo = full_memo
+                .iter()
+                .filter(|_| xorshift(&mut state) % 2 == 0)
+                .map(|(k, v)| (*k, v.clone()))
+                .collect();
+            let (warm, memo, stats) =
+                parse_spec_document_memo(&document, "T", base, partial.clone()).unwrap();
+            assert_eq!(format!("{cold:?}"), format!("{warm:?}"), "seed {seed}");
+            assert_eq!(
+                memo, full_memo,
+                "the new memo holds exactly this parse's inputs"
+            );
+            assert_eq!(stats.hits, partial.len());
+        }
+    }
+
+    #[test]
+    fn changed_base_url_misses_the_memo() {
+        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html");
+        let document = Html::parse_document(html);
+        let (_, memo, _) =
+            parse_spec_document_memo(&document, "T", "https://a.test/", MarkdownMemo::new())
+                .unwrap();
+        let (_, _, stats) =
+            parse_spec_document_memo(&document, "T", "https://b.test/", memo).unwrap();
+        assert_eq!(stats.hits, 0);
+    }
 
     #[test]
     fn step_ids_inside_an_algorithm_are_not_sections() {
