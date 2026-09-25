@@ -1156,6 +1156,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     },
                 )?;
             }
+            webspec_index::refresh_planner_stats();
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
                 .map(|(name, snapshot_id)| model::UpdateEntry {
@@ -1185,6 +1186,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     },
                 )?;
             }
+            webspec_index::refresh_planner_stats();
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
                 .map(|(name, snapshot_id)| model::UpdateEntry {

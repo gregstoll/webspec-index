@@ -70,6 +70,17 @@ pub fn open_or_create_db() -> Result<Connection> {
     Ok(conn)
 }
 
+/// Refresh the query planner's statistics after indexing writes.
+///
+/// Without `sqlite_stat1` SQLite picks per-snapshot index scans for joins
+/// like the outgoing-calls lookup of `flow`, which are orders of magnitude
+/// slower than the plans it chooses with statistics.
+#[cfg(any(feature = "native", test))]
+pub fn refresh_planner_stats(conn: &Connection) -> Result<()> {
+    conn.execute_batch("PRAGMA optimize=0x10002;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub fn open_test_db() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
@@ -81,6 +92,25 @@ pub fn open_test_db() -> Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refresh_planner_stats_analyzes_written_tables() {
+        let conn = open_test_db().unwrap();
+        let spec = write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org", "whatwg")
+            .unwrap();
+        write::insert_snapshot(&conn, spec, "hash:d", "2026-01-01T00:00:00Z").unwrap();
+
+        refresh_planner_stats(&conn).unwrap();
+
+        let analyzed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl IN ('specs', 'snapshots')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(analyzed > 0);
+    }
 
     #[test]
     fn in_memory_db_initializes_schema_without_native_feature() {

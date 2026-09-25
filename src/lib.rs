@@ -464,6 +464,16 @@ pub fn find_anchors_sql(
     }
 }
 
+#[cfg(any(feature = "native", test))]
+const SEARCH_SQL_PR: &str = "SELECT s.anchor, sp.name, s.title, s.section_type,
+            snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
+     FROM sections_fts
+     CROSS JOIN sections s ON sections_fts.rowid = s.id
+     JOIN snapshots sn ON s.snapshot_id = sn.id
+     JOIN specs sp ON sn.spec_id = sp.id
+     WHERE sections_fts MATCH ?1 AND sn.id IN (?2, ?3)
+     LIMIT ?4";
+
 #[cfg(feature = "native")]
 fn search_sections_pr(
     conn: &Connection,
@@ -472,16 +482,7 @@ fn search_sections_pr(
     base_snap: i64,
     limit: u32,
 ) -> Result<Vec<model::SearchEntry>> {
-    let mut stmt = conn.prepare(
-        "SELECT s.anchor, sp.name, s.title, s.section_type,
-                snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
-         FROM sections_fts
-         JOIN sections s ON sections_fts.rowid = s.id
-         JOIN snapshots sn ON s.snapshot_id = sn.id
-         JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sn.id IN (?2, ?3)
-         LIMIT ?4",
-    )?;
+    let mut stmt = conn.prepare(SEARCH_SQL_PR)?;
     let mut seen = HashSet::new();
     let rows = stmt
         .query_map((query, pr_snap, base_snap, limit), |row| {
@@ -628,6 +629,22 @@ pub async fn search_sections(
     })
 }
 
+const SEARCH_SQL_IN_SPEC: &str = "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
+     FROM sections_fts
+     CROSS JOIN sections s ON sections_fts.rowid = s.id
+     JOIN snapshots sn ON s.snapshot_id = sn.id
+     JOIN specs sp ON sn.spec_id = sp.id
+     WHERE sections_fts MATCH ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+     ORDER BY sections_fts.rank LIMIT ?3";
+
+const SEARCH_SQL_ALL: &str = "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
+     FROM sections_fts
+     CROSS JOIN sections s ON sections_fts.rowid = s.id
+     JOIN snapshots sn ON s.snapshot_id = sn.id
+     JOIN specs sp ON sn.spec_id = sp.id
+     WHERE sections_fts MATCH ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+     ORDER BY sections_fts.rank LIMIT ?2";
+
 pub fn search_sections_fts(
     conn: &Connection,
     query: &str,
@@ -635,21 +652,9 @@ pub fn search_sections_fts(
     limit: u32,
 ) -> rusqlite::Result<Vec<model::SearchEntry>> {
     let sql = if spec.is_some() {
-        "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
-         FROM sections_fts
-         JOIN sections s ON sections_fts.rowid = s.id
-         JOIN snapshots sn ON s.snapshot_id = sn.id
-         JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-         ORDER BY sections_fts.rank LIMIT ?3"
+        SEARCH_SQL_IN_SPEC
     } else {
-        "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
-         FROM sections_fts
-         JOIN sections s ON sections_fts.rowid = s.id
-         JOIN snapshots sn ON s.snapshot_id = sn.id
-         JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-         ORDER BY sections_fts.rank LIMIT ?2"
+        SEARCH_SQL_ALL
     };
 
     let mut stmt = conn.prepare(sql)?;
@@ -2204,6 +2209,15 @@ pub async fn reparse_specs(
     fetch::reparse_specs(&conn, spec, providers).await
 }
 
+/// Refresh the query planner's statistics once indexing writes are done.
+/// Failure only costs query speed, so it is reported rather than returned.
+#[cfg(feature = "native")]
+pub fn refresh_planner_stats() {
+    if let Err(e) = db::open_or_create_db().and_then(|conn| db::refresh_planner_stats(&conn)) {
+        eprintln!("Failed to refresh query planner statistics: {}", e);
+    }
+}
+
 /// # Returns
 /// Path to the deleted database file
 #[cfg(feature = "native")]
@@ -2231,6 +2245,33 @@ mod tests {
             include: vec![],
             exclude: vec![],
             same_spec_only: false,
+        }
+    }
+
+    fn query_plan(conn: &Connection, sql: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let mut rows = stmt.raw_query();
+        let mut plan = Vec::new();
+        while let Some(row) = rows.next().unwrap() {
+            plan.push(row.get::<_, String>(3).unwrap());
+        }
+        plan
+    }
+
+    /// Without planner statistics SQLite otherwise walks every section of the
+    /// spec and runs one MATCH per section, instead of one FTS scan.
+    #[test]
+    fn spec_filtered_search_drives_from_fts_without_statistics() {
+        let conn = db::open_test_db().unwrap();
+        for sql in [SEARCH_SQL_IN_SPEC, SEARCH_SQL_PR] {
+            let plan = query_plan(&conn, sql);
+            let position = |prefix: &str| plan.iter().position(|step| step.starts_with(prefix));
+            let fts = position("SCAN sections_fts").expect("FTS scan in plan");
+            let sections = position("SEARCH s ").expect("sections lookup in plan");
+            assert!(
+                fts < sections,
+                "sections should be looked up per FTS hit: {plan:?}"
+            );
         }
     }
 

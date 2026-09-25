@@ -333,7 +333,7 @@ pub fn get_outgoing_algorithm_calls(
     from_anchor: &str,
 ) -> Result<Vec<RefEdge>> {
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT r.to_spec, r.to_anchor,
+        "SELECT r.to_spec, r.to_anchor,
                 r.step_path, r.step_text, r.guard_path, r.call_site_id, r.kind
          FROM refs r
          JOIN specs target_sp ON r.to_spec = target_sp.name
@@ -348,7 +348,10 @@ pub fn get_outgoing_algorithm_calls(
          WHERE r.snapshot_id = ?1
            AND r.from_anchor = ?2
            AND r.kind = 'step'
-           AND r.step_path IS NOT NULL",
+           AND r.step_path IS NOT NULL
+         GROUP BY r.to_spec, r.to_anchor,
+                  r.step_path, r.step_text, r.guard_path, r.call_site_id, r.kind
+         ORDER BY MIN(r.id)",
     )?;
 
     let edges = stmt
@@ -1137,5 +1140,47 @@ mod tests {
         assert_eq!(diff.len(), 1);
         assert_eq!(diff[0].anchor, "sec-b");
         assert_eq!(diff[0].change_type, "modified");
+    }
+
+    /// The order must not depend on which index the planner picks, which
+    /// changes once `sqlite_stat1` exists.
+    #[test]
+    fn outgoing_algorithm_calls_come_in_document_order() {
+        use crate::model::{ParsedReference, RefKind};
+
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg")
+                .unwrap();
+        let snapshot_id =
+            write::insert_snapshot(&conn, spec_id, "hash:h", "2026-01-01T00:00:00Z").unwrap();
+        let algorithm = |anchor: &str| ParsedSection {
+            anchor: anchor.into(),
+            title: Some(anchor.into()),
+            content_text: Some("1. Do it.".into()),
+            section_type: SectionType::Algorithm,
+            parent_anchor: None,
+            prev_anchor: None,
+            next_anchor: None,
+            depth: None,
+            number: None,
+        };
+        write::insert_sections_bulk(
+            &conn,
+            snapshot_id,
+            &[algorithm("navigate"), algorithm("zeta"), algorithm("alpha")],
+        )
+        .unwrap();
+        let step = |to: &str, path: &str| ParsedReference {
+            step_path: Some(path.to_string()),
+            kind: RefKind::Step,
+            ..ParsedReference::prose("navigate", "HTML", to)
+        };
+        write::insert_refs_bulk(&conn, snapshot_id, &[step("zeta", "1"), step("alpha", "2")])
+            .unwrap();
+
+        let calls = get_outgoing_algorithm_calls(&conn, snapshot_id, "navigate").unwrap();
+        let anchors: Vec<_> = calls.iter().map(|call| call.anchor.as_str()).collect();
+        assert_eq!(anchors, ["zeta", "alpha"]);
     }
 }
