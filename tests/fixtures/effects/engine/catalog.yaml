@@ -51,6 +51,20 @@ rules:
     emit:
       kind: script.opportunity
       params: {}
+  - id: multi-fire
+    match:
+      anchor: INFRA#b-fire
+      text: '(?i)fire an event named (?P<name>`[^`]+`|\*[^*]+\*)'
+    emit:
+      kind: event.fire
+      params:
+        name: {capture: name, from: literal}
+  - id: multi-queue
+    match: {anchor: DOM#a-queue}
+    emit:
+      kind: scheduling.enqueue
+      params: {queue: task}
+    continuations: separate
 implementations:
   - id: test-host
     environment: web
@@ -58,3 +72,24 @@ implementations:
     implementation: TEST#host-implementation
     expect_text: '(?i)Queue a microtask'
     reason: The synthetic web environment supplies this implementation.
+  - id: multi-host
+    environment: browser
+    operation: DOM#a-host
+    implementation: INFRA#b-host
+    expect_text: '(?i)Perform the beta host steps'
+    reason: The multi-spec fixture pairs an alpha host operation with a beta implementation.
+summaries:
+  - id: multi-beta-summary
+    subject: INFRA#b-algo
+    expect_text: '(?i)Run alpha'
+    reason: The multi-spec fixture declares a reviewed summary on a beta algorithm.
+    emit:
+      kind: script.opportunity
+      params: {}
+  - id: multi-gamma-stale
+    subject: URL#c-parse
+    expect_text: '(?i)this text never appears'
+    reason: The multi-spec fixture declares a summary whose expectation no longer holds.
+    emit:
+      kind: script.opportunity
+      params: {}

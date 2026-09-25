@@ -3,6 +3,7 @@ pub mod bundled;
 pub mod catalog;
 pub mod engine;
 pub mod graph;
+pub mod link;
 mod local;
 pub mod matcher;
 pub mod model;
