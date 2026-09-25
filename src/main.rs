@@ -925,11 +925,6 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     ));
                 }
             }
-            let catalog = if result.effects.is_some() {
-                webspec_index::effects::default_catalog(&effect_options.rules).ok()
-            } else {
-                None
-            };
             let spec_id = format!("{}#{}", result.query.spec, result.query.anchor);
             match cli.format {
                 OutputFormat::Json => {
@@ -956,6 +951,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     );
                 }
                 OutputFormat::Markdown => {
+                    let catalog = result.effects.as_ref().and_then(|_| {
+                        webspec_index::effects::default_catalog(&effect_options.rules).ok()
+                    });
                     print!(
                         "{}",
                         format::query_with_effects(&result, catalog.as_ref(), pr)

@@ -762,9 +762,19 @@ fn yaml_to_json(yaml: Yaml, file: &str, location: &str) -> Result<Value, Catalog
     }
 }
 
+/// Checks `value` against `^first rest*$` without compiling a regex: the
+/// catalog validates every ID in every process that loads it.
+fn matches_identifier(value: &str, first: fn(char) -> bool, rest: fn(char) -> bool) -> bool {
+    let mut chars = value.chars();
+    chars.next().is_some_and(first) && chars.all(rest)
+}
+
 fn validate_id(value: &str, what: &str, file: &str) -> Result<(), CatalogError> {
-    let regex = Regex::new(r"^[a-z0-9][a-z0-9._-]*$").expect("static ID regex");
-    if regex.is_match(value) {
+    if matches_identifier(
+        value,
+        |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
+        |c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'),
+    ) {
         Ok(())
     } else {
         Err(CatalogError::file(
@@ -808,9 +818,12 @@ fn validate_effect_definition(
             format!("effect {kind} requires non-empty category and label"),
         ));
     }
-    let name_regex = Regex::new(r"^[a-z][a-z0-9_]*$").expect("static parameter regex");
     for (name, parameter) in &definition.parameters {
-        if !name_regex.is_match(name) {
+        if !matches_identifier(
+            name,
+            |c| c.is_ascii_lowercase(),
+            |c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_',
+        ) {
             return Err(CatalogError::file(
                 file,
                 format!("invalid parameter name {name:?} on effect {kind}"),
@@ -1046,6 +1059,52 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn id_validation_accepts_exactly_the_documented_patterns() {
+        let cases = [
+            "",
+            "a",
+            "0",
+            "event.fire",
+            "a-b_c.9",
+            ".a",
+            "-a",
+            "_a",
+            "A",
+            "aB",
+            "a b",
+            "a\n",
+            "é",
+            "a/b",
+            "9lives",
+        ];
+        let id = Regex::new(r"^[a-z0-9][a-z0-9._-]*$").unwrap();
+        let parameter = Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
+        for value in cases {
+            assert_eq!(
+                validate_id(value, "ID", "f").is_ok(),
+                id.is_match(value),
+                "{value:?}"
+            );
+            let definition = EffectDefinition {
+                category: "events".to_owned(),
+                label: "fire an event".to_owned(),
+                parameters: BTreeMap::from([(
+                    value.to_owned(),
+                    ParameterDefinition {
+                        parameter_type: ParameterType::Boolean,
+                        allowed_values: None,
+                    },
+                )]),
+            };
+            assert_eq!(
+                validate_effect_definition("event.fire", &definition, "f").is_ok(),
+                parameter.is_match(value),
+                "{value:?}"
+            );
+        }
+    }
 
     const MINIMAL: &str = r#"
 schema: 1
