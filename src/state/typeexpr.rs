@@ -322,6 +322,10 @@ fn parse_value(v: &str) -> InitialValue {
             value: Literal::Null,
             text,
         },
+        "undefined" => InitialValue::Literal {
+            value: Literal::Undefined,
+            text,
+        },
         "empty" | "« »" => InitialValue::Empty { text },
         "unset" => InitialValue::Unset { text },
         _ if v.starts_with("a new ") || v.starts_with("an new ") => {

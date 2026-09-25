@@ -1,4 +1,6 @@
 //! Statement sources (§7.1) from structural algorithms.
+use std::collections::BTreeMap;
+
 use crate::parse::steps::{AnchorTarget, StructuralSpec};
 use crate::state::ir::{SourceContext, StatementSource};
 
@@ -11,20 +13,24 @@ pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> Vec<StatementSour
             spec: structure.spec.clone(),
             anchor: algorithm.source.section_anchor.clone(),
         };
-        for segment in &algorithm.segments {
-            let step_path = segment.owner_step_id.as_ref().and_then(|id| {
-                algorithm
-                    .steps
+        let step_paths: BTreeMap<&str, String> = algorithm
+            .steps
+            .iter()
+            .map(|step| {
+                let path = step
+                    .path
                     .iter()
-                    .find(|step| &step.source.node_id == id)
-                    .map(|step| {
-                        step.path
-                            .iter()
-                            .map(u32::to_string)
-                            .collect::<Vec<_>>()
-                            .join(".")
-                    })
-            });
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".");
+                (step.source.node_id.as_str(), path)
+            })
+            .collect();
+        for segment in &algorithm.segments {
+            let step_path = segment
+                .owner_step_id
+                .as_deref()
+                .and_then(|id| step_paths.get(id).cloned());
             sources.push(StatementSource {
                 id: segment.source.node_id.clone(),
                 subject: subject.clone(),

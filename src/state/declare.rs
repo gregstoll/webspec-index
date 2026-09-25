@@ -1046,6 +1046,22 @@ mod tests {
     }
 
     #[test]
+    fn initially_undefined_is_not_null() {
+        let out = run(
+            r##"<h4 id="the-img-element">img</h4><dl class="element"><dt>DOM interface:</dt><dd><pre><code class="idl">interface <dfn data-dfn-type="interface" id="htmlimageelement">HTMLImageElement</dfn> {};</code></pre></dd></dl>
+      <p>Each <a href="#the-img-element">img</a> element has associated <dfn id="u">pending thing</dfn>, initially undefined.</p>"##,
+            "HTML",
+        );
+        assert!(matches!(
+            &field(&out, "u").initial,
+            Some(InitialValue::Literal {
+                value: Literal::Undefined,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn negative_sentences_give_no_owner_candidate() {
         let out = run(
             r##"<p>If a <a href="#reflect">reflected IDL attribute</a> has the type long, <dfn id="a">x</dfn>.</p>

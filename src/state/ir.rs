@@ -479,12 +479,20 @@ impl Encoded {
             .collect()
     }
 
-    /// The lexicon verb spelled by the word at `enc`, if any.
+    /// The lexicon verb spelled by the word at `enc`, if any. A hyphenated
+    /// word ("set-up") is not a verb.
     fn verb_at(&self, enc: usize) -> Option<&'static str> {
         let word: String = self.text[enc..]
             .chars()
             .take_while(char::is_ascii_alphabetic)
             .collect();
+        if self.text[enc + word.len()..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_alphanumeric() || next == '-' || next == '_')
+        {
+            return None;
+        }
         let word = word.to_ascii_lowercase();
         LEXICON.iter().copied().find(|verb| *verb == word)
     }
@@ -537,7 +545,11 @@ struct PathParse {
 enum RootKind {
     Var,
     This,
-    Link(usize),
+    /// `the`: the link followed `the `.
+    Link {
+        link: usize,
+        the: bool,
+    },
     Pronoun,
     Phrase,
 }
@@ -557,7 +569,7 @@ impl Parser<'_> {
         let Some(after) = self.keyword(at, &["Set ", "set "]) else {
             return false;
         };
-        if let Some((targets, end)) = self.targets(after, true, |p, end| p.lit(end, " to ")) {
+        if let Some((mut targets, end)) = self.targets(after, true, |p, end| p.lit(end, " to ")) {
             let value_start = end + " to ".len();
             if self.is_invocation(value_start) {
                 let id = self.push_opaque(at, OpaqueReason::ValueIsInvocation, Some("set".into()));
@@ -573,10 +585,12 @@ impl Parser<'_> {
                 return false;
             }
             let mut end = self.push_assignment(at, &targets, value_start, SetForm::To);
-            while let Some(chained) = self.chained_continuation(end) {
+            let mut basis = targets.pop().expect("targets is never empty");
+            while let Some(chained) = self.chained_continuation(end, &basis) {
                 let value_start = chained.path.end + " to ".len();
                 let targets = std::slice::from_ref(&chained.path);
                 end = self.push_assignment(chained.start, targets, value_start, SetForm::Chained);
+                basis = chained.path;
             }
             self.covered_until = end;
             return true;
@@ -602,7 +616,7 @@ impl Parser<'_> {
         value_start: usize,
         form: SetForm,
     ) -> usize {
-        let value_end = self.value_end(value_start, true);
+        let value_end = self.value_end(value_start, targets.last());
         let value = self.expr(value_start, value_end);
         let id = if targets[0].path.subscript.is_some() {
             let kind = StatementKind::Mutate {
@@ -639,7 +653,7 @@ impl Parser<'_> {
         let accept = |p: &Self, end: usize| {
             p.is_end(end)
                 && p.find(end, " to ")
-                    .is_none_or(|to| to >= p.value_end(end, false))
+                    .is_none_or(|to| to >= p.value_end(end, None))
         };
         let Some((targets, end)) = self.targets(after, false, accept) else {
             return false;
@@ -671,7 +685,7 @@ impl Parser<'_> {
         };
         let (operand, end) = if self.lit(target.end, " by ") {
             let value_start = target.end + " by ".len();
-            let value_end = self.value_end(value_start, false);
+            let value_end = self.value_end(value_start, None);
             (Some((value_start, value_end)), value_end)
         } else if self.is_end(target.end) {
             (None, target.end)
@@ -701,8 +715,8 @@ impl Parser<'_> {
             return false;
         };
         let mut vars = vec![first];
-        if self.lit(pos, " and ") {
-            if let Some((Placeholder::Var(second), end)) = self.enc.placeholder(pos + 5) {
+        if let Some(next) = self.keyword(pos, &[" and "]) {
+            if let Some((Placeholder::Var(second), end)) = self.enc.placeholder(next) {
                 vars.push(second);
                 pos = end;
             }
@@ -710,7 +724,7 @@ impl Parser<'_> {
         let Some(value_start) = self.keyword(pos, &[" be "]) else {
             return false;
         };
-        let value_end = self.value_end(value_start, false);
+        let value_end = self.value_end(value_start, None);
         let value = self.expr(value_start, value_end);
         let mut first_id = None;
         for var in vars {
@@ -737,7 +751,7 @@ impl Parser<'_> {
         let Some(value_start) = self.keyword(target.end, &[" must be set to "]) else {
             return false;
         };
-        let value_end = self.value_end(value_start, false);
+        let value_end = self.value_end(value_start, None);
         let kind = StatementKind::Set {
             targets: vec![target.path.clone()],
             value: self.expr(value_start, value_end),
@@ -760,7 +774,7 @@ impl Parser<'_> {
             }
             None => at,
         };
-        let end = self.value_end(after, false);
+        let end = self.value_end(after, None);
         let target_end = self
             .find(after, " to ")
             .filter(|&to| to < end)
@@ -924,19 +938,7 @@ impl Parser<'_> {
                     break;
                 };
                 end = self.trailer(after);
-                let mut path = first.path.clone();
-                path.hops.pop();
-                path.hops.push(hop);
-                let mut hop_links = first.hop_links.clone();
-                hop_links.pop();
-                hop_links.push(Some(link));
-                more.push(PathParse {
-                    path,
-                    end,
-                    hop_links,
-                    root_link: first.root_link,
-                    read_ranges: Vec::new(),
-                });
+                more.push(self.with_last_hop(&first, hop, link, end));
             }
         }
         if !accept(self, end) {
@@ -945,6 +947,24 @@ impl Parser<'_> {
         let mut targets = vec![first];
         targets.append(&mut more);
         Some((targets, end))
+    }
+
+    /// `basis` with its last hop replaced by the linked `hop`: the same root
+    /// and prefix hops.
+    fn with_last_hop(&self, basis: &PathParse, hop: Hop, link: usize, end: usize) -> PathParse {
+        let mut path = basis.path.clone();
+        path.hops.pop();
+        path.hops.push(hop);
+        let mut hop_links = basis.hop_links.clone();
+        hop_links.pop();
+        hop_links.push(Some(link));
+        PathParse {
+            path,
+            end,
+            hop_links,
+            root_link: basis.root_link,
+            read_ranges: Vec::new(),
+        }
     }
 
     /// `PATH`. With `to_terminated`, also `the ⟦L⟧ of ROOT'` where `ROOT'`
@@ -985,8 +1005,10 @@ impl Parser<'_> {
             }
         }
         let mut root_link = None;
-        if let RootKind::Link(link) = kind {
-            if hops.is_empty() {
+        if let RootKind::Link { link, the } = kind {
+            // Only `the ⟦L⟧` is receiver-less (§7.3); a bare link without
+            // hops stays a `Root::Link` path with no field hop.
+            if hops.is_empty() && the {
                 root = Root::Implicit;
                 hops.push(self.field_hop(link));
                 hop_links.push(Some(link));
@@ -1029,10 +1051,17 @@ impl Parser<'_> {
             return None;
         };
         let root_start = self.keyword(after, &[" of "])?;
-        let root_end = self.find(root_start, " to ")?;
+        // `ROOT'` stays inside the clause: it ends at ` to ` before the value
+        // end and never spans `, `.
+        let root_end = self
+            .find(root_start, " to ")
+            .filter(|&to| to < self.value_end(root_start, None))?;
+        if self.enc.text[root_start..root_end].contains(", ") {
+            return None;
+        }
         let root = match self.root(root_start) {
             Some((root, RootKind::Var | RootKind::This, end)) if end == root_end => root,
-            Some((root @ Root::Link { .. }, RootKind::Link(_), end)) if end == root_end => root,
+            Some((root @ Root::Link { .. }, RootKind::Link { .. }, end)) if end == root_end => root,
             _ => Root::Opaque {
                 text: self.src_text(root_start, root_end),
             },
@@ -1074,7 +1103,7 @@ impl Parser<'_> {
             Some((Placeholder::Var(var), end)) => {
                 Some((Root::Var(self.enc.vars[var].clone()), RootKind::Var, end))
             }
-            Some((Placeholder::Link(link), end)) => Some(self.link_root(link, end)),
+            Some((Placeholder::Link(link), end)) => Some(self.link_root(link, end, at > pos)),
             None if at == pos && self.lit(pos, "this") && !self.word_continues(pos + 4) => {
                 Some((Root::This, RootKind::This, pos + 4))
             }
@@ -1082,7 +1111,7 @@ impl Parser<'_> {
         }
     }
 
-    fn link_root(&self, link: usize, end: usize) -> (Root, RootKind, usize) {
+    fn link_root(&self, link: usize, end: usize, the: bool) -> (Root, RootKind, usize) {
         if self.is_this_link(link) {
             return (Root::This, RootKind::This, end);
         }
@@ -1090,7 +1119,7 @@ impl Parser<'_> {
             link_id: self.source.links[link].id.clone(),
             target: self.source.links[link].target.clone(),
         };
-        (root, RootKind::Link(link), end)
+        (root, RootKind::Link { link, the }, end)
     }
 
     fn phrase_root(&self, pos: usize) -> Option<(Root, RootKind, usize)> {
@@ -1240,9 +1269,9 @@ impl Parser<'_> {
         None
     }
 
-    /// End of a `VALUE` starting at `start`. With `chain`, a chained `Set`
-    /// continuation also ends it.
-    fn value_end(&self, start: usize, chain: bool) -> usize {
+    /// End of a `VALUE` starting at `start`. With `chain` (the target of the
+    /// statement being parsed), a chained `Set` continuation also ends it.
+    fn value_end(&self, start: usize, chain: Option<&PathParse>) -> usize {
         let text = &self.enc.text;
         for (offset, _) in text[start..].char_indices() {
             let i = start + offset;
@@ -1264,7 +1293,7 @@ impl Parser<'_> {
                     return i;
                 }
             }
-            if chain && self.chained_continuation(i).is_some() {
+            if chain.is_some_and(|basis| self.chained_continuation(i, basis).is_some()) {
                 return i;
             }
         }
@@ -1277,16 +1306,33 @@ impl Parser<'_> {
             .is_some_and(|verb| self.lit(pos + verb.len(), " "))
     }
 
-    /// `PATH " to "` at `pos`: the target of a chained continuation.
-    fn chained_path(&self, pos: usize) -> Option<PathParse> {
-        self.path(pos, true)
-            .filter(|path| self.lit(path.end, " to "))
+    /// The target of a chained continuation at `pos`, followed by ` to `:
+    /// - a `PATH` with hops or a variable root that doesn't span `, `;
+    /// - a bare `⟦L⟧ TRAILER?`, which shares the receiver of `basis` (the
+    ///   previous target), as in "Set R's A to x, B to y". It needs a
+    ///   receiver: after a receiver-less or hop-less target, a bare link is
+    ///   prose ("…, seek to that time", "*x* to *y*, clamped to the range").
+    fn chained_path(&self, pos: usize, basis: &PathParse) -> Option<PathParse> {
+        if let Some((hop, Some(link), after)) = self.hop(pos) {
+            let end = self.trailer(after);
+            if self.lit(end, " to ") {
+                let has_receiver = basis.path.root != Root::Implicit
+                    && !basis.path.hops.is_empty()
+                    && basis.path.subscript.is_none();
+                return has_receiver.then(|| self.with_last_hop(basis, hop, link, end));
+            }
+        }
+        self.path(pos, true).filter(|path| {
+            self.lit(path.end, " to ")
+                && (!path.path.hops.is_empty() || matches!(path.path.root, Root::Var(_)))
+                && !self.enc.text[pos..path.end].contains(", ")
+        })
     }
 
-    /// `(", and " | ", " | " and ") PATH " to "` at `end`.
-    fn chained_continuation(&self, end: usize) -> Option<Chained> {
+    /// `(", and " | ", " | " and ")` and a chained target at `end`.
+    fn chained_continuation(&self, end: usize, basis: &PathParse) -> Option<Chained> {
         let start = self.keyword(end, &[", and ", ", ", " and "])?;
-        let path = self.chained_path(start)?;
+        let path = self.chained_path(start, basis)?;
         Some(Chained { start, path })
     }
 
@@ -1362,7 +1408,8 @@ fn literal(text: &str) -> Option<Literal> {
     match text {
         "true" => return Some(Literal::Bool(true)),
         "false" => return Some(Literal::Bool(false)),
-        "null" | "undefined" => return Some(Literal::Null),
+        "null" => return Some(Literal::Null),
+        "undefined" => return Some(Literal::Undefined),
         _ => {}
     }
     let digits = text.strip_prefix('-').unwrap_or(text);
@@ -1711,6 +1758,102 @@ mod tests {
             role_of(&s, &p, "official playback position"),
             Some(OccurrenceClass::Write)
         );
+    }
+
+    #[test]
+    fn bare_links_in_values_are_not_chained_writes() {
+        for (step, visible) in [
+            (
+                r##"Set the <a href="#ipp">initial playback position</a> to that time and, if <var>jumped</var> is still false, <a href="#seek">seek</a> to that time."##,
+                "seek",
+            ),
+            (
+                r##"Set <var>x</var> to <var>y</var>, <a href="#clamped">clamped</a> to the range."##,
+                "clamped",
+            ),
+            (
+                r##"Set the <a href="#t">t</a> to <var>y</var> and <a href="#queue">queue a task</a> to fire."##,
+                "queue a task",
+            ),
+        ] {
+            let (s, p) = one(step);
+            assert_eq!(p.statements.len(), 1, "{step}");
+            assert_eq!(
+                role_of(&s, &p, visible),
+                Some(OccurrenceClass::Read),
+                "{step}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_link_continuations_share_the_previous_receiver() {
+        let (s, p) = one(
+            r##"Set <var>doctype</var>’s <a href="#n">name</a> to <var>n</var>, <a href="#p">public ID</a> to <var>p</var>, and <a href="#s">system ID</a> to <var>s</var>."##,
+        );
+        assert_eq!(p.statements.len(), 3);
+        assert!(
+            matches!(&p.statements[2].kind, StatementKind::Set { targets, form: SetForm::Chained, .. } if targets[0].root == Root::Var("doctype".into()))
+        );
+        for visible in ["name", "public ID", "system ID"] {
+            assert_eq!(
+                role_of(&s, &p, visible),
+                Some(OccurrenceClass::Write),
+                "{visible}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_link_target_without_the_has_no_field_hop() {
+        let (s, p) = one(r##"Set <a href="#l">l</a> to 1."##);
+        assert!(
+            p.statements
+                .iter()
+                .all(|st| !matches!(&st.kind, StatementKind::Set { targets, .. } if targets[0].root == Root::Implicit))
+        );
+        assert_ne!(role_of(&s, &p, "l"), Some(OccurrenceClass::Write));
+    }
+
+    #[test]
+    fn of_root_does_not_cross_clause_boundaries() {
+        let (s, p) = one(
+            r##"Set <var>x</var> to the first item and the <a href="#len">length</a> of the list, and append it to <var>s</var>."##,
+        );
+        assert_ne!(role_of(&s, &p, "length"), Some(OccurrenceClass::Write));
+        assert!(matches!(
+            &p.statements[0].kind,
+            StatementKind::Set {
+                form: SetForm::To,
+                ..
+            }
+        ));
+        let (s, p) = one(
+            r##"Set the <a href="#sel">selectedness</a> of the first element, if any, to true."##,
+        );
+        assert_ne!(
+            role_of(&s, &p, "selectedness"),
+            Some(OccurrenceClass::Write)
+        );
+    }
+
+    #[test]
+    fn undefined_is_its_own_literal() {
+        let (_, p) = one(r##"Set <var>x</var> to undefined."##);
+        assert!(matches!(
+            &p.statements[0].kind,
+            StatementKind::Set {
+                value: Expr::Literal(Literal::Undefined),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn hyphenated_words_are_not_verbs() {
+        let (_, p) = one(r##"Set-up steps run <var>x</var>."##);
+        assert_eq!(p.clauses[0].verb, None);
+        assert!(p.statements.is_empty());
     }
 
     #[test]

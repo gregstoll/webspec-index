@@ -240,6 +240,7 @@ pub enum InitialValue {
 pub enum Literal {
     Bool(bool),
     Null,
+    Undefined,
     Number(String),
     String(String),
 }
