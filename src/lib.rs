@@ -1646,13 +1646,17 @@ pub fn query_idl_from_conn(
         }
         let like = format!("%{}%", normalized);
 
+        // ?1 and ?2 are lowercase. NOCASE and LIKE fold ASCII case in place,
+        // as LOWER() does, without allocating a lowered copy of every row.
+        // An exact name or canonical-name match also matches ?2 = %?1%, so the
+        // filter only spells out the anchor equality.
         let sql_with_spec = "SELECT sp.name, d.anchor, d.kind, d.name, d.owner, d.canonical_name, d.idl_text, s.title,
                 CASE
-                    WHEN LOWER(d.canonical_name) = ?1 THEN 100
-                    WHEN LOWER(d.name) = ?1 THEN 95
-                    WHEN LOWER(d.anchor) = ?1 THEN 90
-                    WHEN LOWER(d.canonical_name) LIKE ?2 THEN 80
-                    WHEN LOWER(d.name) LIKE ?2 THEN 70
+                    WHEN d.canonical_name = ?1 COLLATE NOCASE THEN 100
+                    WHEN d.name = ?1 COLLATE NOCASE THEN 95
+                    WHEN d.anchor = ?1 COLLATE NOCASE THEN 90
+                    WHEN d.canonical_name LIKE ?2 THEN 80
+                    WHEN d.name LIKE ?2 THEN 70
                     ELSE 0
                 END AS score
              FROM idl_defs d
@@ -1660,27 +1664,27 @@ pub fn query_idl_from_conn(
              JOIN specs sp ON sn.spec_id = sp.id
              LEFT JOIN sections s ON s.snapshot_id = d.snapshot_id AND s.anchor = d.anchor
              WHERE sp.name = ?3
-               AND (LOWER(d.canonical_name) = ?1 OR LOWER(d.name) = ?1 OR LOWER(d.anchor) = ?1
-                    OR LOWER(d.canonical_name) LIKE ?2 OR LOWER(d.name) LIKE ?2)
+               AND (d.anchor = ?1 COLLATE NOCASE
+                    OR d.canonical_name LIKE ?2 OR d.name LIKE ?2)
                AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
              ORDER BY score DESC, sp.name, d.canonical_name
              LIMIT ?4";
 
         let sql_without_spec = "SELECT sp.name, d.anchor, d.kind, d.name, d.owner, d.canonical_name, d.idl_text, s.title,
                 CASE
-                    WHEN LOWER(d.canonical_name) = ?1 THEN 100
-                    WHEN LOWER(d.name) = ?1 THEN 95
-                    WHEN LOWER(d.anchor) = ?1 THEN 90
-                    WHEN LOWER(d.canonical_name) LIKE ?2 THEN 80
-                    WHEN LOWER(d.name) LIKE ?2 THEN 70
+                    WHEN d.canonical_name = ?1 COLLATE NOCASE THEN 100
+                    WHEN d.name = ?1 COLLATE NOCASE THEN 95
+                    WHEN d.anchor = ?1 COLLATE NOCASE THEN 90
+                    WHEN d.canonical_name LIKE ?2 THEN 80
+                    WHEN d.name LIKE ?2 THEN 70
                     ELSE 0
                 END AS score
              FROM idl_defs d
              JOIN snapshots sn ON d.snapshot_id = sn.id
              JOIN specs sp ON sn.spec_id = sp.id
              LEFT JOIN sections s ON s.snapshot_id = d.snapshot_id AND s.anchor = d.anchor
-             WHERE (LOWER(d.canonical_name) = ?1 OR LOWER(d.name) = ?1 OR LOWER(d.anchor) = ?1
-                    OR LOWER(d.canonical_name) LIKE ?2 OR LOWER(d.name) LIKE ?2)
+             WHERE (d.anchor = ?1 COLLATE NOCASE
+                    OR d.canonical_name LIKE ?2 OR d.name LIKE ?2)
                AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
              ORDER BY score DESC, sp.name, d.canonical_name
              LIMIT ?3";
