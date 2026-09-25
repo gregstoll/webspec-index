@@ -1610,22 +1610,23 @@ impl AnalysisArtifact {
     }
 
     fn run_effect_handles(&self) -> BTreeMap<String, String> {
-        let digests: Vec<_> = self
-            .states
-            .iter()
-            .map(|state| {
-                effect_digest(&state.key.kind, &state.key.params)
-                    .expect("serializable effect identity")
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        digests
-            .iter()
-            .cloned()
-            .zip(effect_handles(&digests))
-            .collect()
+        handles_by_digest(
+            self.states
+                .iter()
+                .map(|state| {
+                    effect_digest(&state.key.kind, &state.key.params)
+                        .expect("serializable effect identity")
+                })
+                .collect(),
+        )
     }
+}
+
+/// Map each distinct effect digest of a run to its collision-safe handle.
+pub(crate) fn handles_by_digest(digests: BTreeSet<String>) -> BTreeMap<String, String> {
+    let digests: Vec<_> = digests.into_iter().collect();
+    let handles = effect_handles(&digests);
+    digests.into_iter().zip(handles).collect()
 }
 
 #[derive(Default)]
@@ -1635,13 +1636,16 @@ struct Group {
     rules: BTreeSet<String>,
 }
 
-fn compare_effect_summaries(left: &EffectSummary, right: &EffectSummary) -> std::cmp::Ordering {
+pub(crate) fn compare_effect_summaries(
+    left: &EffectSummary,
+    right: &EffectSummary,
+) -> std::cmp::Ordering {
     left.kind
         .cmp(&right.kind)
         .then_with(|| compare_params(&left.params, &right.params))
 }
 
-fn category_order(category: Option<&str>) -> (u8, &str) {
+pub(crate) fn category_order(category: Option<&str>) -> (u8, &str) {
     match category {
         Some("async") => (0, ""),
         Some("script") => (1, ""),
@@ -1668,7 +1672,7 @@ fn compare_params(left: &EffectParams, right: &EffectParams) -> std::cmp::Orderi
     left.len().cmp(&right.len())
 }
 
-fn params_dominate(more: &EffectParams, less: &EffectParams) -> bool {
+pub(crate) fn params_dominate(more: &EffectParams, less: &EffectParams) -> bool {
     if more.len() != less.len() {
         return false;
     }

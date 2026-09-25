@@ -2,10 +2,13 @@
 use super::bundled::default_catalog;
 use super::catalog::Catalog;
 #[cfg(any(feature = "native", test))]
-use super::engine::IssueId;
+use super::compact::{propagate_compact, summary_rows};
+use super::compact::{selector_key, CompactSummary};
 use super::engine::{self, AnalysisArtifact, ArtifactSummary, IndexedAnchor, SourceSpec};
 use super::fragment::{build_fragment, Fragment, FragmentInput};
 use super::graph::ExecutionNode;
+#[cfg(feature = "native")]
+use super::graph::SiteStore;
 use super::link::link;
 use super::model::*;
 #[cfg(any(feature = "native", test))]
@@ -13,11 +16,8 @@ use crate::db;
 use crate::db::effects as storage;
 use crate::parse::steps::{StructuralSpec, STRUCTURE_VERSION};
 use rusqlite::{Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
-#[cfg(any(feature = "native", test))]
-use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
@@ -227,113 +227,19 @@ fn issue_codes(issues: &[Issue]) -> Vec<IssueCode> {
         .collect()
 }
 
-#[derive(Serialize, Deserialize)]
-struct CompactSummary {
-    subject: Subject,
-    effects: Vec<EffectSummary>,
-    coverage: Coverage,
-    issue_codes: Vec<IssueCode>,
-    defined_bodies: Vec<CompactBody>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct CompactBody {
-    subject: Subject,
-    effects: Vec<EffectSummary>,
-    issue_codes: Vec<IssueCode>,
-}
-
-fn selector_key(subject: &SubjectSelector) -> Result<String, RequestError> {
-    canonical_json(
-        &serde_json::to_value((
-            &subject.spec,
-            &subject.anchor,
-            &subject.step_id,
-            &subject.step_path,
-            &subject.body_id,
-        ))
-        .map_err(failure)?,
-    )
-    .map_err(failure)
-}
-
-#[cfg(any(feature = "native", test))]
-fn record_selector(subject: &Subject) -> SubjectSelector {
-    SubjectSelector {
-        spec: subject.spec.clone(),
-        anchor: subject.anchor.clone(),
-        step_id: subject.step_id.clone(),
-        step_path: subject.step_path.clone(),
-        body_id: subject.body_id.clone(),
-    }
-}
-
-#[cfg(any(feature = "native", test))]
-fn codes_for_ids(artifact: &AnalysisArtifact, ids: &[IssueId]) -> Vec<IssueCode> {
-    ids.iter()
-        .filter_map(|id| artifact.issue(*id).map(|issue| issue.code))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-
 #[cfg(any(feature = "native", test))]
 fn store_compact_summaries(
     conn: &Connection,
     graph: &engine::Graph,
-    artifact: &AnalysisArtifact,
     meta: &storage::StoredGraphMeta,
     budgets: &DiscoveryBudgets,
 ) -> Result<(), RequestError> {
-    // A bounded global run is not interchangeable with a scoped run: the latter
-    // may reach a subject that the former did not. Publish only a complete run.
-    if !artifact.reached_fixed_point || !artifact.unprocessed_subjects.is_empty() {
-        return Ok(());
-    }
     let budget_key =
         canonical_json(&serde_json::to_value(budgets).map_err(failure)?).map_err(failure)?;
-    let mut rows = artifact
-        .summary_records(None)?
+    let mut rows: Vec<(String, String, String)> = summary_rows(graph, &propagate_compact(graph))?
         .into_iter()
-        .map(|record| {
-            let compact = CompactSummary {
-                subject: record.subject.clone(),
-                effects: record.effects,
-                coverage: record.coverage,
-                issue_codes: codes_for_ids(artifact, &record.issue_ids),
-                defined_bodies: record
-                    .defined_bodies
-                    .into_iter()
-                    .map(|body| CompactBody {
-                        subject: body.subject,
-                        effects: body.effects,
-                        issue_codes: codes_for_ids(artifact, &body.issue_ids),
-                    })
-                    .collect(),
-            };
-            Ok((
-                compact.subject.spec.clone(),
-                selector_key(&record_selector(&compact.subject))?,
-                serde_json::to_string(&compact).map_err(failure)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, RequestError>>()?;
-    let mut stored_keys: HashSet<String> = rows.iter().map(|(_, key, _)| key.clone()).collect();
-    // A missing top-level row can be synthesized only if the graph has no
-    // matching anchor. Keep tiny miss markers for graph anchors not emitted by
-    // summary_records, so the lookup can distinguish those cases.
-    for (spec, anchor) in graph.anchor_nodes.keys() {
-        let key = selector_key(&SubjectSelector {
-            spec: spec.clone(),
-            anchor: anchor.clone(),
-            step_id: None,
-            step_path: None,
-            body_id: None,
-        })?;
-        if stored_keys.insert(key.clone()) {
-            rows.push((spec.clone(), key, "null".into()));
-        }
-    }
+        .map(|row| (row.spec, row.subject_key, row.payload))
+        .collect();
     // This row certifies that an absent key means an ordinary indexed anchor
     // outside the graph, rather than an incompletely populated cache.
     rows.push((String::new(), COMPLETE_CACHE_KEY.into(), "{}".into()));
@@ -543,21 +449,26 @@ pub fn recompute_effects(
     let body_count = graph.nodes.values().filter(|n| n.is_body).count() as u64;
     let relationship_count = graph.edges.len() as u64;
 
-    let artifact =
-        engine::analyze_graph(&graph, AnalysisScope::All, request.options.budgets.clone())?;
-    store_compact_summaries(&conn, &graph, &artifact, &meta, &request.options.budgets)?;
+    store_compact_summaries(&conn, &graph, &meta, &request.options.budgets)?;
     let site_store = storage::SqlSiteStore(&conn);
-    let all_issue_ids: Vec<_> = (0..artifact.issues.len() as IssueId).collect();
-    let all_issues = artifact.materialize_issues(&all_issue_ids, &site_store)?;
-    let issue_count = all_issues.len() as u64;
-    let cap = 200.min(all_issues.len());
+    let issue_count = graph.issue_catalog.len() as u64;
+    let issues = graph
+        .issue_catalog
+        .iter()
+        .take(200)
+        .map(|issue| Issue {
+            code: issue.code,
+            message: issue.message.clone(),
+            site: issue.site_key.as_ref().and_then(|key| site_store.site(key)),
+        })
+        .collect();
 
     Ok(RecomputeEffectsResult {
         schema_version: EFFECTS_SCHEMA_VERSION,
         input_manifest: m,
         body_count,
         relationship_count,
-        issues: all_issues.into_iter().take(cap).collect(),
+        issues,
         issue_count,
     })
 }
@@ -791,9 +702,6 @@ pub fn get_cached_effect_preview_on(
         let id = format!("an_{}", &meta.semantic_key[..16]);
         return Ok(Some(compact_envelope(compact, manifest, &id)));
     };
-    if payload == "null" {
-        return Ok(None);
-    }
     let compact: CompactSummary = serde_json::from_str(&payload).map_err(failure)?;
     if compact.subject != subject {
         return Ok(None);
@@ -1091,9 +999,7 @@ mod tests {
         assert!(!graph
             .anchor_nodes
             .contains_key(&("EMPTY".into(), "ordinary-anchor".into())));
-        let artifact =
-            engine::analyze_graph(&graph, AnalysisScope::All, options.budgets.clone()).unwrap();
-        store_compact_summaries(&conn, &graph, &artifact, &meta, &options.budgets).unwrap();
+        store_compact_summaries(&conn, &graph, &meta, &options.budgets).unwrap();
         let req = request("TEST", "R");
         let full = get_effect_summary_on(&conn, &req).unwrap();
         conn.execute("UPDATE effect_graph SET topology=x'00' WHERE id=1", [])

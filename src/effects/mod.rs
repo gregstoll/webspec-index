@@ -1,6 +1,8 @@
 //! Shared possible-effects analysis for specification queries and editors.
 pub mod bundled;
 pub mod catalog;
+#[cfg_attr(not(any(feature = "native", test)), allow(dead_code))]
+pub(crate) mod compact;
 pub mod engine;
 pub mod fragment;
 pub mod graph;
