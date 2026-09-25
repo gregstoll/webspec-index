@@ -46,11 +46,8 @@ pub fn insert_or_get_spec(
 /// data so the spec gets re-fetched from the correct URL.
 pub fn seed_spec(conn: &Connection, name: &str, base_url: &str, provider: &str) -> Result<()> {
     let existing: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT id, base_url FROM specs WHERE name = ?1",
-            [name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+        .prepare_cached("SELECT id, base_url FROM specs WHERE name = ?1")?
+        .query_row([name], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?;
 
     match existing {

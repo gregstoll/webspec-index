@@ -21,18 +21,26 @@ pub struct SpecEntry {
 pub fn fetch_and_seed(conn: &Connection) -> Result<usize> {
     let entries: Vec<SpecEntry> = serde_json::from_str(BUNDLED_SPEC_LIST)
         .context("Failed to parse bundled w3c_specs.json")?;
-    let mut count = entries.len();
+    let known = crate::spec_registry::known_specs();
+
+    // This runs on every open. One transaction takes the file lock once
+    // instead of once per spec; it stays a read transaction unless a spec
+    // actually needs writing.
+    let tx = conn
+        .is_autocommit()
+        .then(|| conn.unchecked_transaction())
+        .transpose()?;
     for e in &entries {
         crate::db::write::seed_spec(conn, &e.name, &e.base_url, &e.provider)?;
     }
-
-    let known = crate::spec_registry::known_specs();
-    count += known.len();
     for (name, base_url, provider) in &known {
         crate::db::write::seed_spec(conn, name, base_url, provider)?;
     }
+    if let Some(tx) = tx {
+        tx.commit()?;
+    }
 
-    Ok(count)
+    Ok(entries.len() + known.len())
 }
 
 /// Update the W3C spec list from csswg-drafts and w3c/groups.
