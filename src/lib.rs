@@ -26,6 +26,7 @@ pub mod render;
 #[cfg(feature = "native")]
 pub mod spec_list;
 pub mod spec_registry;
+pub mod state;
 
 use anyhow::Context;
 use anyhow::Result;
