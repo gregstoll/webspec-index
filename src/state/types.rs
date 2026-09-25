@@ -34,7 +34,8 @@ fn kind_priority(k: &TypeKind) -> u8 {
         TypeKind::IdlMixin | TypeKind::IdlDictionary => 3,
         TypeKind::IdlInterface => 2,
         TypeKind::Element => 1,
-        TypeKind::Concept | TypeKind::InfraStruct => 0,
+        TypeKind::InfraStruct => 1,
+        TypeKind::Concept => 0,
     }
 }
 
@@ -215,13 +216,16 @@ impl TypeTable {
                 spec: spec.to_string(),
                 anchor: anchor.to_string(),
             });
-            self.types.entry(key.clone()).or_insert_with(|| TypeDef {
+            let entry = self.types.entry(key.clone()).or_insert_with(|| TypeDef {
                 key: key.clone(),
                 name: name.to_string(),
-                kind,
+                kind: kind.clone(),
                 anchors: Vec::new(),
                 supertypes: Vec::new(),
             });
+            if kind_priority(&kind) > kind_priority(&entry.kind) {
+                entry.kind = kind;
+            }
             self.add_anchor(key.clone(), spec, anchor, AnchorRole::Defining);
             key
         }

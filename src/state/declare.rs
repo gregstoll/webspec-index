@@ -1126,8 +1126,14 @@ mod tests {
     fn struct_items_make_an_infra_struct_owner() {
         let doc_html = r##"<p>The <dfn id="dlti">document load timing info</dfn> <a href="https://infra.spec.whatwg.org/#struct">struct</a> has the following items:</p><dl>
       <dt><dfn data-dfn-for="document load timing info" id="nst">navigation start time</dfn> (default 0)</dt><dd>A number</dd></dl>"##;
-        let out = run(doc_html, "HTML");
+        let (out, table) = run_with_table(doc_html, "HTML");
         assert_eq!(owner_keys(field(&out, "nst")), ["HTML#dlti"]);
+        // R1 creates dlti as Concept first; R4 must upgrade it to InfraStruct.
+        let dlti_key = TypeKey::Anchor(AnchorTarget {
+            spec: "HTML".into(),
+            anchor: "dlti".into(),
+        });
+        assert_eq!(table.types[&dlti_key].kind, TypeKind::InfraStruct);
     }
 
     #[test]
