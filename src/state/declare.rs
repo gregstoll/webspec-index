@@ -7,8 +7,9 @@ use crate::state::block::{
 };
 use crate::state::model::{
     AnchorTarget, DeclarationSite, FieldBasis, FieldDef, ModelIssue, Owner, OwnerBasis, OwnerRef,
-    OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind,
+    OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind, TypeRef,
 };
+use crate::state::typeexpr::{declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text};
 use crate::state::types::{ConceptDfn, TypeTable};
 use regex::Regex;
 use scraper::{ElementRef, Html, Node, Selector};
@@ -30,7 +31,7 @@ const CLASSIFIERS: [&str; 7] = [
 ];
 
 /// "An HTML element can have …" states an ability, not a declaration: a plain-word owner phrase
-/// ending in one of these is the subject plus an auxiliary verb.
+/// containing any of these words is the subject of an auxiliary construction, not a declaration.
 const AUXILIARIES: [&str; 13] = [
     "can", "cannot", "could", "may", "might", "must", "shall", "should", "will", "would", "does",
     "do", "did",
@@ -527,11 +528,10 @@ fn strip_classifiers(words: &str) -> String {
 }
 
 /// R2: the owners of a declaration sentence ("Each OWNER has …") that precedes the dfn.
+///
+/// Delegates to [`parse_r2_owners`] after locating the sentence and slicing the text to
+/// the dfn position, so there is exactly one owner-phrase parser in this module.
 fn declaration_owners(tokens: &[BlockToken], dfn_id: &str) -> Option<Vec<OwnerPhrase>> {
-    static R2_RE: OnceLock<Regex> = OnceLock::new();
-    static R2_ALT_RE: OnceLock<Regex> = OnceLock::new();
-    static SEPARATOR: OnceLock<Regex> = OnceLock::new();
-    static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
     let pat = pattern(tokens);
     let slot = pat
         .slots
@@ -541,25 +541,10 @@ fn declaration_owners(tokens: &[BlockToken], dfn_id: &str) -> Option<Vec<OwnerPh
     let sentence = sentences(&pat)
         .into_iter()
         .find(|range| range.contains(&dfn_at))?;
-    let text = &pat.text[sentence.start..];
-    let caps = regex(&R2_RE, R2)
-        .captures(text)
-        .or_else(|| regex(&R2_ALT_RE, R2_ALT).captures(text))?;
-    if sentence.start + caps.get(0)?.end() > dfn_at {
-        return None;
-    }
-    let placeholder = regex(&PLACEHOLDER, r"^⟦[LDC](\d+)⟧$");
-    let mut owners = Vec::new();
-    for part in regex(&SEPARATOR, r", and |, | and ").split(&caps["owners"]) {
-        if let Some(n) = placeholder.captures(part) {
-            owners.push(OwnerPhrase::Slot(pat.slots[n[1].parse::<usize>().ok()?]));
-        } else if part.split(' ').any(|w| AUXILIARIES.contains(&w)) {
-            return None;
-        } else {
-            owners.push(OwnerPhrase::Words(part.to_string()));
-        }
-    }
-    Some(owners)
+    // Pass only the text from the sentence start up to the dfn so that R2 must end
+    // before the dfn — equivalent to the old explicit end-position check.
+    let text_before_dfn = &pat.text[sentence.start..dfn_at];
+    parse_r2_owners(text_before_dfn, &pat.slots)
 }
 
 fn is_algorithm_container(element: &ElementRef<'_>) -> bool {
@@ -715,6 +700,13 @@ pub(crate) fn declare_fields(
                 .add_concept(spec, struct_id, &struct_name, TypeKind::InfraStruct);
         }
 
+        // Capture intro_initial before list_r34 is consumed by the owner match.
+        let intro_initial: Option<String> = match &list_r34 {
+            Some((ListCandidate::Property { intro_initial, .. }, _)) => intro_initial.clone(),
+            Some((ListCandidate::Struct { intro_initial, .. }, _)) => intro_initial.clone(),
+            _ => None,
+        };
+
         let has_list = list_r34.is_some();
 
         let (owner, rule) = match (r1, &declared, list_r34) {
@@ -815,6 +807,43 @@ pub(crate) fn declare_fields(
             });
         }
 
+        // §6.4: compute declared type and initial value.
+        let dd_text = sibling_dd_text(dfn, spec, base_url);
+        let pat = pattern(&tokens);
+        let (declared_type_val, initial_val) = {
+            // Immutable snapshot of the type table for the resolve closure.
+            let by_anchor = &resolver.table.by_anchor;
+            let spec_str: &str = resolver.spec;
+            let resolve_fn = |target: &AnchorTarget| -> TypeRef {
+                if target.spec == spec_str {
+                    if let Some(key) = by_anchor.get(&target.anchor) {
+                        return TypeRef::Known(key.clone());
+                    }
+                }
+                TypeRef::Unresolved(target.clone())
+            };
+            if let Some((dfn_slot, clause, next_sent)) = locate_dfn_in_pat(&tokens, &pat, id) {
+                let ty = declared_type(
+                    &tokens,
+                    &pat,
+                    dfn_slot,
+                    clause.clone(),
+                    dd_text.as_deref(),
+                    &resolve_fn,
+                );
+                let init = initial_value(
+                    &pat.text[clause],
+                    next_sent.as_deref(),
+                    intro_initial.as_deref(),
+                );
+                (ty, init)
+            } else {
+                // Dfn not found in block tokens; still honour intro_initial.
+                let init = initial_value("", None, intro_initial.as_deref());
+                (TypeExpr::Unknown, init)
+            }
+        };
+
         let (name, names) = dfn_names(dfn);
         out.fields.push(FieldDef {
             anchor: AnchorTarget {
@@ -825,8 +854,8 @@ pub(crate) fn declare_fields(
             names,
             owner,
             field_basis,
-            declared_type: TypeExpr::Unknown,
-            initial: None,
+            declared_type: declared_type_val,
+            initial: initial_val,
             declaration: Some(DeclarationSite {
                 section_anchor: section_anchor.clone(),
                 text: plain_text(&tokens),
@@ -870,11 +899,17 @@ pub(crate) fn declare_fields(
 mod tests {
     use super::*;
     use crate::parse::steps::extract_step_structure_from_document;
-    use crate::state::model::{AnchorRole, ConceptAliasBasis};
+    use crate::state::model::{
+        AnchorRole, ConceptAliasBasis, InitialValue, Literal, Primitive, TypeRef,
+    };
     use scraper::Html;
 
     fn run(html: &str, spec: &str) -> DeclareOutput {
         run_with_table(html, spec).0
+    }
+
+    fn run_declare(html: &str, spec: &str) -> DeclareOutput {
+        run(html, spec)
     }
 
     fn run_with_table(html: &str, spec: &str) -> (DeclareOutput, TypeTable) {
@@ -1202,5 +1237,90 @@ mod tests {
                 }
             }
         }
+    }
+
+    // A7: declared type and initial value.
+
+    #[test]
+    fn post_dfn_boolean_and_initial_false() {
+        let out = run_declare(
+            r##"<p>Each <code><a href="#document">Document</a></code> has an <dfn id="f">is initial <code>about:blank</code></dfn>, which is a boolean, initially false.</p><pre><code class="idl">partial interface <dfn id="document">Document</dfn> {};</code></pre>"##,
+            "HTML",
+        );
+        let f = field(&out, "f");
+        assert_eq!(f.declared_type, TypeExpr::Primitive(Primitive::Boolean));
+        assert!(matches!(
+            &f.initial,
+            Some(InitialValue::Literal {
+                value: Literal::Bool(false),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn union_with_null_and_nominal() {
+        use crate::state::typeexpr::parse_type_phrase;
+        let links = vec![(
+            "navigable".to_string(),
+            TypeRef::Known(TypeKey::parse("HTML#navigable").unwrap()),
+        )];
+        let ty = parse_type_phrase("⟦L0⟧ or null", &links);
+        assert!(matches!(ty, TypeExpr::Union(ref v) if v.len() == 2 && v[1] == TypeExpr::Null));
+    }
+
+    #[test]
+    fn struct_item_default_and_dd_type() {
+        let out = run_declare(
+            r##"<p>The <dfn id="dlti">document load timing info</dfn> <a href="https://infra.spec.whatwg.org/#struct">struct</a> has the following items:</p><dl><dt><dfn data-dfn-for="document load timing info" id="nst">navigation start time</dfn> (default 0)</dt><dd>A number</dd></dl>"##,
+            "HTML",
+        );
+        let f = field(&out, "nst");
+        assert_eq!(f.declared_type, TypeExpr::Primitive(Primitive::Number));
+        assert!(
+            matches!(&f.initial, Some(InitialValue::Literal { value: Literal::Number(n), .. }) if n == "0")
+        );
+    }
+
+    #[test]
+    fn intro_initial_unset_applies_to_every_item_and_next_sentence_initial() {
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="event">Event</dfn> {};</pre><p>An <dfn data-dfn-type="dfn" id="concept-event">event</dfn> is …</p>
+      <p>Each <a href="#concept-event">event</a> has the following associated flags that are all initially unset:</p><ul><li><dfn data-dfn-for="Event" data-dfn-type="dfn" id="spf">stop propagation flag</dfn></li></ul>
+      <p>Each <code><a href="#nodeiterator">NodeIterator</a></code> object has an associated boolean <dfn data-dfn-for="NodeIterator" data-dfn-type="dfn" id="active">is active</dfn> to avoid recursive invocations. It is initially false.</p>"##,
+            "DOM",
+        );
+        assert!(matches!(
+            field(&out, "spf").initial,
+            Some(InitialValue::Unset { .. })
+        ));
+        assert_eq!(
+            field(&out, "active").declared_type,
+            TypeExpr::Primitive(Primitive::Boolean)
+        );
+        assert!(matches!(
+            &field(&out, "active").initial,
+            Some(InitialValue::Literal {
+                value: Literal::Bool(false),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn set_upon_creation_is_opaque_and_nominal_keeps_text() {
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-node">Node</dfn> {}; interface <dfn data-dfn-type="interface" id="interface-document">Document</dfn> : Node {};</pre>
+      <p>A <dfn data-dfn-type="dfn" id="concept-node">node</dfn>. A <dfn data-dfn-type="dfn" id="concept-document">document</dfn>.</p>
+      <p>Each <a href="#concept-node">node</a> has an associated <dfn data-dfn-for="Node" data-dfn-type="dfn" id="nd">node document</dfn>, set upon creation, that is a <a href="#concept-document">document</a>.</p>"##,
+            "DOM",
+        );
+        let f = field(&out, "nd");
+        assert!(
+            matches!(&f.declared_type, TypeExpr::Nominal { ty: TypeRef::Known(TypeKey::Idl(n)), text } if n == "Document" && text == "document")
+        );
+        assert!(
+            matches!(&f.initial, Some(InitialValue::Opaque { text }) if text == "set upon creation")
+        );
     }
 }
