@@ -74,6 +74,11 @@ webspec-index query "HTML#navigate" --links full     # full absolute URLs
 webspec-index query "HTML#navigate" --links none     # link text only, no URLs
 webspec-index query "HTML#navigate" --no-notes       # drop Note/Example/Warning blocks
 
+# Cross-reference counts in query output: listed when < 5, command otherwise
+# JSON: {"total": 3, "items": [...]} or {"total": 117, "command": "webspec-index refs ..."}
+# Fetch the full list with the emitted command, e.g.:
+webspec-index refs "HTML#navigate" -d incoming -l 117
+
 # Inspect effect evidence for an algorithm or one of its steps
 webspec-index effects "HTML#navigate"
 webspec-index effects "HTML#navigate" --step 20 --kind event.fire

@@ -907,9 +907,38 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             } else {
                 None
             };
-            print_output(&cli.format, &result, |result| {
-                format::query_with_effects(result, catalog.as_ref())
-            });
+            let spec_id = format!("{}#{}", result.query.spec, result.query.anchor);
+            match cli.format {
+                OutputFormat::Json => {
+                    let mut v = serde_json::to_value(&result).context("serialization failed")?;
+                    apply_refs_summary(
+                        &mut v,
+                        &spec_id,
+                        pr,
+                        "outgoing_refs",
+                        "outgoing",
+                        result.query.outgoing_refs.len(),
+                    );
+                    apply_refs_summary(
+                        &mut v,
+                        &spec_id,
+                        pr,
+                        "incoming_refs",
+                        "incoming",
+                        result.query.incoming_refs.len(),
+                    );
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&v).context("serialization failed")?
+                    );
+                }
+                OutputFormat::Markdown => {
+                    print!(
+                        "{}",
+                        format::query_with_effects(&result, catalog.as_ref(), pr)
+                    );
+                }
+            }
             Ok(ExitCode::SUCCESS)
         }
 
@@ -1487,6 +1516,30 @@ async fn run_analyze(
 
     eprintln!("spec-analyze: {files_with_refs} files with spec references");
     Ok(())
+}
+
+/// Transform a `refs` array field in a serialised `QueryWithEffects` value into
+/// the summarised shape.
+///
+/// When `total < REFS_LIST_THRESHOLD` the field becomes `{"total": N, "items": [...]}`.
+/// When `total >= REFS_LIST_THRESHOLD` the array is replaced with
+/// `{"total": N, "command": "webspec-index refs ..."}` so the caller has a
+/// ready-made command to fetch the full list.
+fn apply_refs_summary(
+    v: &mut serde_json::Value,
+    spec_id: &str,
+    pr: Option<i64>,
+    field: &str,
+    direction: &str,
+    total: usize,
+) {
+    let items = v[field].take();
+    if total < format::REFS_LIST_THRESHOLD {
+        v[field] = serde_json::json!({"total": total, "items": items});
+    } else {
+        let cmd = format::refs_command(spec_id, direction, total, pr);
+        v[field] = serde_json::json!({"total": total, "command": cmd});
+    }
 }
 
 fn parse_ref_kind(kind: Option<&str>) -> anyhow::Result<Option<model::RefKind>> {

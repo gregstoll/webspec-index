@@ -73,6 +73,10 @@ Read the whole section when a hop's own text and guards are not enough:
 `webspec-index query '<SPEC#anchor>' --format markdown`
 (links default to `short` — `SPEC#anchor` — which you can feed back into `query`; use `--links full` for absolute URLs).
 
+`query` output shows cross-reference counts. When a section has fewer than 5 refs in one direction
+they are listed; otherwise a ready-made `refs` command is emitted — copy and run it to fetch the
+full list (e.g. `webspec-index refs HTML#navigate -d incoming -l 117`).
+
 **A NOT REACHED verdict needs the step where the chain stops, and that step is never in the
 output.** `trace` enumerates routes that reach the target, so the step that ends a chain instead —
 returning, aborting, or taking the other branch — has no edge to the target and cannot appear in any

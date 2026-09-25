@@ -12,8 +12,28 @@ use crate::model::{AnchorEntry, SearchEntry};
 
 use std::collections::HashMap;
 
-/// Format a QueryResult as markdown
-pub fn query(result: &QueryResult) -> String {
+/// When the total ref count is at least this many, emit a fetch command instead
+/// of listing every ref in `query` output. Keeps large sections readable while
+/// giving callers a copy-pasteable command for the full list.
+pub const REFS_LIST_THRESHOLD: usize = 5;
+
+/// Build the `refs` command that fetches all refs for a direction.
+///
+/// The caller passes the full count as `-l` so nothing is truncated.
+/// `--pr N` is appended when the original query used a PR preview.
+pub fn refs_command(spec_id: &str, direction: &str, total: usize, pr: Option<i64>) -> String {
+    let mut cmd = format!("webspec-index refs {spec_id} -d {direction} -l {total}");
+    if let Some(n) = pr {
+        cmd.push_str(&format!(" --pr {n}"));
+    }
+    cmd
+}
+
+/// Format a QueryResult as markdown.
+///
+/// Refs sections list every ref below `REFS_LIST_THRESHOLD`; at or above it they
+/// show the count and a `refs` command (carrying `--pr` when `pr` is set).
+pub fn query(result: &QueryResult, pr: Option<i64>) -> String {
     let mut md = String::new();
 
     md.push_str(&format!("# {}#{}\n\n", result.spec, result.anchor));
@@ -79,37 +99,61 @@ pub fn query(result: &QueryResult) -> String {
         }
     }
 
-    if !result.outgoing_refs.is_empty() {
-        md.push_str(&format!(
-            "\n## Outgoing refs ({})\n\n",
-            result.outgoing_refs.len()
-        ));
-        for ref_entry in &result.outgoing_refs {
-            md.push_str(&format!("- {}#{}\n", ref_entry.spec, ref_entry.anchor));
-        }
-    }
-
-    if !result.incoming_refs.is_empty() {
-        md.push_str(&format!(
-            "\n## Incoming refs ({})\n\n",
-            result.incoming_refs.len()
-        ));
-        for ref_entry in &result.incoming_refs {
-            md.push_str(&format!("- {}#{}\n", ref_entry.spec, ref_entry.anchor));
-        }
-    }
+    let spec_id = format!("{}#{}", result.spec, result.anchor);
+    render_refs_section(
+        &mut md,
+        "Outgoing",
+        &result.outgoing_refs,
+        &spec_id,
+        "outgoing",
+        pr,
+    );
+    render_refs_section(
+        &mut md,
+        "Incoming",
+        &result.incoming_refs,
+        &spec_id,
+        "incoming",
+        pr,
+    );
 
     md
 }
 
 /// Format the additive query result using the shared effects renderer.
-pub fn query_with_effects(result: &QueryWithEffects, catalog: Option<&Catalog>) -> String {
-    let mut markdown = query(&result.query);
+pub fn query_with_effects(
+    result: &QueryWithEffects,
+    catalog: Option<&Catalog>,
+    pr: Option<i64>,
+) -> String {
+    let mut markdown = query(&result.query, pr);
     if let Some(effects) = result.effects_result() {
         markdown.push('\n');
         markdown.push_str(&crate::effects::render::summary_markdown(&effects, catalog));
     }
     markdown
+}
+
+fn render_refs_section(
+    md: &mut String,
+    label: &str,
+    refs: &[RefEntry],
+    spec_id: &str,
+    direction: &str,
+    pr: Option<i64>,
+) {
+    if refs.is_empty() {
+        return;
+    }
+    let n = refs.len();
+    md.push_str(&format!("\n## {label} refs ({n})\n\n"));
+    if n < REFS_LIST_THRESHOLD {
+        for ref_entry in refs {
+            md.push_str(&format!("- {}#{}\n", ref_entry.spec, ref_entry.anchor));
+        }
+    } else {
+        md.push_str(&format!("`{}`\n", refs_command(spec_id, direction, n, pr)));
+    }
 }
 
 /// Format an ExistsResult as markdown
@@ -809,7 +853,7 @@ mod tests {
             incoming_refs: vec![],
         };
 
-        let md = query(&result);
+        let md = query(&result, None);
         assert!(md.contains("# TEST#test-section"));
         assert!(md.contains("**Type**: Heading"));
         assert!(md.contains("**SHA**: abc123"));
@@ -841,11 +885,145 @@ mod tests {
             incoming_refs: vec![],
         };
 
-        let md = query(&result);
+        let md = query(&result, None);
         assert!(md.contains("**navigate** (Algorithm)"));
         assert!(md.contains("## Content"));
         assert!(md.contains("To **navigate** a [navigable](#foo)"));
         assert!(md.contains("- Parent: `section-7`"));
+    }
+
+    #[test]
+    fn refs_command_basic() {
+        assert_eq!(
+            super::refs_command("HTML#navigate", "incoming", 117, None),
+            "webspec-index refs HTML#navigate -d incoming -l 117"
+        );
+    }
+
+    #[test]
+    fn refs_command_with_pr() {
+        assert_eq!(
+            super::refs_command("HTML#navigate", "outgoing", 153, Some(12345)),
+            "webspec-index refs HTML#navigate -d outgoing -l 153 --pr 12345"
+        );
+    }
+
+    #[test]
+    fn query_small_refs_are_listed() {
+        use crate::effects::QueryWithEffects;
+        let result = QueryWithEffects {
+            query: QueryResult {
+                spec: "HTML".to_string(),
+                sha: "abc".to_string(),
+                anchor: "navigate".to_string(),
+                url: String::new(),
+                title: None,
+                number: None,
+                content: None,
+                section_type: "algorithm".to_string(),
+                navigation: crate::model::Navigation {
+                    parent: None,
+                    prev: None,
+                    next: None,
+                    children: vec![],
+                },
+                outgoing_refs: vec![
+                    RefEntry::plain("DOM", "concept-tree"),
+                    RefEntry::plain("INFRA", "assert"),
+                ],
+                incoming_refs: vec![RefEntry::plain("HTML", "navigate-fragid")],
+            },
+            effects: None,
+            effects_status: None,
+        };
+        let md = super::query_with_effects(&result, None, None);
+        assert!(md.contains("## Outgoing refs (2)"), "header present: {md}");
+        assert!(md.contains("- DOM#concept-tree"), "item listed: {md}");
+        assert!(md.contains("## Incoming refs (1)"), "incoming header: {md}");
+        assert!(md.contains("- HTML#navigate-fragid"), "incoming item: {md}");
+        assert!(
+            !md.contains("webspec-index refs"),
+            "no command when below threshold: {md}"
+        );
+    }
+
+    #[test]
+    fn query_large_refs_emit_command() {
+        use crate::effects::QueryWithEffects;
+        let many: Vec<RefEntry> = (0..10)
+            .map(|i| RefEntry::plain("HTML", format!("section-{i}")))
+            .collect();
+        let result = QueryWithEffects {
+            query: QueryResult {
+                spec: "HTML".to_string(),
+                sha: "abc".to_string(),
+                anchor: "navigate".to_string(),
+                url: String::new(),
+                title: None,
+                number: None,
+                content: None,
+                section_type: "algorithm".to_string(),
+                navigation: crate::model::Navigation {
+                    parent: None,
+                    prev: None,
+                    next: None,
+                    children: vec![],
+                },
+                outgoing_refs: many.clone(),
+                incoming_refs: many,
+            },
+            effects: None,
+            effects_status: None,
+        };
+        let md = super::query_with_effects(&result, None, None);
+        assert!(md.contains("## Outgoing refs (10)"), "header present: {md}");
+        assert!(
+            md.contains("`webspec-index refs HTML#navigate -d outgoing -l 10`"),
+            "outgoing command: {md}"
+        );
+        assert!(
+            md.contains("`webspec-index refs HTML#navigate -d incoming -l 10`"),
+            "incoming command: {md}"
+        );
+        assert!(
+            !md.contains("- HTML#section-"),
+            "individual items must not be listed: {md}"
+        );
+    }
+
+    #[test]
+    fn query_large_refs_with_pr() {
+        use crate::effects::QueryWithEffects;
+        let many: Vec<RefEntry> = (0..6)
+            .map(|i| RefEntry::plain("HTML", format!("s{i}")))
+            .collect();
+        let result = QueryWithEffects {
+            query: QueryResult {
+                spec: "HTML".to_string(),
+                sha: "abc".to_string(),
+                anchor: "navigate".to_string(),
+                url: String::new(),
+                title: None,
+                number: None,
+                content: None,
+                section_type: "algorithm".to_string(),
+                navigation: crate::model::Navigation {
+                    parent: None,
+                    prev: None,
+                    next: None,
+                    children: vec![],
+                },
+                outgoing_refs: many,
+                incoming_refs: vec![],
+            },
+            effects: None,
+            effects_status: None,
+        };
+        let md = super::query_with_effects(&result, None, Some(999));
+        assert!(
+            md.contains("--pr 999"),
+            "PR number included in command: {md}"
+        );
     }
 
     #[test]
@@ -880,7 +1058,7 @@ mod tests {
             incoming_refs: vec![RefEntry::plain("ANOTHER".to_string(), "baz".to_string())],
         };
 
-        let md = query(&result);
+        let md = query(&result, None);
         assert!(md.contains("- Children: 2"));
         assert!(md.contains("  - `child1` — First Child"));
         assert!(md.contains("  - `child2`"));

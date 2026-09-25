@@ -168,9 +168,7 @@ pub fn build_converter(base_url: &str) -> HtmlToMarkdown {
             }
 
             if is_props {
-                // Parse it to extract dt/dd structure
-                // Actually, let's build the table directly from walking the DOM
-                Some(build_table_from_dl(element.node).into())
+                Some(build_table_from_dl(element.node, handlers).into())
             } else {
                 // Regular dl, just pass through
                 Some(handlers.walk_children(element.node))
@@ -244,28 +242,33 @@ fn has_class(attr_value: &str, class: &str) -> bool {
     attr_value.split_whitespace().any(|c| c == class)
 }
 
-/// Build a markdown table from a <dl> node by walking the DOM
-fn build_table_from_dl(node: &std::rc::Rc<markup5ever_rcdom::Node>) -> String {
+/// Build a markdown table from a `<dl class="props">` node, preserving inline
+/// markup (links, `<var>` → `*x*`, `<code>` → `` `x` ``) in both dt and dd cells.
+///
+/// Pipe characters inside cells are escaped as `\|` so they do not break the
+/// table structure. The `handlers` argument is the htmd engine so that the
+/// registered `<a>`, `<var>`, `<code>`, `<dfn>` handlers apply to cell content.
+fn build_table_from_dl(
+    node: &std::rc::Rc<markup5ever_rcdom::Node>,
+    handlers: &dyn Handlers,
+) -> String {
     use markup5ever_rcdom::NodeData;
 
-    let mut rows = Vec::new();
+    let mut rows: Vec<(String, String)> = Vec::new();
     let mut current_dt: Option<String> = None;
 
-    // Walk children to find dt/dd pairs
     for child in node.children.borrow().iter() {
         if let NodeData::Element { ref name, .. } = child.data {
             let tag_name = name.local.as_ref();
-
             match tag_name {
                 "dt" => {
-                    // Save previous dt if any
                     if let Some(term) = current_dt.take() {
                         rows.push((term, String::new()));
                     }
-                    current_dt = Some(extract_text_recursive(child));
+                    current_dt = Some(handlers.walk_children(child).content);
                 }
                 "dd" => {
-                    let def = extract_text_recursive(child);
+                    let def = handlers.walk_children(child).content;
                     if let Some(term) = current_dt.take() {
                         rows.push((term, def));
                     }
@@ -275,7 +278,6 @@ fn build_table_from_dl(node: &std::rc::Rc<markup5ever_rcdom::Node>) -> String {
         }
     }
 
-    // Handle leftover dt
     if let Some(term) = current_dt {
         rows.push((term, String::new()));
     }
@@ -284,11 +286,10 @@ fn build_table_from_dl(node: &std::rc::Rc<markup5ever_rcdom::Node>) -> String {
         return String::new();
     }
 
-    // Build markdown table
     let mut table = String::from("\n\n| Field | Value |\n|-------|-------|\n");
     for (term, def) in rows {
-        let term = term.trim().replace('\n', " ");
-        let def = def.trim().replace('\n', " ");
+        let term = term.trim().replace('\n', " ").replace('|', "\\|");
+        let def = def.trim().replace('\n', " ").replace('|', "\\|");
         table.push_str(&format!("| {} | {} |\n", term, def));
     }
 
@@ -569,7 +570,45 @@ interface <dfn id="node"><code>Node</code></dfn> : <a href="#et">EventTarget</a>
             "https://html.spec.whatwg.org",
         );
         assert!(md.contains("| Field | Value |"));
-        assert!(md.contains("| term | definition with variable |"));
+        assert!(
+            md.contains("[term](https://html.spec.whatwg.org#foo)"),
+            "dt link must be preserved as markdown link: {md}"
+        );
+        assert!(
+            md.contains("*variable*"),
+            "dd var must be rendered as italic: {md}"
+        );
+    }
+
+    #[test]
+    fn test_dl_props_preserves_links_and_markup() {
+        let md = html_to_markdown(
+            r##"<dl class="props">
+              <dt><a href="#navigation-params-id">id</a></dt>
+              <dd><var>navigationId</var></dd>
+              <dt><a href="#navigation-params-response">response</a></dt>
+              <dd><var>response</var>'s <a href="https://fetch.spec.whatwg.org/#concept-response-url">URL</a></dd>
+            </dl>"##,
+            "https://html.spec.whatwg.org",
+        );
+        assert!(md.contains("| Field | Value |"));
+        assert!(
+            md.contains("[id](https://html.spec.whatwg.org#navigation-params-id)"),
+            "dt link to field anchor must be preserved: {md}"
+        );
+        assert!(md.contains("*navigationId*"), "dd var must be italic: {md}");
+        assert!(
+            md.contains("*response*"),
+            "dd var in complex cell must be italic: {md}"
+        );
+        assert!(
+            md.contains("[URL](https://fetch.spec.whatwg.org/#concept-response-url)"),
+            "dd cross-spec link must be preserved: {md}"
+        );
+        assert!(
+            !md.contains("| id | navigationId |"),
+            "plain-text version must not appear (links/markup must be present): {md}"
+        );
     }
 
     #[test]
