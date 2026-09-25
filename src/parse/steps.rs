@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use super::algorithms::step_number;
 
 /// Version of the serialized structural parse format.
-pub const STRUCTURE_VERSION: &str = "8";
+pub const STRUCTURE_VERSION: &str = "9";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuralSpec {
@@ -293,6 +293,7 @@ struct ExtractContext<'a> {
     base_url: &'a str,
     snapshot_sha: &'a str,
     anchor: &'a str,
+    owner: ElementRef<'a>,
 }
 
 struct AlgorithmBuilder<'a> {
@@ -337,6 +338,7 @@ pub fn extract_step_structure_from_document(
             base_url,
             snapshot_sha,
             anchor: &anchor,
+            owner: candidate.owner,
         };
         match extract_algorithm(candidate, ctx) {
             Some(algorithm) => algorithms.push(algorithm),
@@ -387,6 +389,7 @@ pub(crate) fn canonical_inline(
         base_url: ctx.base_url,
         snapshot_sha: ctx.snapshot_sha,
         anchor: ctx.anchor,
+        owner: *element,
     };
     let mut builder = CanonicalBuilder::new(&ctx);
     builder.skip_nested_blocks = true;
@@ -481,6 +484,14 @@ struct AlgorithmCandidate<'a> {
 fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'a>> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
+    let positions: HashMap<ego_tree::NodeId, usize> = document
+        .root_element()
+        .descendants()
+        .enumerate()
+        .map(|(index, node)| (node.id(), index))
+        .collect();
+    let position =
+        |element: &ElementRef<'_>| positions.get(&element.id()).copied().unwrap_or(usize::MAX);
 
     let emu_selector = Selector::parse("emu-clause[id], emu-annex[id]").expect("valid selector");
     for clause in document.select(&emu_selector) {
@@ -499,7 +510,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
             title,
             owner: clause,
             body,
-            order: document_order_position(document, &clause),
+            order: position(&clause),
         });
     }
 
@@ -524,7 +535,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
                 title: nonempty_text(&first),
                 owner: container,
                 body,
-                order: document_order_position(document, &container),
+                order: position(&container),
             });
             continue;
         }
@@ -545,7 +556,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
                 title: nonempty_text(&dfn),
                 owner,
                 body: Some(CandidateBody::List(list)),
-                order: document_order_position(document, &owner),
+                order: position(&owner),
             });
         }
     }
@@ -569,7 +580,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
             title: nonempty_text(&dfn),
             owner,
             body,
-            order: document_order_position(document, &owner),
+            order: position(&owner),
         });
     }
 
@@ -582,9 +593,9 @@ fn extract_algorithm(
     ctx: ExtractContext<'_>,
 ) -> Option<StructuralAlgorithm> {
     let body = candidate.body?;
-    let algorithm_path = dom_path(&candidate.owner);
-    let algorithm_source = source_identity(&ctx, "algorithm", &algorithm_path, None);
-    let root_body_source = source_identity(&ctx, "body", &algorithm_path, Some("root"));
+    let owner_path = algorithm_path(&candidate.owner, &candidate.owner);
+    let algorithm_source = source_identity(&ctx, "algorithm", &owner_path, None);
+    let root_body_source = source_identity(&ctx, "body", &owner_path, Some("root"));
     let root_body_id = root_body_source.node_id.clone();
     let mut builder = AlgorithmBuilder {
         ctx,
@@ -629,6 +640,10 @@ fn extract_algorithm(
 }
 
 impl AlgorithmBuilder<'_> {
+    fn path(&self, element: &ElementRef<'_>) -> String {
+        algorithm_path(&self.ctx.owner, element)
+    }
+
     fn parse_list(
         &mut self,
         list: &ElementRef<'_>,
@@ -641,7 +656,7 @@ impl AlgorithmBuilder<'_> {
             let number = step_number(&item).unwrap_or(position + 1) as u32;
             let mut path = path_prefix.to_vec();
             path.push(number);
-            let step_path = dom_path(&item);
+            let step_path = self.path(&item);
             let source = source_identity(&self.ctx, "step", &step_path, None);
             let step_id = source.node_id.clone();
             self.algorithm.steps.push(StructuralStep {
@@ -692,7 +707,7 @@ impl AlgorithmBuilder<'_> {
                 if is_block_element(name) {
                     self.flush_inline_group(&mut inline_group, step_id, body_id);
                     let nodes: Vec<_> = element.children().collect();
-                    self.record_segment_nodes(&nodes, &dom_path(&element), step_id, body_id);
+                    self.record_segment_nodes(&nodes, &self.path(&element), step_id, body_id);
                     continue;
                 }
             }
@@ -712,7 +727,7 @@ impl AlgorithmBuilder<'_> {
         }
         let path = nodes
             .iter()
-            .find_map(|node| ElementRef::wrap(*node).map(|element| dom_path(&element)))
+            .find_map(|node| ElementRef::wrap(*node).map(|element| self.path(&element)))
             .unwrap_or_else(|| format!("{step_id}/text"));
         self.record_segment_nodes(nodes, &path, step_id, body_id);
         nodes.clear();
@@ -1076,7 +1091,7 @@ impl AlgorithmBuilder<'_> {
     ) {
         let preceding = self.step_text(step_id);
         if let Some(name) = body_definition_name(&preceding) {
-            let body_source = source_identity(&self.ctx, "body", &dom_path(list), Some(&name));
+            let body_source = source_identity(&self.ctx, "body", &self.path(list), Some(&name));
             let new_body_id = body_source.node_id.clone();
             self.algorithm.bodies.push(StructuralBody {
                 source: body_source.clone(),
@@ -1088,7 +1103,12 @@ impl AlgorithmBuilder<'_> {
                 range: None,
             });
             self.algorithm.body_definitions.push(BodyDefinitionSite {
-                source: source_identity(&self.ctx, "body-definition", &dom_path(list), Some(&name)),
+                source: source_identity(
+                    &self.ctx,
+                    "body-definition",
+                    &self.path(list),
+                    Some(&name),
+                ),
                 step_id: step_id.to_string(),
                 scope_body_id: body_id.to_string(),
                 name: name.clone(),
@@ -1104,7 +1124,7 @@ impl AlgorithmBuilder<'_> {
             self.parse_list(list, &new_body_id, None, path);
         } else if anonymous_body_intro(&preceding) {
             let body_source =
-                source_identity(&self.ctx, "body", &dom_path(list), Some("anonymous"));
+                source_identity(&self.ctx, "body", &self.path(list), Some("anonymous"));
             let new_body_id = body_source.node_id.clone();
             self.algorithm.bodies.push(StructuralBody {
                 source: body_source,
@@ -1222,7 +1242,7 @@ impl AlgorithmBuilder<'_> {
             let branch_source = source_identity(
                 &self.ctx,
                 "branch",
-                &dom_path(&item),
+                &self.path(&item),
                 Some(&(position + 1).to_string()),
             );
             let branch_id = branch_source.node_id.clone();
@@ -1254,7 +1274,7 @@ impl AlgorithmBuilder<'_> {
         for child in list.children().filter_map(ElementRef::wrap) {
             match child.value().name() {
                 "dt" => {
-                    let source = source_identity(&self.ctx, "branch", &dom_path(&child), None);
+                    let source = source_identity(&self.ctx, "branch", &self.path(&child), None);
                     let id = source.node_id.clone();
                     let mut label = CanonicalBuilder::new(&self.ctx);
                     for node in child.children() {
@@ -1316,7 +1336,7 @@ impl AlgorithmBuilder<'_> {
         let Some(kind) = note_kind(element) else {
             return;
         };
-        let path = dom_path(element);
+        let path = self.path(element);
         let source = source_identity(&self.ctx, "note", &path, None);
         let note_id = source.node_id.clone();
         let nodes: Vec<_> = element.children().collect();
@@ -1353,7 +1373,7 @@ impl AlgorithmBuilder<'_> {
                 .map(|(_, _, path)| path.clone())
                 .unwrap_or_default();
             path.push(*ordinal);
-            let step_path = format!("{}/source-line-{}", dom_path(emu_alg), line_index + 1);
+            let step_path = format!("{}/source-line-{}", self.path(emu_alg), line_index + 1);
             let source = source_identity(&self.ctx, "step", &step_path, None);
             let step_id = source.node_id.clone();
             self.algorithm.steps.push(StructuralStep {
@@ -1856,7 +1876,7 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
                 stable_id(
                     self.ctx,
                     "link",
-                    &dom_path(link),
+                    &algorithm_path(&self.ctx.owner, link),
                     Some(&self.link_ordinal.to_string()),
                 )
             });
@@ -2043,14 +2063,7 @@ fn source_identity(
 
 fn stable_id(ctx: &ExtractContext<'_>, kind: &str, path: &str, suffix: Option<&str>) -> String {
     let mut hasher = Sha256::new();
-    for component in [
-        ctx.snapshot_sha,
-        ctx.spec,
-        ctx.anchor,
-        kind,
-        path,
-        suffix.unwrap_or_default(),
-    ] {
+    for component in [ctx.spec, ctx.anchor, kind, path, suffix.unwrap_or_default()] {
         hasher.update(component.as_bytes());
         hasher.update([0]);
     }
@@ -2096,35 +2109,45 @@ fn resolve_target(href: &str, current_spec: &str, base_url: &str) -> Option<Anch
     None
 }
 
-fn dom_path(element: &ElementRef<'_>) -> String {
+/// Path of `element` relative to the algorithm owner: `.` for the owner, a
+/// path below it, or `+k/…` below the owner's k-th following element sibling
+/// (the Wattsi `<p>To <dfn>…</dfn>:</p><ol>` pattern). Nothing before the
+/// algorithm in the document affects it.
+fn algorithm_path(owner: &ElementRef<'_>, element: &ElementRef<'_>) -> String {
     let mut parts = Vec::new();
-    let mut current = Some(*element);
-    while let Some(item) = current {
-        let index = item
-            .parent()
-            .map(|parent| {
-                parent
-                    .children()
-                    .filter_map(ElementRef::wrap)
-                    .take_while(|sibling| sibling.id() != item.id())
-                    .filter(|sibling| sibling.value().name() == item.value().name())
-                    .count()
-                    + 1
-            })
-            .unwrap_or(1);
-        parts.push(format!("{}[{index}]", item.value().name()));
-        current = item.parent().and_then(ElementRef::wrap);
+    let mut current = *element;
+    loop {
+        if current.id() == owner.id() {
+            parts.push(".".to_string());
+            break;
+        }
+        let same_parent = current.parent().map(|p| p.id()) == owner.parent().map(|p| p.id());
+        if same_parent {
+            if let Some(k) = owner
+                .next_siblings()
+                .filter_map(ElementRef::wrap)
+                .position(|sibling| sibling.id() == current.id())
+            {
+                parts.push(format!("+{}", k + 1));
+                break;
+            }
+        }
+        let Some(parent) = current.parent().and_then(ElementRef::wrap) else {
+            parts.push("^".to_string());
+            break;
+        };
+        let index = parent
+            .children()
+            .filter_map(ElementRef::wrap)
+            .take_while(|sibling| sibling.id() != current.id())
+            .filter(|sibling| sibling.value().name() == current.value().name())
+            .count()
+            + 1;
+        parts.push(format!("{}[{index}]", current.value().name()));
+        current = parent;
     }
     parts.reverse();
     parts.join("/")
-}
-
-fn document_order_position(document: &Html, element: &ElementRef<'_>) -> usize {
-    document
-        .root_element()
-        .descendants()
-        .position(|node| node.id() == element.id())
-        .unwrap_or(usize::MAX)
 }
 
 fn direct_child_named<'a>(element: &ElementRef<'a>, name: &str) -> Option<ElementRef<'a>> {
@@ -2999,9 +3022,10 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_and_dom_location_make_ids_deterministic() {
-        let first = fixture("wattsi");
-        let second = fixture("wattsi");
+    fn ids_are_deterministic_and_independent_of_the_snapshot() {
+        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html");
+        let first = extract_step_structure(html, "TEST", BASE, "hash:x");
+        let second = extract_step_structure(html, "TEST", BASE, "hash:x");
         assert_eq!(first, second);
         let json = serde_json::to_string(&first).unwrap();
         assert_eq!(
@@ -3009,12 +3033,73 @@ mod tests {
             first
         );
         assert_eq!(first.version, STRUCTURE_VERSION);
-        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html");
         let changed = extract_step_structure(html, "TEST", BASE, "different-snapshot");
-        assert_ne!(
-            first.algorithms[0].source.node_id,
-            changed.algorithms[0].source.node_id
+        for (a, b) in first.algorithms.iter().zip(&changed.algorithms) {
+            assert_eq!(a.source.node_id, b.source.node_id);
+        }
+        assert_eq!(
+            changed.algorithms[0].source.snapshot_sha,
+            "different-snapshot"
         );
+    }
+
+    fn all_ids(spec: &StructuralSpec, anchor: &str) -> Vec<String> {
+        let json = serde_json::to_string(algorithm(spec, anchor)).unwrap();
+        let re = regex::Regex::new(r"src-[0-9a-f]{64}").unwrap();
+        let mut ids: Vec<String> = re
+            .find_iter(&json)
+            .map(|m| m.as_str().to_string())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    const STABLE: &str = r##"<h2 id="s">S</h2>
+<div class="algorithm"><p>To <dfn id="a">run a</dfn>:</p><ol><li>Let <var>x</var> be the result of <a href="#b">run b</a>.</li><li>Return <var>x</var>.</li></ol></div>
+<p>To <dfn id="b">run b</dfn>:</p><ol><li>Return 1.</li></ol>"##;
+
+    #[test]
+    fn ids_survive_unrelated_edits_and_new_snapshots() {
+        let edited = STABLE
+            .replace(
+                r#"<h2 id="s">S</h2>"#,
+                r#"<h2 id="s">S</h2><p>A new paragraph.</p><div><p>More.</p></div>"#,
+            )
+            .replace("<li>Return 1.</li>", "<li>Return 1.</li><li>Return 2.</li>");
+        let before = extract_step_structure(STABLE, "TEST", BASE, "hash:one");
+        let after = extract_step_structure(&edited, "TEST", BASE, "hash:two");
+        assert_eq!(all_ids(&before, "a"), all_ids(&after, "a"));
+        assert_eq!(algorithm(&after, "a").source.snapshot_sha, "hash:two");
+    }
+
+    #[test]
+    fn a_structural_edit_changes_only_ids_under_that_step() {
+        let edited = STABLE.replace(
+            "<li>Return <var>x</var>.</li>",
+            "<li>Return <var>x</var>.<ol><li>Assert: true.</li></ol></li>",
+        );
+        let before = all_ids(&extract_step_structure(STABLE, "TEST", BASE, "hash:t"), "a");
+        let after = all_ids(
+            &extract_step_structure(&edited, "TEST", BASE, "hash:t"),
+            "a",
+        );
+        assert!(
+            before.iter().all(|id| after.contains(id)),
+            "existing ids are kept"
+        );
+        assert!(
+            after.len() > before.len(),
+            "the new child step gets new ids"
+        );
+    }
+
+    #[test]
+    fn wattsi_sibling_bodies_use_owner_relative_paths() {
+        let prefixed = format!("<p>filler</p>{STABLE}");
+        let a = extract_step_structure(STABLE, "TEST", BASE, "hash:t");
+        let b = extract_step_structure(&prefixed, "TEST", BASE, "hash:t");
+        assert_eq!(all_ids(&a, "b"), all_ids(&b, "b"));
     }
 
     #[test]
@@ -3179,7 +3264,7 @@ mod tests {
       <dl class="props"><dt><a href="#is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd>
       <dt><a href="https://dom.spec.whatwg.org/#concept-document-type">type</a></dt><dd>"<code>html</code>"</dd></dl></li>"##,
         );
-        assert_eq!(s.version, "8");
+        assert_eq!(s.version, "9");
         let branch = &s.algorithms[0].branches[0];
         assert_eq!(branch.label, "is initial about:blank");
         assert_eq!(branch.label_text, "is initial `about:blank`");
@@ -3244,8 +3329,9 @@ mod tests {
             base_url: "https://html.spec.whatwg.org/",
             snapshot_sha: "hash:x",
             anchor: "a",
+            owner: container,
         };
-        let expected = source_identity(&ctx, "algorithm", &dom_path(&container), None).node_id;
+        let expected = source_identity(&ctx, "algorithm", ".", None).node_id;
         let s = extract_step_structure_from_document(
             &document,
             "HTML",
