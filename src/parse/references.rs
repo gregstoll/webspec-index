@@ -12,13 +12,11 @@ use scraper::{ElementRef, Html};
 /// because they don't establish a new scope for algorithm steps and prose that
 /// follow them.
 pub fn extract_references(
-    html: &str,
+    document: &Html,
     spec_name: &str,
     sections: &[ParsedSection],
     registry: &SpecRegistry,
 ) -> Vec<ParsedReference> {
-    let document = Html::parse_document(html);
-
     // Build lookup set of section anchors that establish reference scope.
     // Only headings and algorithms create persistent scope; definitions are
     // sub-sections that shouldn't override the enclosing algorithm/heading.
@@ -289,6 +287,11 @@ fn own_text(elem: &ElementRef) -> String {
 mod tests {
     use super::*;
 
+    fn extract(html: &str, spec: &str, sections: &[ParsedSection], registry: &SpecRegistry) -> Vec<ParsedReference> {
+        let document = Html::parse_document(html);
+        extract_references(&document, spec, sections, registry)
+    }
+
     #[test]
     fn test_intra_spec_reference() {
         let html = r##"
@@ -325,7 +328,7 @@ mod tests {
         ];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have one reference from section1 to section2
         assert_eq!(refs.len(), 1);
@@ -354,7 +357,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have no references (self-link skipped)
         assert_eq!(refs.len(), 0);
@@ -380,7 +383,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have no references (biblio ref skipped)
         assert_eq!(refs.len(), 0);
@@ -408,7 +411,7 @@ mod tests {
         // SpecRegistry already includes WhatwgProvider
         let registry = SpecRegistry::new();
 
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have one cross-spec reference
         assert_eq!(refs.len(), 1);
@@ -437,7 +440,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have no references (unknown URL skipped)
         assert_eq!(refs.len(), 0);
@@ -479,7 +482,7 @@ mod tests {
         ];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // Should have one reference from child to parent
         assert_eq!(refs.len(), 1);
@@ -513,7 +516,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         assert_eq!(refs.len(), 5, "Expected 5 references, got {}", refs.len());
 
@@ -594,7 +597,7 @@ mod tests {
         ];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         // ALL links (including those in <ol> steps) should be attributed to "navigate",
         // not to the parameter definitions
@@ -629,7 +632,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         assert_eq!(refs.len(), 2);
         assert!(refs
@@ -660,7 +663,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].to_spec, "ECMA-262");
@@ -688,7 +691,7 @@ mod tests {
         }];
 
         let registry = SpecRegistry::new();
-        let refs = extract_references(html, "TEST", &sections, &registry);
+        let refs = extract(html, "TEST", &sections, &registry);
 
         assert_eq!(refs.len(), 1, "Duplicate ref should be deduplicated");
         assert_eq!(refs[0].to_anchor, "target");
@@ -730,7 +733,7 @@ mod tests {
 
     #[test]
     fn test_step_path_top_level() {
-        let refs = extract_references(
+        let refs = extract(
             NESTED_ALGORITHM,
             "TEST",
             &[algo_section("navigate")],
@@ -744,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_step_path_nested() {
-        let refs = extract_references(
+        let refs = extract(
             NESTED_ALGORITHM,
             "TEST",
             &[algo_section("navigate")],
@@ -757,7 +760,7 @@ mod tests {
 
     #[test]
     fn test_step_text_excludes_substeps() {
-        let refs = extract_references(
+        let refs = extract(
             NESTED_ALGORITHM,
             "TEST",
             &[algo_section("navigate")],
@@ -778,7 +781,7 @@ mod tests {
 
     #[test]
     fn test_guard_path_from_enclosing_steps() {
-        let refs = extract_references(
+        let refs = extract(
             NESTED_ALGORITHM,
             "TEST",
             &[algo_section("navigate")],
@@ -798,7 +801,7 @@ mod tests {
 
     #[test]
     fn test_prose_reference_has_no_step() {
-        let refs = extract_references(
+        let refs = extract(
             NESTED_ALGORITHM,
             "TEST",
             &[algo_section("navigate")],
@@ -807,7 +810,7 @@ mod tests {
 
         // The intro <p> is prose, not a step. It contains no links here, so verify
         // via a section whose only link sits outside any list.
-        let prose = extract_references(
+        let prose = extract(
             r##"<h2 id="s">S</h2><p>See <a href="#other">other</a>.</p>"##,
             "TEST",
             &[ParsedSection {
@@ -828,7 +831,7 @@ mod tests {
         // differently: wattsi bare, bikeshed inside div.algorithm, ecmarkup inside
         // <emu-alg> with links buried in <emu-xref>. Step numbering must not care.
         let wattsi = include_str!("../../tests/fixtures/algorithms/wattsi_navigate.html");
-        let refs = extract_references(
+        let refs = extract(
             wattsi,
             "TEST",
             &[algo_section("navigate")],
@@ -852,7 +855,7 @@ mod tests {
         );
 
         let bikeshed = include_str!("../../tests/fixtures/algorithms/bikeshed_algorithm.html");
-        let refs = extract_references(
+        let refs = extract(
             bikeshed,
             "TEST",
             &[algo_section("concept-ordered-set-parser")],
@@ -865,7 +868,7 @@ mod tests {
         );
 
         let ecmarkup = include_str!("../../tests/fixtures/ecmarkup/tostring.html");
-        let refs = extract_references(
+        let refs = extract(
             ecmarkup,
             "TEST",
             &[algo_section("sec-tostring")],
@@ -903,7 +906,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -938,7 +941,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -971,7 +974,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -997,7 +1000,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -1019,7 +1022,7 @@ mod tests {
             <pre class="idl">interface <a href="#thing">Thing</a> {};</pre>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[ParsedSection {
@@ -1041,7 +1044,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -1064,7 +1067,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -1102,7 +1105,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],
@@ -1127,7 +1130,7 @@ mod tests {
             </ol>
         "##;
 
-        let refs = extract_references(
+        let refs = extract(
             html,
             "TEST",
             &[algo_section("navigate")],

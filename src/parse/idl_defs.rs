@@ -57,8 +57,7 @@ fn nearest_pre_idl_text(element: &scraper::ElementRef) -> Option<String> {
 }
 
 /// Extract all WebIDL definitions from dfn nodes carrying `data-dfn-type`.
-pub fn extract_idl_definitions(html: &str) -> Vec<ParsedIdlDefinition> {
-    let document = Html::parse_document(html);
+pub fn extract_idl_definitions(document: &Html) -> Vec<ParsedIdlDefinition> {
     let selector = scraper::Selector::parse("dfn[id][data-dfn-type]").expect("valid selector");
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
@@ -127,7 +126,8 @@ mod tests {
             </pre>
         "#;
 
-        let defs = extract_idl_definitions(html);
+        let document = Html::parse_document(html);
+        let defs = extract_idl_definitions(&document);
         assert!(defs.iter().any(|d| d.canonical_name == "Window"));
         assert!(defs.iter().any(|d| d.canonical_name == "Window.navigation"));
         assert!(defs.iter().any(|d| d.canonical_name == "Window.open"));
@@ -141,7 +141,8 @@ mod tests {
                 <dfn data-dfn-for="Window/open(url)" data-dfn-type="argument" id="dom-window-open-url"><code>url</code></dfn>
             </pre>
         "#;
-        let defs = extract_idl_definitions(html);
+        let document = Html::parse_document(html);
+        let defs = extract_idl_definitions(&document);
         assert!(defs.is_empty());
     }
 }

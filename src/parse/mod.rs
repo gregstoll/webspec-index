@@ -225,7 +225,13 @@ fn parse_generic_html(document: &Html, converter: &Converter) -> Result<Vec<Pars
 /// `base_url` is used to absolutize relative links in content markdown.
 pub fn parse_spec(html: &str, spec_name: &str, base_url: &str) -> Result<ParsedSpec> {
     let document = Html::parse_document(html);
-    parse_spec_document_memo(&document, spec_name, base_url, MarkdownMemo::new())
+    parse_spec_document(&document, spec_name, base_url)
+}
+
+/// Parse a pre-parsed spec HTML document into structured sections and references.
+/// `base_url` is used to absolutize relative links in content markdown.
+pub fn parse_spec_document(document: &Html, spec_name: &str, base_url: &str) -> Result<ParsedSpec> {
+    parse_spec_document_memo(document, spec_name, base_url, MarkdownMemo::new())
         .map(|(parsed, _, _)| parsed)
 }
 
@@ -261,16 +267,12 @@ pub fn parse_spec_document_memo(
     // Build tree relationships (parent, prev, next)
     let sections = sections::build_section_tree(sections);
 
-    // Serialize the outer HTML once so both the reference extractor and IDL
-    // extractor see the same string without reparsing the document.
-    let html = document.html();
-
     // Extract references
     // Note: We need a SpecRegistry to resolve cross-spec URLs
     // For now, create an empty one (will be passed in later for full functionality)
     let registry = crate::spec_registry::SpecRegistry::new();
-    let references = references::extract_references(&html, spec_name, &sections, &registry);
-    let idl_definitions = idl_defs::extract_idl_definitions(&html);
+    let references = references::extract_references(document, spec_name, &sections, &registry);
+    let idl_definitions = idl_defs::extract_idl_definitions(document);
 
     let (memo, stats) = converter.finish();
 
@@ -313,6 +315,21 @@ mod tests {
         *state ^= *state >> 7;
         *state ^= *state << 17;
         *state
+    }
+
+    #[test]
+    fn document_entry_point_matches_string_entry_point() {
+        for html in [
+            include_str!("../../tests/fixtures/effects/structure/wattsi.html"),
+            include_str!("../../tests/fixtures/effects/structure/bikeshed.html"),
+            include_str!("../../tests/fixtures/effects/structure/ecmarkup.html"),
+            include_str!("../../tests/fixtures/fuzz/new-29-ir-nondeterministic-body-ids.html"),
+        ] {
+            let from_str = parse_spec(html, "T", "https://example.test/").unwrap();
+            let document = Html::parse_document(html);
+            let from_doc = parse_spec_document(&document, "T", "https://example.test/").unwrap();
+            assert_eq!(format!("{from_str:?}"), format!("{from_doc:?}"));
+        }
     }
 
     #[test]

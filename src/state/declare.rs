@@ -884,7 +884,7 @@ mod tests {
         } else {
             "https://html.spec.whatwg.org/"
         };
-        let idl = crate::parse::idl_defs::extract_idl_definitions(html);
+        let idl = crate::parse::idl_defs::extract_idl_definitions(&doc);
         let structure = extract_step_structure_from_document(&doc, spec, base, "hash:t");
         let concepts = concept_dfns(&doc);
         let mut table = crate::state::types::collect_types(&doc, spec, base, &idl, &concepts);
