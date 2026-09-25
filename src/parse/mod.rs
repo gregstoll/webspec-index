@@ -347,7 +347,7 @@ mod tests {
             let mut state = seed;
             let partial: MarkdownMemo = full_memo
                 .iter()
-                .filter(|_| xorshift(&mut state) % 2 == 0)
+                .filter(|_| xorshift(&mut state).is_multiple_of(2))
                 .map(|(k, v)| (*k, v.clone()))
                 .collect();
             let (warm, memo, stats) =

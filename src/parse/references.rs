@@ -287,7 +287,12 @@ fn own_text(elem: &ElementRef) -> String {
 mod tests {
     use super::*;
 
-    fn extract(html: &str, spec: &str, sections: &[ParsedSection], registry: &SpecRegistry) -> Vec<ParsedReference> {
+    fn extract(
+        html: &str,
+        spec: &str,
+        sections: &[ParsedSection],
+        registry: &SpecRegistry,
+    ) -> Vec<ParsedReference> {
         let document = Html::parse_document(html);
         extract_references(&document, spec, sections, registry)
     }
