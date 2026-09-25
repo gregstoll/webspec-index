@@ -5,6 +5,7 @@
 pub(crate) mod block;
 pub(crate) mod declare;
 pub mod ir;
+pub mod lookup;
 pub mod model;
 pub(crate) mod typeexpr;
 pub(crate) mod types;
