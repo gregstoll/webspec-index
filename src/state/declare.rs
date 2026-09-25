@@ -273,6 +273,44 @@ impl Resolver<'_, '_> {
         }
     }
 
+    /// The same-spec concept dfn an owner phrase names, if any.
+    fn concept_anchor(&self, phrase: &OwnerPhrase, tokens: &[BlockToken]) -> Option<String> {
+        let local = |id: &str| {
+            self.concepts
+                .name_by_id
+                .contains_key(id)
+                .then(|| id.to_string())
+        };
+        match phrase {
+            OwnerPhrase::Words(words) => self
+                .concepts
+                .by_name(&strip_classifiers(words))
+                .map(str::to_string),
+            OwnerPhrase::Slot(index) => match &tokens[*index] {
+                BlockToken::Link {
+                    target: Some(target),
+                    ..
+                } if target.spec == self.spec => local(&target.anchor),
+                BlockToken::Dfn { id, .. } => local(id),
+                _ => None,
+            },
+        }
+    }
+
+    /// A `data-dfn-for` naming a local IDL type, on a dfn whose declaration sentence names one
+    /// concept dfn, is evidence that the concept is that type (§6.2).
+    fn alias_by_dfn_for(&mut self, key: &TypeKey, phrase: &OwnerPhrase, tokens: &[BlockToken]) {
+        let TypeKey::Idl(name) = key else {
+            return;
+        };
+        if !self.table.idl_names.contains(name) {
+            return;
+        }
+        if let Some(anchor) = self.concept_anchor(phrase, tokens) {
+            self.table.alias_concept(key, self.spec, &anchor);
+        }
+    }
+
     fn owner(
         &mut self,
         phrases: &[OwnerPhrase],
@@ -393,6 +431,11 @@ fn owner_keys(owner: &Owner) -> Option<BTreeSet<&TypeKey>> {
     }
 }
 
+/// Cross-spec anchor keys are canonicalized only at query time, so they can't be compared here.
+fn is_cross_spec(key: &TypeKey, spec: &str) -> bool {
+    matches!(key, TypeKey::Anchor(target) if target.spec != spec)
+}
+
 fn rule_key(basis: &OwnerBasis) -> &'static str {
     match basis {
         OwnerBasis::DfnFor => "dfn_for",
@@ -444,12 +487,20 @@ pub(crate) fn declare_fields(
             .attr("data-dfn-for")
             .map(normalize_owner)
             .filter(|owner| !owner.is_empty());
-        let declared = declaration_owners(&tokens, id)
+        let phrases = declaration_owners(&tokens, id);
+        let r1 = dfn_for.map(|name| {
+            let owner = resolver.name(&name, true);
+            if let (Some(owner), Some([phrase])) = (&owner, phrases.as_deref()) {
+                resolver.alias_by_dfn_for(&owner.key, phrase, &tokens);
+            }
+            (name, owner)
+        });
+        let declared = phrases
             .map(|phrases| resolver.owner(&phrases, &tokens, OwnerBasis::DeclarationSentence));
 
-        let (owner, rule) = match (dfn_for, &declared) {
-            (Some(name), _) => {
-                let owner = match resolver.name(&name, true) {
+        let (owner, rule) = match (r1, &declared) {
+            (Some((name, r1)), _) => {
+                let owner = match r1 {
                     Some(owner) => Owner::Known {
                         types: vec![owner],
                         basis: OwnerBasis::DfnFor,
@@ -460,7 +511,7 @@ pub(crate) fn declare_fields(
                 };
                 let conflict = owner_keys(&owner)
                     .zip(declared.as_ref().and_then(owner_keys))
-                    .filter(|(r1, r2)| r1 != r2);
+                    .filter(|(r1, r2)| r1 != r2 && !r2.iter().any(|k| is_cross_spec(k, spec)));
                 if let Some((r1, r2)) = conflict {
                     let list = |keys: BTreeSet<&TypeKey>| {
                         keys.iter()
@@ -537,9 +588,14 @@ pub(crate) fn declare_fields(
 mod tests {
     use super::*;
     use crate::parse::steps::extract_step_structure_from_document;
+    use crate::state::model::{AnchorRole, ConceptAliasBasis};
     use scraper::Html;
 
     fn run(html: &str, spec: &str) -> DeclareOutput {
+        run_with_table(html, spec).0
+    }
+
+    fn run_with_table(html: &str, spec: &str) -> (DeclareOutput, TypeTable) {
         let doc = Html::parse_document(html);
         let base = if spec == "DOM" {
             "https://dom.spec.whatwg.org/"
@@ -550,14 +606,82 @@ mod tests {
         let structure = extract_step_structure_from_document(&doc, spec, base, "hash:t");
         let concepts = concept_dfns(&doc);
         let mut table = crate::state::types::collect_types(&doc, spec, base, &idl, &concepts);
-        declare_fields(
+        let out = declare_fields(
             &doc,
             spec,
             base,
             &structure,
             &mut table,
             &NameBindings::default(),
-        )
+        );
+        (out, table)
+    }
+
+    fn alias_role(table: &TypeTable, idl: &str, anchor: &str) -> Option<AnchorRole> {
+        table.types[&TypeKey::Idl(idl.into())]
+            .anchors
+            .iter()
+            .find(|a| a.target.anchor == anchor)
+            .map(|a| a.role.clone())
+    }
+
+    const DOM_IDL: &str = r#"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-node">Node</dfn> {};
+      interface <dfn data-dfn-type="interface" id="interface-documenttype">DocumentType</dfn> : Node {};
+      interface <dfn data-dfn-type="interface" id="interface-attr">Attr</dfn> : Node {};</pre>"#;
+
+    #[test]
+    fn plural_and_data_lt_concepts_become_evidence_aliases_through_dfn_for() {
+        let html = format!(
+            r##"{DOM_IDL}
+      <p><dfn data-dfn-type="dfn" id="concept-node">Nodes</dfn> are objects.</p>
+      <p>There are <dfn data-dfn-type="dfn" data-lt="doctype" id="concept-doctype">doctypes</dfn> and <dfn data-dfn-type="dfn" data-lt="attribute" id="concept-attribute">attributes</dfn>.</p>
+      <p>Each <a href="#concept-node">node</a> has an associated <dfn data-dfn-for="Node" data-dfn-type="dfn" id="concept-node-document">node document</dfn>.</p>
+      <p><a href="#concept-doctype">Doctypes</a> have an associated <dfn data-dfn-for="DocumentType" data-dfn-type="dfn" id="concept-doctype-name">name</dfn>.</p>
+      <p><a href="#concept-attribute">Attributes</a> have a <dfn data-dfn-for="Attr" data-dfn-type="dfn" id="concept-attribute-value">value</dfn>.</p>"##
+        );
+        let (out, table) = run_with_table(&html, "DOM");
+        assert!(
+            !out.issues
+                .iter()
+                .any(|i| i.code == StateIssueCode::OwnerConflict),
+            "{:?}",
+            out.issues
+        );
+        for (idl, concept) in [
+            ("Node", "concept-node"),
+            ("DocumentType", "concept-doctype"),
+            ("Attr", "concept-attribute"),
+        ] {
+            assert_eq!(table.by_anchor[concept], TypeKey::Idl(idl.into()));
+            assert_eq!(
+                alias_role(&table, idl, concept),
+                Some(AnchorRole::ConceptAlias(ConceptAliasBasis::Evidence))
+            );
+            assert!(!table.types.contains_key(&TypeKey::Anchor(AnchorTarget {
+                spec: "DOM".into(),
+                anchor: concept.into()
+            })));
+        }
+        assert_eq!(
+            owner_keys(field(&out, "concept-doctype-name")),
+            ["idl:DocumentType"]
+        );
+    }
+
+    #[test]
+    fn cross_spec_declaration_owner_is_not_a_conflict() {
+        let out = run(
+            r##"<p>Each <a href="https://html.spec.whatwg.org/#window">Window</a> object has an associated <dfn data-dfn-for="Window" data-dfn-type="dfn" id="w">current event</dfn>.</p>
+      <p>Each <a href="#concept-thing">thing</a> has a <dfn data-dfn-for="Window" data-dfn-type="dfn" id="v">value</dfn>.</p>"##,
+            "DOM",
+        );
+        let conflicts: Vec<_> = out
+            .issues
+            .iter()
+            .filter(|i| i.code == StateIssueCode::OwnerConflict)
+            .filter_map(|i| i.anchor.as_deref())
+            .collect();
+        assert_eq!(conflicts, ["v"]);
     }
 
     fn field<'a>(out: &'a DeclareOutput, anchor: &str) -> &'a FieldDef {

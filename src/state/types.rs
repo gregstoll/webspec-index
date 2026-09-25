@@ -158,15 +158,27 @@ impl TypeTable {
         }
     }
 
-    /// Add `ConceptAlias(NameMatch)` anchors for concept dfns whose normalized name matches an
-    /// IDL interface name in the same spec.
+    /// Add `ConceptAlias(NameMatch)` anchors for concept dfns one of whose normalized names
+    /// (text or `data-lt`, a trailing plural `s` tolerated) matches an IDL interface name in the
+    /// same spec.
     fn add_concept_aliases(&mut self, spec: &str, concept_dfns: &[ConceptDfn]) {
-        let idl_names: Vec<String> = self.idl_names.iter().cloned().collect();
+        let by_normalized: HashMap<String, String> = self
+            .idl_names
+            .iter()
+            .map(|n| (n.to_lowercase(), n.clone()))
+            .collect();
         for dfn in concept_dfns {
-            let normalized = dfn.name.to_lowercase().replace(' ', "");
-            if let Some(idl_name) = idl_names.iter().find(|n| n.to_lowercase() == normalized) {
+            let matched = dfn.names.iter().find_map(|name| {
+                let normalized = name.to_lowercase().replace(' ', "");
+                by_normalized.get(&normalized).or_else(|| {
+                    normalized
+                        .strip_suffix('s')
+                        .and_then(|singular| by_normalized.get(singular))
+                })
+            });
+            if let Some(idl_name) = matched.cloned() {
                 let key = TypeKey::Idl(idl_name.clone());
-                self.ensure_idl(idl_name, TypeKind::IdlInterface);
+                self.ensure_idl(&idl_name, TypeKind::IdlInterface);
                 self.add_anchor(
                     key,
                     spec,
@@ -213,6 +225,42 @@ impl TypeTable {
             self.add_anchor(key.clone(), spec, anchor, AnchorRole::Defining);
             key
         }
+    }
+
+    /// Record evidence (a `data-dfn-for` that resolves by IDL name) that the concept dfn `anchor`
+    /// is the existing type `key`: upgrades a `NameMatch` alias, or replaces the `Concept` type
+    /// keyed by the anchor itself. Returns false when the anchor belongs to some other type.
+    pub fn alias_concept(&mut self, key: &TypeKey, spec: &str, anchor: &str) -> bool {
+        let target = AnchorTarget {
+            spec: spec.to_string(),
+            anchor: anchor.to_string(),
+        };
+        let own = TypeKey::Anchor(target.clone());
+        match self.by_anchor.get(anchor) {
+            Some(current) if current == key => {}
+            Some(current)
+                if *current == own
+                    && self.types.get(&own).map(|t| &t.kind) == Some(&TypeKind::Concept) =>
+            {
+                self.types.remove(&own);
+            }
+            Some(_) => return false,
+            None => {}
+        }
+        let Some(type_def) = self.types.get_mut(key) else {
+            return false;
+        };
+        let role = AnchorRole::ConceptAlias(ConceptAliasBasis::Evidence);
+        match type_def
+            .anchors
+            .iter_mut()
+            .find(|a| a.target.spec == spec && a.target.anchor == anchor)
+        {
+            Some(existing) => existing.role = role,
+            None => type_def.anchors.push(TypeAnchor { target, role }),
+        }
+        self.by_anchor.insert(anchor.to_string(), key.clone());
+        true
     }
 
     /// Walk `dl.element` blocks, find the nearest preceding heading, and add an
@@ -502,6 +550,49 @@ mod tests {
             .anchors
             .iter()
             .any(|a| a.role == AnchorRole::ConceptAlias(ConceptAliasBasis::NameMatch)));
+    }
+
+    #[test]
+    fn name_match_uses_every_name_and_tolerates_plurals() {
+        let html = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-node">Node</dfn> {};
+        interface <dfn data-dfn-type="interface" id="interface-document">Document</dfn> {};
+        interface <dfn data-dfn-type="interface" id="interface-shadowroot">ShadowRoot</dfn> {};</pre>"##;
+        let doc = Html::parse_document(html);
+        let idl = vec![
+            idl_def("interface-node", "Node", "interface", "interface Node {};"),
+            idl_def(
+                "interface-document",
+                "Document",
+                "interface",
+                "interface Document {};",
+            ),
+            idl_def(
+                "interface-shadowroot",
+                "ShadowRoot",
+                "interface",
+                "interface ShadowRoot {};",
+            ),
+        ];
+        let concept = |id: &str, names: &[&str]| ConceptDfn {
+            id: id.into(),
+            name: names[0].into(),
+            names: names.iter().map(|n| n.to_string()).collect(),
+        };
+        let concepts = vec![
+            concept("concept-node", &["Nodes"]),
+            concept("concept-document", &["documents", "document"]),
+            concept("concept-shadow-root", &["shadow roots", "shadow root"]),
+        ];
+        let t = collect_types(&doc, "DOM", "https://dom.spec.whatwg.org/", &idl, &concepts);
+        assert_eq!(t.by_anchor["concept-node"], TypeKey::Idl("Node".into()));
+        assert_eq!(
+            t.by_anchor["concept-document"],
+            TypeKey::Idl("Document".into())
+        );
+        assert_eq!(
+            t.by_anchor["concept-shadow-root"],
+            TypeKey::Idl("ShadowRoot".into())
+        );
     }
 
     #[test]
