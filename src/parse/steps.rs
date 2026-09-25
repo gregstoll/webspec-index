@@ -305,7 +305,20 @@ pub fn extract_step_structure(
     snapshot_sha: &str,
 ) -> StructuralSpec {
     let document = Html::parse_document(html);
-    let candidates = find_algorithm_candidates(&document);
+    extract_step_structure_from_document(&document, spec, base_url, snapshot_sha)
+}
+
+/// Extract reusable algorithm structure from an already parsed snapshot.
+///
+/// The caller supplies the snapshot digest because persistence owns snapshot
+/// identity. This function performs no database access and no effect analysis.
+pub fn extract_step_structure_from_document(
+    document: &Html,
+    spec: &str,
+    base_url: &str,
+    snapshot_sha: &str,
+) -> StructuralSpec {
+    let candidates = find_algorithm_candidates(document);
     let mut algorithms = Vec::new();
     let mut issues = Vec::new();
 
@@ -327,7 +340,7 @@ pub fn extract_step_structure(
         }
     }
 
-    resolve_aoid_links(&document, spec, &mut algorithms);
+    resolve_aoid_links(document, spec, &mut algorithms);
 
     StructuralSpec {
         version: STRUCTURE_VERSION.to_string(),
@@ -342,6 +355,59 @@ pub fn extract_step_structure(
         algorithms,
         issues,
     }
+}
+
+/// Identity of an inline rendering outside structural algorithms. `anchor`
+/// scopes generated link ids exactly as a structural algorithm anchor does.
+#[allow(dead_code)]
+pub(crate) struct InlineContext<'a> {
+    pub spec: &'a str,
+    pub base_url: &'a str,
+    pub snapshot_sha: &'a str,
+    pub anchor: &'a str,
+}
+
+/// Canonical text, tokens and links of one block, in segment encoding. Nested
+/// lists and callouts are skipped: they are their own blocks.
+#[allow(dead_code)]
+pub(crate) fn canonical_inline(
+    element: &ElementRef<'_>,
+    ctx: &InlineContext<'_>,
+) -> (String, Vec<InlineToken>, Vec<LinkSpan>) {
+    let ctx = ExtractContext {
+        spec: ctx.spec,
+        base_url: ctx.base_url,
+        snapshot_sha: ctx.snapshot_sha,
+        anchor: ctx.anchor,
+    };
+    let mut builder = CanonicalBuilder::new(&ctx);
+    builder.skip_nested_blocks = true;
+    for child in element.children() {
+        builder.walk(child);
+    }
+    (
+        builder.text.trim().to_string(),
+        builder.tokens,
+        builder.links,
+    )
+}
+
+/// Resolve a link `href` to its canonical anchor target.
+#[allow(dead_code)]
+pub(crate) fn resolve_href(href: &str, spec: &str, base_url: &str) -> Option<AnchorTarget> {
+    resolve_target(href, spec, base_url)
+}
+
+/// Node ids of every `<ol>`/`emu-alg` that is a structural algorithm body.
+#[allow(dead_code)]
+pub(crate) fn structural_body_nodes(document: &Html) -> HashSet<ego_tree::NodeId> {
+    find_algorithm_candidates(document)
+        .into_iter()
+        .filter_map(|candidate| match candidate.body? {
+            CandidateBody::List(list) => Some(list.id()),
+            CandidateBody::SourceEmuAlg(emu_alg) => Some(emu_alg.id()),
+        })
+        .collect()
 }
 
 fn resolve_aoid_links(document: &Html, spec: &str, algorithms: &mut [StructuralAlgorithm]) {
@@ -1585,6 +1651,7 @@ struct CanonicalBuilder<'a, 'b> {
     links: Vec<LinkSpan>,
     pending_space: bool,
     link_ordinal: usize,
+    skip_nested_blocks: bool,
 }
 
 impl<'a, 'b> CanonicalBuilder<'a, 'b> {
@@ -1596,6 +1663,7 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
             links: Vec::new(),
             pending_space: false,
             link_ordinal: 0,
+            skip_nested_blocks: false,
         }
     }
 
@@ -1623,6 +1691,12 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
                     "a" | "emu-xref" => self.push_link(&element_ref),
                     "br" => self.pending_space = true,
                     _ => {
+                        if self.skip_nested_blocks
+                            && (matches!(element.name(), "ol" | "ul" | "dl")
+                                || note_kind(&element_ref).is_some())
+                        {
+                            return;
+                        }
                         for child in node.children() {
                             self.walk(child);
                         }
@@ -2892,5 +2966,64 @@ mod tests {
                 .find(|body| body.source.node_id == id)
                 .unwrap()
         }
+    }
+
+    #[test]
+    fn document_entry_point_matches_string_entry_point() {
+        let html = "<div class=algorithm><p>To <dfn id=a>a</dfn>:</p><ol><li>Set <var>x</var> to <a href='#b'>b</a>.</li></ol></div><p><dfn id=b>b</dfn></p>";
+        let from_str = extract_step_structure(html, "T", "https://t.example/", "hash:x");
+        let document = Html::parse_document(html);
+        let from_doc =
+            extract_step_structure_from_document(&document, "T", "https://t.example/", "hash:x");
+        assert_eq!(from_str, from_doc);
+    }
+
+    #[test]
+    fn canonical_inline_uses_segment_encoding_and_skips_nested_lists() {
+        let html = "<div><p>The <dfn id=m>stopPropagation()</dfn> method steps are to set <a href='#this'>this</a>'s <a href='#spf'>stop propagation flag</a> to <code>true</code>.<ul><li>nested</li></ul><span class=note>n</span></p></div>";
+        let document = Html::parse_document(html);
+        let p = document
+            .select(&Selector::parse("p").unwrap())
+            .next()
+            .unwrap();
+        let ctx = InlineContext {
+            spec: "DOM",
+            base_url: "https://dom.spec.whatwg.org/",
+            snapshot_sha: "hash:x",
+            anchor: "m",
+        };
+        let (text, tokens, links) = canonical_inline(&p, &ctx);
+        assert_eq!(
+            text,
+            "The stopPropagation() method steps are to set this's stop propagation flag to `true`."
+        );
+        assert_eq!(links.len(), 2);
+        assert_eq!(
+            &text[links[1].span.start..links[1].span.end],
+            "stop propagation flag"
+        );
+        assert_eq!(links[1].target.as_ref().unwrap().anchor, "spf");
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == InlineTokenKind::Literal
+                && &text[t.span.start..t.span.end] == "`true`"));
+        assert!(!text.contains("nested"));
+    }
+
+    #[test]
+    fn structural_body_nodes_contains_only_algorithm_bodies() {
+        let html = "<p>To <dfn id=a>a</dfn>:</p><ol id=body><li>Return.</li></ol><p>Each navigable has:</p><ul id=props><li><dfn id=p>p</dfn></li></ul>";
+        let document = Html::parse_document(html);
+        let nodes = structural_body_nodes(&document);
+        let body = document
+            .select(&Selector::parse("#body").unwrap())
+            .next()
+            .unwrap();
+        let props = document
+            .select(&Selector::parse("#props").unwrap())
+            .next()
+            .unwrap();
+        assert!(nodes.contains(&body.id()));
+        assert!(!nodes.contains(&props.id()));
     }
 }
