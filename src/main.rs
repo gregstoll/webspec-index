@@ -814,8 +814,22 @@ Ex: query HTML#navigate --pr 1234|query HTML --pr 1234 --diff|query proposal-def
     );
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+impl Command {
+    /// `lsp` and `analyze` block worker threads with `block_in_place`, and
+    /// `update`/`reparse` fetch and parse specs concurrently. Lookups run one
+    /// query and exit, so they skip spawning a worker per core.
+    fn needs_multi_thread_runtime(&self) -> bool {
+        matches!(
+            self,
+            Command::Lsp { .. }
+                | Command::Analyze { .. }
+                | Command::Update { .. }
+                | Command::Reparse { .. }
+        )
+    }
+}
+
+fn main() -> ExitCode {
     // Handle SIGPIPE gracefully (prevents broken pipe panics when piped through head/less)
     #[cfg(unix)]
     unsafe {
@@ -841,7 +855,16 @@ async fn main() -> ExitCode {
 
     let cli = Cli::parse();
 
-    let result = run(cli).await;
+    let mut runtime = if cli.command.needs_multi_thread_runtime() {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    };
+    let result = runtime
+        .enable_all()
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| runtime.block_on(run(cli)));
 
     version_checker.print_warning();
 
