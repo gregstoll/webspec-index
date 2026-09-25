@@ -235,6 +235,14 @@ pub fn parse_spec(html: &str, spec_name: &str, base_url: &str) -> Result<ParsedS
         parse_generic_html(&document, &converter)?
     };
 
+    // Drop duplicate anchors (first occurrence wins) before building navigation so
+    // next/prev pointers never reference a discarded row.
+    let mut seen = std::collections::HashSet::new();
+    let sections: Vec<_> = sections
+        .into_iter()
+        .filter(|section| seen.insert(section.anchor.clone()))
+        .collect();
+
     // Build tree relationships (parent, prev, next)
     let sections = sections::build_section_tree(sections);
 
@@ -392,6 +400,20 @@ mod tests {
         assert_eq!(parsed.sections.len(), 0);
         assert_eq!(parsed.references.len(), 0);
         assert_eq!(parsed.idl_definitions.len(), 0);
+    }
+
+    #[test]
+    fn duplicate_anchor_gets_no_navigation_into_the_dropped_row() {
+        let html = r#"<h2 id="a">A</h2><h2 id="dup">First</h2><h2 id="b">B</h2><h2 id="dup">Second</h2><h2 id="c">C</h2>"#;
+        let parsed = parse_spec(html, "T", "https://example.test/").unwrap();
+        let anchors: Vec<_> = parsed.sections.iter().map(|s| s.anchor.as_str()).collect();
+        assert_eq!(anchors, ["a", "dup", "b", "c"]);
+        let get = |anchor: &str| parsed.sections.iter().find(|s| s.anchor == anchor).unwrap();
+        assert!(get("dup").title.as_deref().unwrap().contains("First"));
+        assert_eq!(get("dup").next_anchor.as_deref(), Some("b"));
+        assert_eq!(get("b").prev_anchor.as_deref(), Some("dup"));
+        assert_eq!(get("b").next_anchor.as_deref(), Some("c"));
+        assert_eq!(get("c").prev_anchor.as_deref(), Some("b"));
     }
 
     #[test]
