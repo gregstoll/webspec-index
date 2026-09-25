@@ -827,7 +827,7 @@ impl<'a> GraphBuilder<'a> {
         self.occurrences.insert(
             occurrence_id.clone(),
             LocalOccurrence {
-                id: occurrence_id,
+                id: occurrence_id.clone(),
                 subject_id: owner.to_owned(),
                 kind: matched.kind,
                 params: matched.params,
@@ -836,6 +836,10 @@ impl<'a> GraphBuilder<'a> {
                 source_order: self.order,
             },
         );
+        self.occurrences_by_site
+            .entry(site.id.clone())
+            .or_default()
+            .push(occurrence_id);
         for code in matched.issues {
             self.add_issue(
                 owner,
@@ -950,7 +954,7 @@ impl<'a> GraphBuilder<'a> {
         self.occurrences.insert(
             occurrence_id.clone(),
             LocalOccurrence {
-                id: occurrence_id,
+                id: occurrence_id.clone(),
                 subject_id: owner.to_owned(),
                 kind: matched.kind,
                 params: matched.params,
@@ -959,6 +963,10 @@ impl<'a> GraphBuilder<'a> {
                 source_order: self.order,
             },
         );
+        self.occurrences_by_site
+            .entry(site.id)
+            .or_default()
+            .push(occurrence_id);
         self.order += 1;
     }
 
@@ -1660,17 +1668,18 @@ impl<'a> GraphBuilder<'a> {
         self.occurrences_by_site
             .get(operation_site_id)?
             .iter()
-            .find_map(|occ_id| {
-                let occ = self.occurrences.get(occ_id)?;
+            .filter_map(|occ_id| self.occurrences.get(occ_id))
+            .filter(|occ| {
                 self.input
                     .catalog
                     .effects
                     .get(&occ.kind)
                     .is_some_and(|definition| definition.category == "async")
-                    .then(|| BoundaryEffect {
-                        kind: occ.kind.clone(),
-                        params: occ.params.clone(),
-                    })
+            })
+            .min_by(|left, right| left.id.cmp(&right.id))
+            .map(|occ| BoundaryEffect {
+                kind: occ.kind.clone(),
+                params: occ.params.clone(),
             })
     }
 
@@ -3470,6 +3479,63 @@ mod tests {
                 "{intro}"
             );
         }
+    }
+
+    #[test]
+    fn scheduling_boundary_uses_the_lowest_id_async_occurrence_at_the_site() {
+        let catalog_yaml = r#"schema: 1
+package: boundary-test
+effects:
+  scheduling.alpha:
+    category: async
+    label: alpha
+    parameters: {}
+  scheduling.omega:
+    category: async
+    label: omega
+    parameters: {}
+rules:
+  - id: queue-alpha
+    match: {anchor: TEST#queue}
+    emit: {kind: scheduling.alpha, params: {}}
+    continuations: separate
+  - id: queue-omega
+    match: {anchor: TEST#queue}
+    emit: {kind: scheduling.omega, params: {}}
+    continuations: separate
+"#;
+        let html = r##"<div class="algorithm"><p>To <dfn id="root">run root</dfn>:</p><ol>
+            <li><a href="#queue">Queue a task</a> to run these steps:
+                <ol><li>Return.</li></ol></li></ol></div>
+            <p><dfn id="queue">queue a task</dfn>.</p>"##;
+        let artifact = artifact_from_html_and_catalog(
+            "root",
+            "generic",
+            DiscoveryBudgets::default(),
+            html,
+            catalog_yaml,
+        );
+        let boundary = artifact
+            .relationships
+            .iter()
+            .find_map(|edge| {
+                edge.boundary
+                    .as_ref()
+                    .filter(|boundary| boundary.execution == Execution::Separate)
+            })
+            .unwrap();
+        let at_site: Vec<_> = artifact
+            .occurrences
+            .iter()
+            .filter(|occ| {
+                occ.evidence
+                    .iter()
+                    .any(|evidence| evidence.site.id == boundary.operation_site_id)
+            })
+            .collect();
+        assert_eq!(at_site.len(), 2);
+        let lowest = at_site.iter().min_by(|a, b| a.id.cmp(&b.id)).unwrap();
+        assert_eq!(boundary.effect.as_ref().unwrap().kind, lowest.kind);
     }
 
     #[test]

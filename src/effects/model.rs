@@ -999,18 +999,35 @@ mod tests {
     #[test]
     fn sorted_handles_equal_the_pairwise_reference() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
-        let mut next = || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
         for round in 0..200 {
-            let prefix: String = (0..(14 + round % 6)).map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char).collect();
+            let prefix: String = (0..(14 + round % 6))
+                .map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char)
+                .collect();
             let digests: Vec<String> = (0..(2 + round % 9))
                 .map(|i| {
-                    let tail: String = (0..64).map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char).collect();
-                    if i % 3 == 0 { format!("{prefix}{tail}")[..64].to_string() } else { tail }
+                    let tail: String = (0..64)
+                        .map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char)
+                        .collect();
+                    if i % 3 == 0 {
+                        format!("{prefix}{tail}")[..64].to_string()
+                    } else {
+                        tail
+                    }
                 })
                 .collect();
             let mut with_duplicates = digests.clone();
             with_duplicates.push(digests[0].clone());
-            assert_eq!(effect_handles(&with_duplicates), effect_handles_reference(&with_duplicates), "round {round}");
+            assert_eq!(
+                effect_handles(&with_duplicates),
+                effect_handles_reference(&with_duplicates),
+                "round {round}"
+            );
         }
     }
 
