@@ -1,0 +1,10 @@
+{
+  "name": "new-24-duplicate-anchor-navigation",
+  "spec": "ACTIVITYSTREAMS",
+  "base_url": "https://w3c.github.io/activitystreams",
+  "anchor": "notes",
+  "invariant": "N1",
+  "status": "known_bug",
+  "bug": "#24 navigation is built before duplicate anchors are dropped: a section's next can point at a duplicate id whose stored (first) row has a different prev",
+  "expected": {}
+}

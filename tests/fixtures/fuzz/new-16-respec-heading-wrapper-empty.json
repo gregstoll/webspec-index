@@ -1,0 +1,13 @@
+{
+  "name": "new-16-respec-heading-wrapper-empty",
+  "spec": "WCAG",
+  "base_url": "https://w3c.github.io/wcag/guidelines/22",
+  "anchor": "introduction",
+  "invariant": "C3",
+  "status": "known_bug",
+  "bug": "#16 ReSpec wraps headings in div.header-wrapper; heading content walks the <h*>'s own siblings inside the wrapper, so every ReSpec heading has empty content",
+  "signature": "C3|heading/heading-wrapped|empty-content:heading-wrapped",
+  "expected": {
+    "nonempty": true
+  }
+}

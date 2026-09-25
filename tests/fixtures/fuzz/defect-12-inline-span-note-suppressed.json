@@ -1,0 +1,16 @@
+{
+  "name": "defect-12-inline-span-note-suppressed",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "concept-fe-optional-value",
+  "invariant": "C1",
+  "status": "known_bug",
+  "bug": "#12 inline span.note is suppressed wholesale by the span handler",
+  "signature": "C1|definition/def-block|missing:span.note>a",
+  "expected": {
+    "links": [
+      "https://html.spec.whatwg.org#concept-fe-value"
+    ],
+    "one_sided": false
+  }
+}

@@ -49,7 +49,7 @@ pub(crate) fn html_cache_dir(db_dir: &Path) -> PathBuf {
 /// `identity` is the upstream identity string (commit sha or `hash:<hex>`).
 /// The portion after the last `:` is used so `hash:abc123` becomes `abc123.html`.
 #[cfg(feature = "native")]
-pub(crate) fn html_cache_path(db_dir: &Path, spec_name: &str, identity: &str) -> PathBuf {
+pub fn html_cache_path(db_dir: &Path, spec_name: &str, identity: &str) -> PathBuf {
     let dir = html_cache_dir(db_dir).join(sanitize_for_fs(spec_name));
     let file_stem = identity.rsplit(':').next().unwrap_or(identity);
     dir.join(format!("{}.html", sanitize_for_fs(file_stem)))

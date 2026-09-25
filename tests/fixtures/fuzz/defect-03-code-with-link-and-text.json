@@ -1,0 +1,16 @@
+{
+  "name": "defect-03-code-with-link-and-text",
+  "spec": "XHR",
+  "base_url": "https://xhr.spec.whatwg.org",
+  "anchor": "the-upload-attribute",
+  "invariant": "C1",
+  "status": "known_bug",
+  "bug": "#3 the <code>/<var> handlers special-case a whole-content link: a link plus other content loses the link or leaves raw [text](url) inside a code span",
+  "signature": "C1|heading/heading|missing:dl.domintro>dt>code>a",
+  "expected": {
+    "links": [
+      "https://xhr.spec.whatwg.org#dom-xmlhttprequest-upload"
+    ],
+    "one_sided": true
+  }
+}

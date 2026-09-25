@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div class="algorithm" data-algorithm="get, decode, and split">
+<p>To <dfn data-dfn-type="dfn" id="header-value-get-decode-and-split">get, decode, and split</dfn> a header value <var>value</var>:</p>
+<ol>
+ <li><p>Let <var>input</var> be the result of decoding <var>value</var>.</p></li>
+ <li>
+  <p>While true:</p>
+  <ol>
+   <li>
+    <p>Append the result of collecting a sequence of code points to <var>value</var>.</p>
+    <p class="note">The result might be the empty string.</p>
+   </li>
+   <li><p>If <var>position</var> is not past the end of <var>input</var> and the <a href="https://infra.spec.whatwg.org/#code-point">code point</a> at <var>position</var> within <var>input</var> is U+0022 ("), then continue.</p></li>
+  </ol>
+ </li>
+</ol>
+</div>
+</body>
+</html>

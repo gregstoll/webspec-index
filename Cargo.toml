@@ -19,6 +19,11 @@ required-features = ["native"]
 name = "effects_parity"
 required-features = ["native"]
 
+[[example]]
+name = "spec_fuzz"
+path = "examples/spec_fuzz/main.rs"
+required-features = ["native"]
+
 [features]
 default = ["native", "pdf"]
 native = [

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<body class="h-entry status-LS">
+<main>
+<div class="algorithm" data-algorithm="BOM sniff">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export="" id="bom-sniff">BOM sniff</dfn> an I/O queue of bytes <var>ioQueue</var>, run these steps:
+
+</p>
+    <ol>
+     <li>
+      <p>Let <var>BOM</var> be the result of <a data-link-type="dfn" href="#i-o-queue-peek" id="ref-for-i-o-queue-peek①">peeking</a> 3 bytes from
+ <var>ioQueue</var>, converted to a byte sequence.
+
+ </p>
+     </li><li>
+      <p>For each of the rows in the table below, starting with the first one and going down, if
+  <var>BOM</var> <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#byte-sequence-starts-with" id="ref-for-byte-sequence-starts-with">starts with</a> the bytes given in the first column, then
+  return the <a data-link-type="dfn" href="#encoding" id="ref-for-encoding②⑤">encoding</a> given in the cell in the second column of that row. Otherwise,
+  return null.
+
+  </p>
+      <table>
+       <tbody>
+        <tr>
+         <th>Byte order mark
+         </th><th>Encoding
+   
+        </th></tr><tr>
+         <td>0xEF 0xBB 0xBF
+         </td><td><a data-link-type="dfn" href="#utf-8" id="ref-for-utf-8①②">UTF-8</a>
+   
+        </td></tr><tr>
+         <td>0xFE 0xFF
+         </td><td><a data-link-type="dfn" href="#utf-16be" id="ref-for-utf-16be③">UTF-16BE</a>
+   
+        </td></tr><tr>
+         <td>0xFF 0xFE
+         </td><td><a data-link-type="dfn" href="#utf-16le" id="ref-for-utf-16le③">UTF-16LE</a>
+  
+      </td></tr></tbody></table>
+    </li></ol>
+    <p class="note" role="note">This hook is a workaround for the fact that <a data-link-type="dfn" href="#decode" id="ref-for-decode②">decode</a> has no way to communicate
+back to the caller that it has found a byte order mark and is therefore not using the provided
+encoding. The hook is to be invoked before <a data-link-type="dfn" href="#decode" id="ref-for-decode③">decode</a>, and it will return an encoding
+corresponding to the byte order mark found, or null otherwise.
+</p>
+   </div>
+</main>
+</body>
+</html>

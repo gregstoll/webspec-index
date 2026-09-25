@@ -1,0 +1,14 @@
+{
+  "name": "defect-01-algorithm-div-first-list-only",
+  "spec": "WEBGPU",
+  "base_url": "https://gpuweb.github.io/gpuweb",
+  "anchor": "abstract-opdef-validate-gpucolor-shape",
+  "invariant": "S1",
+  "status": "known_bug",
+  "bug": "#1 extract_from_algorithm_div renders only the div's first list: a leading <ul> of inputs hides the <ol> steps, and content after the list is dropped",
+  "signature": "S1|algorithm/algo-div|md-fewer-steps:ols=1",
+  "expected": {
+    "depth": 1,
+    "steps": 1
+  }
+}

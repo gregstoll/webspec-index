@@ -1,0 +1,14 @@
+{
+  "name": "new-32-abstract-op-dfn-taken-for-parameter",
+  "spec": "STREAMS",
+  "base_url": "https://streams.spec.whatwg.org",
+  "anchor": "rs-abstract-ops",
+  "invariant": "A1",
+  "status": "known_bug",
+  "bug": "#32 an abstract-op dfn whose text lists its parameters in <var> (Bikeshed ReadableStreamDefaultTee(stream, ...)) is taken for a parameter dfn and not indexed at all",
+  "expected": {
+    "anchors": [
+      "STREAMS#abstract-opdef-readablestreamdefaulttee"
+    ]
+  }
+}

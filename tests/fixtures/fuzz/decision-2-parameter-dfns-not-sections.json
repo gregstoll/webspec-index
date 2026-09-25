@@ -1,0 +1,15 @@
+{
+  "name": "decision-2-parameter-dfns-not-sections",
+  "spec": "ENTRIES-API",
+  "base_url": "https://wicg.github.io/entries-api",
+  "anchor": "callbackdef-errorcallback",
+  "invariant": "A1",
+  "status": "known_bug",
+  "bug": "decision 2: parameter dfns, dfns in steps and inline ecmarkup dfns are to become queryable, resolving to the enclosing algorithm",
+  "signature": "A1|idl/idl-pre|dfn-in-region:dfn-parameter",
+  "expected": {
+    "anchors": [
+      "ENTRIES-API#dom-errorcallback-err"
+    ]
+  }
+}

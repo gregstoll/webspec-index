@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en-US-x-hixie">
+<body>
+<div data-algorithm="">
+  <p>To <dfn id="initialize-the-navigable">initialize the navigable</dfn> <a href="#navigable" id="navigables:navigable-11">navigable</a> <var>navigable</var>, given a
+  <a href="#document-state-2" id="navigables:document-state-2">document state</a> <var>documentState</var> and an optional
+  <a href="#navigable" id="navigables:navigable-12">navigable</a>-or-null <var>parent</var> (default null):</p>
+
+  <ol><li><p><a data-x-internal="assert" href="https://infra.spec.whatwg.org/#assert" id="navigables:assert">Assert</a>: <var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document">document</a> is non-null.</p></li><li>
+    <p>Let <var>entry</var> be a new <a href="#session-history-entry" id="navigables:session-history-entry-3">session history entry</a>, with</p>
+
+    <dl class="props"><dt><a href="#she-url" id="navigables:she-url">URL</a></dt><dd><var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document-2">document</a>'s <a data-x-internal="the-document's-address" href="https://dom.spec.whatwg.org/#concept-document-url" id="navigables:the-document's-address">URL</a></dd><dt><a href="#she-document-state" id="navigables:she-document-state-2">document state</a></dt><dd><var>documentState</var></dd></dl>
+
+    <p class="note">The caller of this algorithm is responsible for initializing <var>entry</var>'s
+    <a href="#she-step" id="navigables:she-step">step</a>; it will be left as "<code>pending</code>" until
+    that is complete.</p>
+   </li><li><p>Set <var>navigable</var>'s <a href="#nav-current-history-entry" id="navigables:nav-current-history-entry-4">current session
+   history entry</a> to <var>entry</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="navigables:nav-active-history-entry-9">active session history
+   entry</a> to <var>entry</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-parent" id="navigables:nav-parent-2">parent</a> to
+   <var>parent</var>.</p></li><li><p><a href="#set-the-initial-visibility-state" id="navigables:set-the-initial-visibility-state">Set the initial visibility state</a> of <var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document-3">document</a> to
+   <var>navigable</var>'s <a href="#nav-traversable" id="navigables:nav-traversable">traversable navigable</a>'s <a href="#system-visibility-state" id="navigables:system-visibility-state">system visibility state</a>.</p></li></ol>
+  </div>
+</body>
+</html>

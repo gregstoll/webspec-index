@@ -1,0 +1,11 @@
+{
+  "name": "new-25-short-links-skip-padded-hrefs",
+  "spec": "PDF-AAM",
+  "base_url": "https://w3c.github.io/pdf-aam",
+  "anchor": "link",
+  "invariant": "M2",
+  "status": "known_bug",
+  "bug": "#25 --links short/none leave a link unrewritten when its href has surrounding whitespace ([t](url )): the rewrite searches for a literal ](url)",
+  "signature": "M2|definition/anchor-element|rewrite:link",
+  "expected": {}
+}

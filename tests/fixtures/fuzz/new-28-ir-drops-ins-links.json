@@ -1,0 +1,16 @@
+{
+  "name": "new-28-ir-drops-ins-links",
+  "spec": "PROPOSAL-DEFER-IMPORT-EVAL",
+  "base_url": "https://tc39.es/proposal-defer-import-eval",
+  "anchor": "sec-import-call-runtime-semantics-evaluation",
+  "invariant": "S3",
+  "status": "known_bug",
+  "bug": "#28 the IR drops links inside <ins> (inserted text in proposal specs)",
+  "signature": "S3|algorithm/emu-clause|missing:emu-alg>ol>ins>a",
+  "expected": {
+    "links": [
+      "https://tc39.es/proposal-defer-import-eval#prod-ImportCallArguments",
+      "https://tc39.es/proposal-defer-import-eval#sec-evaluate-import-call"
+    ]
+  }
+}

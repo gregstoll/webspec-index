@@ -1,0 +1,12 @@
+{
+  "name": "defect-15-converter-drift-golden",
+  "spec": "ENCODING",
+  "base_url": "https://encoding.spec.whatwg.org",
+  "anchor": "bom-sniff",
+  "invariant": "D1",
+  "status": "fixed",
+  "bug": "#15 (fixed by building the harness against the product's Cargo.lock) a separately locked htmd rendered tables differently from the index; this golden rendering catches converter drift",
+  "expected": {
+    "content": "To **BOM sniff** an I/O queue of bytes *ioQueue*, run these steps:\n\n1. Let *BOM* be the result of [peeking](https://encoding.spec.whatwg.org#i-o-queue-peek) 3 bytes from *ioQueue*, converted to a byte sequence.\n2. For each of the rows in the table below, starting with the first one and going down, if *BOM* [starts with](https://infra.spec.whatwg.org/#byte-sequence-starts-with) the bytes given in the first column, then return the [encoding](https://encoding.spec.whatwg.org#encoding) given in the cell in the second column of that row. Otherwise, return null.\n\n    | Byte order mark | Encoding                                              |\n    | --------------- | ----------------------------------------------------- |\n    | 0xEF 0xBB 0xBF  | [UTF-8](https://encoding.spec.whatwg.org#utf-8)       |\n    | 0xFE 0xFF       | [UTF-16BE](https://encoding.spec.whatwg.org#utf-16be) |\n    | 0xFF 0xFE       | [UTF-16LE](https://encoding.spec.whatwg.org#utf-16le) |"
+  }
+}

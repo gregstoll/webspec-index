@@ -236,6 +236,20 @@ cargo test --no-default-features --lib                          # OS/network-fre
 cargo check --no-default-features --lib --target wasm32-unknown-unknown
 ```
 
+### Invariant fuzzer
+
+`examples/spec_fuzz` re-reads every indexed section's source HTML from the local HTML cache and checks that the index conserves it: links, words, algorithm steps, references, IR links, link rewriting, `--no-notes`, query round trips. It opens `~/.webspec-index/index.db` read-only and never rebuilds it. A spec whose stored sections no longer match a fresh parse is skipped with a `webspec-index reparse --spec SPEC` hint; an index built by another version is refused.
+
+```bash
+cargo run --release --example spec_fuzz -- run                 # one pass over every testable spec; --spec, --invariant, --loop
+cargo run --release --example spec_fuzz -- report artifacts/spec-fuzz/<run-id>
+cargo run --release --example spec_fuzz -- replay artifacts/spec-fuzz/<run-id> C1-3f2a9c
+cargo run --release --example spec_fuzz -- promote artifacts/spec-fuzz/<run-id> C1-3f2a9c --name my-bug --bug "what is wrong"
+cargo test --release --example spec_fuzz                      # harness self-tests
+```
+
+A run writes `manifest.json`, `findings.jsonl` (one record per distinct defect) and `summary.json` to `artifacts/spec-fuzz/<run-id>/`. `promote` reduces a finding to a small fixture in `tests/fixtures/fuzz/`, which `tests/fuzz_regressions.rs` checks as a ratchet: `known_bug` fixtures must still fail, `fixed` ones must pass. Fixing a bug therefore means flipping its fixture to `fixed`. `promote --section SPEC#anchor --invariant C1 --status fixed` records a section that has no finding.
+
 ## License
 
 MIT

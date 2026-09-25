@@ -1,0 +1,12 @@
+{
+  "name": "new-29-ir-nondeterministic-body-ids",
+  "spec": "STREAMS",
+  "base_url": "https://streams.spec.whatwg.org",
+  "anchor": "rs-abstract-ops",
+  "invariant": "D1",
+  "status": "known_bug",
+  "bug": "#29 extract_step_structure is nondeterministic: body_arguments.body_id differs between runs on the same input",
+  "expected": {
+    "structure_deterministic": true
+  }
+}

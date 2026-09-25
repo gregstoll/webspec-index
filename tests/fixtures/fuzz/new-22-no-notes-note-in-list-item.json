@@ -1,0 +1,13 @@
+{
+  "name": "new-22-no-notes-note-in-list-item",
+  "spec": "WGSL",
+  "base_url": "https://gpuweb.github.io/gpuweb/wgsl",
+  "anchor": "finite-math-assumption",
+  "invariant": "M4",
+  "status": "known_bug",
+  "bug": "#22 --no-notes removes a note that is the content of a list item and drops links outside the note",
+  "signature": "M4|algorithm/algo-sibling|no-notes-lost:M4a",
+  "expected": {
+    "callout_links": []
+  }
+}

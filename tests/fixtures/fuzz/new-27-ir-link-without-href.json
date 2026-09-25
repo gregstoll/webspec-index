@@ -1,0 +1,13 @@
+{
+  "name": "new-27-ir-link-without-href",
+  "spec": "BACKGROUND-FETCH",
+  "base_url": "https://wicg.github.io/background-fetch",
+  "anchor": "dom-backgroundfetchmanager-getids",
+  "invariant": "S3",
+  "status": "known_bug",
+  "bug": "#27 the IR records an <a> without href as a link with an empty href",
+  "signature": "S3|algorithm/algo-div|extra:ir",
+  "expected": {
+    "links": []
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "new-17-block-glued-to-next-paragraph",
+  "spec": "STORAGE",
+  "base_url": "https://storage.spec.whatwg.org",
+  "anchor": "infrastructure",
+  "invariant": "C2",
+  "status": "known_bug",
+  "bug": "#17 a block rendered by a pass-through handler (<div>/<dd> text, a dl) ends without a blank line, so the next paragraph is glued on and words merge",
+  "signature": "C2|heading/heading|missing-words:dl>dd",
+  "expected": {
+    "words": [
+      "api",
+      "application",
+      "cache",
+      "caches",
+      "concerns",
+      "db",
+      "etc",
+      "indexed",
+      "itself",
+      "notifications",
+      "primarily",
+      "registrations",
+      "service",
+      "standard",
+      "storage",
+      "this",
+      "with",
+      "worker"
+    ]
+  }
+}

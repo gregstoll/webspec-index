@@ -1,0 +1,13 @@
+{
+  "name": "defect-13-dfn-before-domintro-typed-algorithm",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "associated-offscreencanvas-object",
+  "invariant": "T1",
+  "status": "known_bug",
+  "bug": "#13 a dfn followed by a dl/ul sibling (here dl.domintro) is typed Algorithm",
+  "signature": "T1|algorithm/algo-sibling|not-an-algorithm:list-sibling:dl.domintro",
+  "expected": {
+    "not_section_type": "algorithm"
+  }
+}

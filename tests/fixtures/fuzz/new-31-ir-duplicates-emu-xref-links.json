@@ -1,0 +1,15 @@
+{
+  "name": "new-31-ir-duplicates-emu-xref-links",
+  "spec": "ECMA-262",
+  "base_url": "https://tc39.es/ecma262",
+  "anchor": "sec-json.israwjson",
+  "invariant": "S3",
+  "status": "known_bug",
+  "bug": "#31 the IR records an <emu-xref href> and its inner <a> as two links to the same target",
+  "signature": "S3|algorithm/emu-clause|extra:ir",
+  "expected": {
+    "links": [
+      "https://tc39.es/ecma262#sec-object-type"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "new-23-ir-nested-algorithm-div",
+  "spec": "WEB-AUDIO-API",
+  "base_url": "https://webaudio.github.io/web-audio-api",
+  "anchor": "visit",
+  "invariant": "S2",
+  "status": "known_bug",
+  "bug": "#23 an algorithm div nested inside another algorithm's steps gets no IR algorithm",
+  "signature": "S2|algorithm/algo-div|no-ir-algorithm:ols=1",
+  "expected": {
+    "depth": 0,
+    "steps": 0
+  }
+}

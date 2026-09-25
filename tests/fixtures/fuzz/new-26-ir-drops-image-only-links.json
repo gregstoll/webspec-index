@@ -1,0 +1,15 @@
+{
+  "name": "new-26-ir-drops-image-only-links",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "extract-error",
+  "invariant": "S3",
+  "status": "known_bug",
+  "bug": "#26 the IR drops links without text (image-only anchors such as HTML's tracking-vector links)",
+  "signature": "S3|algorithm/algo-div|missing:div.algorithm>ol>a",
+  "expected": {
+    "links": [
+      "https://infra.spec.whatwg.org/#tracking-vector"
+    ]
+  }
+}

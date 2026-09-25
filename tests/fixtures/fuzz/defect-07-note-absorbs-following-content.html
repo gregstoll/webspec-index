@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<body class="h-entry">
+<main>
+<h4 class="heading settled" data-level="4.5.8" id="playing-an-animation-section"><span class="secno">4.5.8. </span><span class="content">Playing an animation</span><a class="self-link" href="#playing-an-animation-section"></a></h4>
+<div class="algorithm" data-algorithm="play an animation">
+    
+    The procedure to , ,
+    given a flag ,
+    is as follows:
+
+
+    <ol>
+     <li data-md="">
+      
+      <ol>
+       <li data-md="">
+        <p>Assert that at least one of <var>animation</var>’s <a data-link-type="dfn" href="#animation-start-time" id="ref-for-animation-start-time①⑧">start time</a> or <a data-link-type="dfn" href="#animation-hold-time" id="ref-for-animation-hold-time①⑦">hold time</a>
+is <a data-link-type="dfn" href="#unresolved" id="ref-for-unresolved④⓪">resolved</a>.</p>
+       </li><li data-md="">
+        <p>Let <var>ready time</var> be the <a data-link-type="dfn" href="#time-value" id="ref-for-time-value②⑤">time value</a> of
+the <a data-link-type="dfn" href="#timeline" id="ref-for-timeline③⓪">timeline</a> associated with <var>animation</var>
+at the moment when <var>animation</var> became <a data-link-type="dfn" href="#ready" id="ref-for-ready④">ready</a>.</p>
+       </li><li data-md="">
+        <p>Perform the steps corresponding to the first matching condition below,
+if any:</p>
+        <dl class="switch">
+         <dt data-md="">If <var>animation</var>’s <a data-link-type="dfn" href="#animation-hold-time" id="ref-for-animation-hold-time①⑧">hold time</a> is <a data-link-type="dfn" href="#unresolved" id="ref-for-unresolved④①">resolved</a>,
+         </dt><dd data-md="">
+          <ol>
+           <li data-md="">
+            <p><a data-link-type="dfn" href="#apply-any-pending-playback-rate" id="ref-for-apply-any-pending-playback-rate③">Apply any pending playback rate</a> on <var>animation</var>.</p>
+           </li><li data-md="">
+            <p>Let <var>new start time</var> be the result of evaluating
+<code><var>ready time</var> − <a data-link-type="dfn" href="#animation-hold-time" id="ref-for-animation-hold-time①⑨">hold time</a>
+      / <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate⑥">playback rate</a></code>
+for <var>animation</var>.
+If the <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate⑦">playback rate</a> is zero,
+let <var>new start time</var> be simply <var>ready time</var>.</p>
+           </li><li data-md="">
+            <p>Set the <a data-link-type="dfn" href="#animation-start-time" id="ref-for-animation-start-time①⑨">start time</a> of <var>animation</var> to <var>new start time</var>.</p>
+           </li><li data-md="">
+            <p>If <var>animation</var>’s <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate⑧">playback rate</a> is not 0,
+make <var>animation</var>’s <a data-link-type="dfn" href="#animation-hold-time" id="ref-for-animation-hold-time②⓪">hold time</a> <a data-link-type="dfn" href="#unresolved" id="ref-for-unresolved④②">unresolved</a>.</p>
+          </li></ol>
+         </dd><dt data-md="">If <var>animation</var>’s <a data-link-type="dfn" href="#animation-start-time" id="ref-for-animation-start-time②⓪">start time</a> is resolved
+and <var>animation</var> has a <a data-link-type="dfn" href="#pending-playback-rate" id="ref-for-pending-playback-rate①">pending playback rate</a>,
+         </dt><dd data-md="">
+          <ol>
+           <li data-md="">
+            <p>Let <var>current time to match</var> be the result of evaluating
+<code>(<var>ready time</var> − <a data-link-type="dfn" href="#animation-start-time" id="ref-for-animation-start-time②①">start time</a>)
+      × <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate⑨">playback rate</a></code>
+for <var>animation</var>.</p>
+           </li><li data-md="">
+            <p><a data-link-type="dfn" href="#apply-any-pending-playback-rate" id="ref-for-apply-any-pending-playback-rate④">Apply any pending playback rate</a> on <var>animation</var>.</p>
+           </li><li data-md="">
+            <p>If <var>animation</var>’s <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate①⓪">playback rate</a> is zero,
+let <var>animation</var>’s <a data-link-type="dfn" href="#animation-hold-time" id="ref-for-animation-hold-time②①">hold time</a> be <var>current time to match</var>.</p>
+           </li><li data-md="">
+            <p>Let <var>new start time</var> be the result of evaluating
+<code><var>ready time</var> − <var>current time to match</var>
+      / <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate①①">playback rate</a></code>
+for <var>animation</var>.
+If the <a data-link-type="dfn" href="#playback-rate" id="ref-for-playback-rate①②">playback rate</a> is zero,
+let <var>new start time</var> be simply <var>ready time</var>.</p>
+           </li><li data-md="">
+            <p>Set the <a data-link-type="dfn" href="#animation-start-time" id="ref-for-animation-start-time②②">start time</a> of <var>animation</var> to <var>new start time</var>.</p>
+          </li></ol>
+        </dd></dl>
+       </li><li data-md="">
+        <p><a data-link-type="dfn" data-refhint-key="d89e99c5" href="https://webidl.spec.whatwg.org/#resolve" id="ref-for-resolve⑤">Resolve</a> <var>animation</var>’s <a data-link-type="dfn" href="#current-ready-promise" id="ref-for-current-ready-promise⑥">current ready promise</a>
+with <var>animation</var>.</p>
+       </li><li data-md="">
+        <p>Run the procedure to <a data-link-type="dfn" href="#update-an-animations-finished-state" id="ref-for-update-an-animations-finished-state⑤">update an animation’s finished state</a>
+for <var>animation</var>
+with the <var>did seek</var> flag set to false,
+and the <var>synchronously notify</var> flag set to false.</p>
+        <p class="note" role="note"><span class="marker">Note:</span> The order of the above two steps is important since
+it means that an animation with zero-length <a data-link-type="dfn" href="#animation-associated-effect" id="ref-for-animation-associated-effect①⓪">associated effect</a>
+will resolve its <a data-link-type="dfn" href="#current-ready-promise" id="ref-for-current-ready-promise⑦">current ready promise</a>
+before its <a data-link-type="dfn" href="#current-finished-promise" id="ref-for-current-finished-promise">current finished promise</a>.</p>
+      </li></ol>
+      
+      <p>If a user agent determines that <var>animation</var> is immediately <a data-link-type="dfn" href="#ready" id="ref-for-ready⑤">ready</a>,
+it may schedule the above task as a microtask
+such that it runs at the next <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/webappapis.html#perform-a-microtask-checkpoint" id="ref-for-perform-a-microtask-checkpoint①">microtask checkpoint</a>,
+but it <em>must not</em> perform the task synchronously.</p>
+      
+     </li></ol>
+   </div>
+</main>
+</body>
+</html>

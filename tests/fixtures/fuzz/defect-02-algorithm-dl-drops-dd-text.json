@@ -1,0 +1,33 @@
+{
+  "name": "defect-02-algorithm-dl-drops-dd-text",
+  "spec": "CSS-VALUES-3",
+  "base_url": "https://drafts.csswg.org/css-values-3",
+  "anchor": "time-value",
+  "invariant": "C2",
+  "status": "known_bug",
+  "bug": "#2 render_algorithm_dl walks only element children of <dd>: text directly inside <dd> vanishes",
+  "signature": "C2|algorithm/algo-sibling|missing-words:dl>dd",
+  "expected": {
+    "words": [
+      "1000",
+      "a",
+      "are",
+      "are",
+      "are",
+      "by",
+      "denoted",
+      "identifiers",
+      "in",
+      "milliseconds",
+      "milliseconds",
+      "second",
+      "the",
+      "there",
+      "time",
+      "time",
+      "time",
+      "unit",
+      "values"
+    ]
+  }
+}

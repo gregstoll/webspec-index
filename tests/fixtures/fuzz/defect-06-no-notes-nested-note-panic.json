@@ -1,0 +1,10 @@
+{
+  "name": "defect-06-no-notes-nested-note-panic",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "the-p-element",
+  "invariant": "M0",
+  "status": "fixed",
+  "bug": "#6 (fixed in 9fe9d71) --no-notes panicked on nested labelled blockquotes: overlapping ranges applied back-to-front",
+  "expected": {}
+}

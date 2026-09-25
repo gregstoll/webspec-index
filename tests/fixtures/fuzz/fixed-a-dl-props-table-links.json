@@ -1,0 +1,32 @@
+{
+  "name": "fixed-a-dl-props-table-links",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "initialize-the-navigable",
+  "invariant": "C1",
+  "status": "fixed",
+  "bug": "(a) (fixed in b14577d) dl.props struct initializers rendered as text-only tables, dropping the field links",
+  "expected": {
+    "links": [
+      "https://dom.spec.whatwg.org/#concept-document-url",
+      "https://html.spec.whatwg.org#document-state-2",
+      "https://html.spec.whatwg.org#document-state-document",
+      "https://html.spec.whatwg.org#document-state-document",
+      "https://html.spec.whatwg.org#document-state-document",
+      "https://html.spec.whatwg.org#nav-active-history-entry",
+      "https://html.spec.whatwg.org#nav-current-history-entry",
+      "https://html.spec.whatwg.org#nav-parent",
+      "https://html.spec.whatwg.org#nav-traversable",
+      "https://html.spec.whatwg.org#navigable",
+      "https://html.spec.whatwg.org#navigable",
+      "https://html.spec.whatwg.org#session-history-entry",
+      "https://html.spec.whatwg.org#set-the-initial-visibility-state",
+      "https://html.spec.whatwg.org#she-document-state",
+      "https://html.spec.whatwg.org#she-step",
+      "https://html.spec.whatwg.org#she-url",
+      "https://html.spec.whatwg.org#system-visibility-state",
+      "https://infra.spec.whatwg.org/#assert"
+    ],
+    "one_sided": false
+  }
+}

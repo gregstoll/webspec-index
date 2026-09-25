@@ -1,0 +1,12 @@
+{
+  "name": "defect-05-no-notes-indentation-residue",
+  "spec": "FETCH",
+  "base_url": "https://fetch.spec.whatwg.org",
+  "anchor": "header-value-get-decode-and-split",
+  "invariant": "M4",
+  "status": "fixed",
+  "bug": "#5 (fixed in 9fe9d71) --no-notes left indentation that turned the next list item into an indented code block",
+  "expected": {
+    "callout_links": []
+  }
+}

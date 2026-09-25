@@ -1,0 +1,15 @@
+{
+  "name": "new-18-heading-bare-text-dropped",
+  "spec": "WEBAPPSEC-DBSC",
+  "base_url": "https://w3c.github.io/webappsec-dbsc",
+  "anchor": "format-jwt",
+  "invariant": "C2",
+  "status": "known_bug",
+  "bug": "#18 heading content collects only element siblings: prose that is a bare text node after the heading is dropped",
+  "signature": "C2|heading/heading|missing-words:text",
+  "expected": {
+    "words": [
+      "a"
+    ]
+  }
+}

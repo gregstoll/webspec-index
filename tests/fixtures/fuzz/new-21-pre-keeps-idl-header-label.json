@@ -1,0 +1,16 @@
+{
+  "name": "new-21-pre-keeps-idl-header-label",
+  "spec": "MEDIA-SOURCE",
+  "base_url": "https://w3c.github.io/media-source",
+  "anchor": "dom-appendmode",
+  "invariant": "C2",
+  "status": "known_bug",
+  "bug": "#21 the <pre> renderer keeps ReSpec's IDL header self-link text (\"WebIDL\") and glues it onto the first IDL token",
+  "signature": "C2|idl/idl-pre|missing-words:pre",
+  "expected": {
+    "words": [
+      "appendmode",
+      "enum"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "new-19-url-host-not-recognized",
+  "spec": "PRIVATE-CLICK-MEASUREMENT",
+  "base_url": "https://privacycg.github.io/private-click-measurement",
+  "anchor": "attribution",
+  "invariant": "M1",
+  "status": "known_bug",
+  "bug": "#19 parse_spec_anchor rejects the URL of an indexed spec whose host the static registry does not whitelist (e.g. privacycg.github.io)",
+  "signature": "M1|definition/def-block|url-roundtrip:url",
+  "expected": {
+    "url": "https://privacycg.github.io/private-click-measurement/#attribution"
+  }
+}

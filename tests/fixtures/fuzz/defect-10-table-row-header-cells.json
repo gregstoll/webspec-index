@@ -1,0 +1,16 @@
+{
+  "name": "defect-10-table-row-header-cells",
+  "spec": "CSS-MIXINS-1",
+  "base_url": "https://drafts.csswg.org/css-mixins-1",
+  "anchor": "function-descriptor-table",
+  "invariant": "C1",
+  "status": "known_bug",
+  "bug": "#10 table rendering drops row-header <th> cells (or the cells next to them) in body rows",
+  "signature": "C1|heading/heading|missing:table>th>a",
+  "expected": {
+    "links": [
+      "https://drafts.csswg.org/css-mixins-1#descdef-function-result"
+    ],
+    "one_sided": true
+  }
+}

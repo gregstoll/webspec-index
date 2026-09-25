@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h3 id="rs-abstract-ops">Readable stream abstract operations</h3>
+<div class="algorithm" data-algorithm="ReadableStreamDefaultTee">
+<p><dfn data-dfn-type="abstract-op" id="abstract-opdef-readablestreamdefaulttee">ReadableStreamDefaultTee(<var>stream</var>)</dfn> performs the following steps:</p>
+<ol>
+ <li><p>Let <var>pullAlgorithm</var> be the following steps:</p><ol></ol></li>
+ <li>
+  <p>Let <var>cancel2Algorithm</var> be the following steps, taking a <var>reason</var> argument:</p>
+  <ol>
+   <li><p>Set <var>branch2</var> to ! <a href="#create-readable-stream">CreateReadableStream</a>(<var>startAlgorithm</var>, <var>pullAlgorithm</var>, <var>cancel2Algorithm</var>).</p></li>
+  </ol>
+ </li>
+</ol>
+</div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "defect-08-ecmarkup-only-last-emu-alg",
+  "spec": "ECMA-262",
+  "base_url": "https://tc39.es/ecma262",
+  "anchor": "sec-static-semantics-iscomputedpropertykey",
+  "invariant": "S1",
+  "status": "known_bug",
+  "bug": "#8 ecmarkup clauses keep only the last <emu-alg> and move trailing content before the steps",
+  "signature": "S1|algorithm/emu-clause|md-fewer-steps:emu-alg=2",
+  "expected": {
+    "depth": 1,
+    "steps": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "defect-07-note-absorbs-following-content",
+  "spec": "WEB-ANIMATIONS-1",
+  "base_url": "https://drafts.csswg.org/web-animations-1",
+  "anchor": "playing-an-animation-section",
+  "invariant": "M4",
+  "status": "known_bug",
+  "bug": "#7 a labelled note blockquote absorbs the following content (markdown lazy continuation): note links come from outside the callout, and --no-notes over-deletes",
+  "signature": "M4|heading/heading|note-link-not-from-callout:M4b:div.algorithm>ol>a",
+  "expected": {
+    "callout_links": [
+      "https://drafts.csswg.org/web-animations-1#animation-associated-effect",
+      "https://drafts.csswg.org/web-animations-1#current-finished-promise",
+      "https://drafts.csswg.org/web-animations-1#current-ready-promise"
+    ]
+  }
+}

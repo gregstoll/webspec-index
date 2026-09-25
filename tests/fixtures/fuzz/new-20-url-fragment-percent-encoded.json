@@ -1,0 +1,13 @@
+{
+  "name": "new-20-url-fragment-percent-encoded",
+  "spec": "CSS2",
+  "base_url": "https://drafts.csswg.org/css2",
+  "anchor": "charset①",
+  "invariant": "M1",
+  "status": "known_bug",
+  "bug": "#20 parse_spec_anchor keeps a non-ASCII URL fragment percent-encoded, so the anchor does not match the section",
+  "signature": "M1|definition/def-block|url-roundtrip:url",
+  "expected": {
+    "url": "https://drafts.csswg.org/css2/#charset①"
+  }
+}
