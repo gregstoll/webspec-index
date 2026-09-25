@@ -4,6 +4,7 @@
 //! imports the effects layer; shared rule primitives live in `crate::semantics`.
 pub(crate) mod block;
 pub(crate) mod declare;
+pub(crate) mod extract;
 pub mod ir;
 pub mod lookup;
 pub mod model;
