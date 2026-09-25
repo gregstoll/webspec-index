@@ -16,6 +16,7 @@ pub mod export;
 pub mod fetch;
 pub mod flow;
 pub mod format;
+pub(crate) mod hex;
 pub mod ietf;
 #[cfg(feature = "native")]
 pub mod itu;

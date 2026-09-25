@@ -850,28 +850,65 @@ pub fn effect_digest(kind: &str, params: &EffectParams) -> Result<String, serde_
 /// Produce collision-safe effect handles for a run. Equal full digests share a
 /// handle; distinct digests extend together beyond the normal 16 hex digits.
 pub fn effect_handles(full_digests: &[String]) -> Vec<String> {
-    let mut lengths = vec![16usize; full_digests.len()];
-    loop {
-        let mut changed = false;
-        for left in 0..full_digests.len() {
-            for right in (left + 1)..full_digests.len() {
-                if full_digests[left] == full_digests[right] {
-                    continue;
+    let n = full_digests.len();
+    let mut lengths = vec![16usize; n];
+
+    // Sort indices by digest so digests with equal 16-char prefixes are adjacent.
+    let mut sorted_indices: Vec<usize> = (0..n).collect();
+    sorted_indices.sort_by(|&a, &b| full_digests[a].cmp(&full_digests[b]));
+
+    // Group consecutive indices that share the same 16-char prefix and run the
+    // pairwise convergence loop only within each group. Digests whose prefixes
+    // differ can never collide at or below length 16, so they need no comparison.
+    let mut i = 0;
+    while i < n {
+        let first_digest = &full_digests[sorted_indices[i]];
+        let group_prefix_len = 16.min(first_digest.len());
+        let group_prefix = &first_digest[..group_prefix_len];
+
+        let mut j = i + 1;
+        while j < n {
+            let d = &full_digests[sorted_indices[j]];
+            let plen = 16.min(d.len());
+            if d[..plen] != *group_prefix {
+                break;
+            }
+            j += 1;
+        }
+
+        if j - i > 1 {
+            // Restore original relative order within the group so the pairwise
+            // loop visits pairs in the same sequence as the reference algorithm.
+            let mut group: Vec<usize> = sorted_indices[i..j].to_vec();
+            group.sort_unstable();
+            loop {
+                let mut changed = false;
+                for k in 0..group.len() {
+                    for m in (k + 1)..group.len() {
+                        let left = group[k];
+                        let right = group[m];
+                        if full_digests[left] == full_digests[right] {
+                            continue;
+                        }
+                        let left_len = lengths[left].min(full_digests[left].len());
+                        let right_len = lengths[right].min(full_digests[right].len());
+                        if full_digests[left][..left_len] == full_digests[right][..right_len] {
+                            let next = left_len.max(right_len) + 1;
+                            lengths[left] = next.min(full_digests[left].len());
+                            lengths[right] = next.min(full_digests[right].len());
+                            changed = true;
+                        }
+                    }
                 }
-                let left_len = lengths[left].min(full_digests[left].len());
-                let right_len = lengths[right].min(full_digests[right].len());
-                if full_digests[left][..left_len] == full_digests[right][..right_len] {
-                    let next = left_len.max(right_len) + 1;
-                    lengths[left] = next.min(full_digests[left].len());
-                    lengths[right] = next.min(full_digests[right].len());
-                    changed = true;
+                if !changed {
+                    break;
                 }
             }
         }
-        if !changed {
-            break;
-        }
+
+        i = j;
     }
+
     full_digests
         .iter()
         .zip(lengths)
@@ -896,8 +933,7 @@ pub fn canonical_anchor_identity(spec: &str, anchor: &str) -> String {
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 #[cfg(test)]
@@ -928,6 +964,54 @@ mod tests {
             sorted_execution([Execution::Unknown, Execution::Inline, Execution::Inline]),
             vec![Execution::Inline, Execution::Unknown]
         );
+    }
+
+    fn effect_handles_reference(full_digests: &[String]) -> Vec<String> {
+        let mut lengths = vec![16usize; full_digests.len()];
+        loop {
+            let mut changed = false;
+            for left in 0..full_digests.len() {
+                for right in (left + 1)..full_digests.len() {
+                    if full_digests[left] == full_digests[right] {
+                        continue;
+                    }
+                    let left_len = lengths[left].min(full_digests[left].len());
+                    let right_len = lengths[right].min(full_digests[right].len());
+                    if full_digests[left][..left_len] == full_digests[right][..right_len] {
+                        let next = left_len.max(right_len) + 1;
+                        lengths[left] = next.min(full_digests[left].len());
+                        lengths[right] = next.min(full_digests[right].len());
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        full_digests
+            .iter()
+            .zip(lengths)
+            .map(|(digest, len)| format!("ef_{}", &digest[..len.min(digest.len())]))
+            .collect()
+    }
+
+    #[test]
+    fn sorted_handles_equal_the_pairwise_reference() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+        for round in 0..200 {
+            let prefix: String = (0..(14 + round % 6)).map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char).collect();
+            let digests: Vec<String> = (0..(2 + round % 9))
+                .map(|i| {
+                    let tail: String = (0..64).map(|_| "0123456789abcdef".as_bytes()[(next() % 16) as usize] as char).collect();
+                    if i % 3 == 0 { format!("{prefix}{tail}")[..64].to_string() } else { tail }
+                })
+                .collect();
+            let mut with_duplicates = digests.clone();
+            with_duplicates.push(digests[0].clone());
+            assert_eq!(effect_handles(&with_duplicates), effect_handles_reference(&with_duplicates), "round {round}");
+        }
     }
 
     #[test]

@@ -1052,8 +1052,7 @@ fn require_text(
 
 fn sha256_bytes(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 #[cfg(test)]

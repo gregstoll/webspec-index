@@ -11,7 +11,7 @@ use crate::effects::matcher::{
 use crate::effects::model::*;
 use crate::parse::steps::{
     BodyItem, BodyKind, ContinuationSyntax, ReferenceRole, SourceIdentity, StructuralAlgorithm,
-    StructuralSegment, StructuralSpec,
+    StructuralSegment, StructuralSpec, StructuralStep,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -456,6 +456,7 @@ struct GraphBuilder<'a> {
     edges: BTreeMap<String, ExecutionEdge>,
     edge_triples: HashSet<(String, String, Execution)>,
     occurrences: BTreeMap<String, LocalOccurrence>,
+    occurrences_by_site: HashMap<String, Vec<String>>,
     issue_catalog: Vec<GraphIssue>,
     issue_ids: BTreeMap<String, IssueId>,
     issues: BTreeMap<String, Vec<IssueId>>,
@@ -475,6 +476,7 @@ impl<'a> GraphBuilder<'a> {
             edges: BTreeMap::new(),
             edge_triples: HashSet::new(),
             occurrences: BTreeMap::new(),
+            occurrences_by_site: HashMap::new(),
             issue_catalog: Vec::new(),
             issue_ids: BTreeMap::new(),
             issues: BTreeMap::new(),
@@ -618,6 +620,11 @@ impl<'a> GraphBuilder<'a> {
             .iter()
             .map(|segment| (segment.source.node_id.as_str(), segment))
             .collect();
+        let steps_by_id: HashMap<&str, &StructuralStep> = algorithm
+            .steps
+            .iter()
+            .map(|s| (s.source.node_id.as_str(), s))
+            .collect();
         for segment in &algorithm.segments {
             let owner = segment_owner(algorithm, segment);
             let matches = self
@@ -657,11 +664,11 @@ impl<'a> GraphBuilder<'a> {
                         code,
                         "an anchor-text match covered multiple matching operation references",
                         self.site_for_identity(
-                            algorithm,
                             &operation.source,
                             Some(&operation.step_id),
                             Some(&operation.body_id),
                             Some(segment),
+                            &steps_by_id,
                         ),
                     );
                 }
@@ -737,7 +744,7 @@ impl<'a> GraphBuilder<'a> {
         self.occurrences.insert(
             occurrence_id.clone(),
             LocalOccurrence {
-                id: occurrence_id,
+                id: occurrence_id.clone(),
                 subject_id: owner.to_owned(),
                 kind: matched.kind,
                 params: matched.params,
@@ -746,6 +753,10 @@ impl<'a> GraphBuilder<'a> {
                 source_order: self.order,
             },
         );
+        self.occurrences_by_site
+            .entry(site.id.clone())
+            .or_default()
+            .push(occurrence_id);
         for code in matched.issues {
             self.add_issue(
                 owner,
@@ -991,11 +1002,16 @@ impl<'a> GraphBuilder<'a> {
             .iter()
             .map(|s| (s.source.node_id.as_str(), s))
             .collect();
+        let steps_by_id: HashMap<&str, &StructuralStep> = algorithm
+            .steps
+            .iter()
+            .map(|s| (s.source.node_id.as_str(), s))
+            .collect();
         for body in &algorithm.bodies {
             for item in &body.items {
                 if let BodyItem::Step(step_id) = item {
                     if self.nodes.contains_key(step_id) {
-                        let site = self.site_for_step(algorithm, step_id);
+                        let site = self.site_for_step(step_id, &steps_by_id);
                         self.add_edge(
                             &body.source.node_id,
                             step_id,
@@ -1011,7 +1027,7 @@ impl<'a> GraphBuilder<'a> {
         for step in &algorithm.steps {
             for item in &step.items {
                 if let crate::parse::steps::StepItem::ChildStep(child) = item {
-                    let site = self.site_for_step(algorithm, child);
+                    let site = self.site_for_step(child, &steps_by_id);
                     self.add_edge(
                         &step.source.node_id,
                         child,
@@ -1031,11 +1047,11 @@ impl<'a> GraphBuilder<'a> {
                     IssueCode::UnresolvedBodyBinding,
                     format!("no lexical body named {:?} is visible", invocation.name),
                     self.site_for_identity(
-                        algorithm,
                         &invocation.source,
                         Some(&invocation.step_id),
                         Some(&invocation.scope_body_id),
                         None,
+                        &steps_by_id,
                     ),
                 );
             }
@@ -1051,11 +1067,11 @@ impl<'a> GraphBuilder<'a> {
             };
             for body in &invocation.candidate_body_ids {
                 let site = self.site_for_identity(
-                    algorithm,
                     &invocation.source,
                     Some(&invocation.step_id),
                     Some(&invocation.scope_body_id),
                     None,
+                    &steps_by_id,
                 );
                 self.add_edge(&owner, body, relation, execution, site, None);
             }
@@ -1066,11 +1082,11 @@ impl<'a> GraphBuilder<'a> {
                 continue;
             };
             let site = self.site_for_identity(
-                algorithm,
                 &operation.source,
                 Some(&operation.step_id),
                 Some(&operation.body_id),
                 Some(segment),
+                &steps_by_id,
             );
             if operation.role == ReferenceRole::Mention {
                 if let Some(target) = operation
@@ -1246,11 +1262,11 @@ impl<'a> GraphBuilder<'a> {
                 .contains(&(owner.clone(), remainder.clone(), mode));
             if !already {
                 let site = self.site_for_identity(
-                    algorithm,
                     &continuation.source,
                     Some(&continuation.step_id),
                     Some(&continuation.enclosing_body_id),
                     segments.get(continuation.segment_id.as_str()).copied(),
+                    &steps_by_id,
                 );
                 self.add_edge(
                     &owner,
@@ -1641,22 +1657,20 @@ impl<'a> GraphBuilder<'a> {
     }
 
     fn boundary_effect(&self, operation_site_id: &str) -> Option<BoundaryEffect> {
-        self.occurrences
-            .values()
-            .find(|occ| {
-                occ.evidence
-                    .iter()
-                    .any(|evidence| evidence.site.id == operation_site_id)
-                    && self
-                        .input
-                        .catalog
-                        .effects
-                        .get(&occ.kind)
-                        .is_some_and(|definition| definition.category == "async")
-            })
-            .map(|occ| BoundaryEffect {
-                kind: occ.kind.clone(),
-                params: occ.params.clone(),
+        self.occurrences_by_site
+            .get(operation_site_id)?
+            .iter()
+            .find_map(|occ_id| {
+                let occ = self.occurrences.get(occ_id)?;
+                self.input
+                    .catalog
+                    .effects
+                    .get(&occ.kind)
+                    .is_some_and(|definition| definition.category == "async")
+                    .then(|| BoundaryEffect {
+                        kind: occ.kind.clone(),
+                        params: occ.params.clone(),
+                    })
             })
     }
 
@@ -1721,34 +1735,30 @@ impl<'a> GraphBuilder<'a> {
         result
     }
 
-    fn site_for_step(&self, algorithm: &StructuralAlgorithm, step_id: &str) -> Option<SourceSite> {
-        let step = algorithm
-            .steps
-            .iter()
-            .find(|step| step.source.node_id == step_id)?;
+    fn site_for_step(
+        &self,
+        step_id: &str,
+        steps_by_id: &HashMap<&str, &StructuralStep>,
+    ) -> Option<SourceSite> {
+        let step = *steps_by_id.get(step_id)?;
         self.site_for_identity(
-            algorithm,
             &step.source,
             Some(step_id),
             Some(&step.body_id),
             None,
+            steps_by_id,
         )
     }
 
     fn site_for_identity(
         &self,
-        algorithm: &StructuralAlgorithm,
         source: &SourceIdentity,
         step_id: Option<&str>,
         body_id: Option<&str>,
         segment: Option<&StructuralSegment>,
+        steps_by_id: &HashMap<&str, &StructuralStep>,
     ) -> Option<SourceSite> {
-        let step = step_id.and_then(|id| {
-            algorithm
-                .steps
-                .iter()
-                .find(|step| step.source.node_id == id)
-        });
+        let step = step_id.and_then(|id| steps_by_id.get(id).copied());
         Some(SourceSite {
             id: source.node_id.clone(),
             subject: Subject {
