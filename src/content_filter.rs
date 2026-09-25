@@ -150,13 +150,24 @@ fn collect_note_ranges(
             }
 
             if label_found {
+                // Take the indentation before `>` too, so a note inside a list
+                // item doesn't leave spaces that re-indent the following line.
+                let line_start = markdown[..bq_start].rfind('\n').map_or(0, |p| p + 1);
+                let start = if markdown[line_start..bq_start].trim().is_empty() {
+                    line_start
+                } else {
+                    bq_start
+                };
                 // Extend past a trailing newline if present so we don't leave a
                 // stray blank line.
                 let mut end = bq_end;
                 if markdown.as_bytes().get(end) == Some(&b'\n') {
                     end += 1;
                 }
-                ranges.push(bq_start..end);
+                ranges.push(start..end);
+                // Nested blockquotes go with this one; ranges must not overlap.
+                i = j + 1;
+                continue;
             }
         }
         i += 1;
@@ -405,6 +416,46 @@ mod tests {
             out.contains("[tree](DOM#concept-tree)"),
             "link outside note rewritten: {out}"
         );
+    }
+
+    #[test]
+    fn no_notes_removes_note_with_nested_example() {
+        // From HTML#the-p-element: a Note blockquote containing nested Example blockquotes.
+        let md = "Paragraph before.\n\n\
+> **Note:** List elements (in particular, [`ol`](https://html.spec.whatwg.org#the-ol-element) and [`ul`](https://html.spec.whatwg.org#the-ul-element) elements) cannot be children of [`p`](https://html.spec.whatwg.org#the-p-element) elements. When a sentence contains a bulleted list, therefore, one might wonder how it should be marked up.\n\
+>\n\
+> > **Example:** For instance, this fantastic sentence has bullets relating to\n\
+> >\n\
+> > *   wizards,\n\
+> > *   faster-than-light travel, and\n\
+> > *   telepathy,\n\
+> >\n\
+> > and is further discussed below.\n\
+>\n\
+> The solution is to realize that a *[paragraph](https://html.spec.whatwg.org#paragraph)*, in HTML terms, is not a logical concept, but a structural one.\n\
+>\n\
+> > **Example:** Thus for instance the above example could become the following:\n\
+> >\n\
+> > ```\n\
+> > <div>For instance, this fantastic sentence has bullets relating to\n\
+> > </div>\n\
+> > ```\n\
+> >\n\
+> > This example still has five structural paragraphs, but now the author can style just the [`div`](https://html.spec.whatwg.org#the-div-element) instead.\n\
+\n\
+See [tree](https://dom.spec.whatwg.org/#concept-tree).\n";
+        let out = transform_content(md, LinksMode::Short, true, &registry());
+        assert_eq!(
+            out, "Paragraph before.\n\nSee [tree](DOM#concept-tree).\n",
+            "outer note and its nested examples removed"
+        );
+    }
+
+    #[test]
+    fn no_notes_removes_indented_note_in_list_item() {
+        let md = "1. First step.\n\n    > **Note:** A note about\n    > the first step.\n\n2. Second step.\n";
+        let out = transform_content(md, LinksMode::Full, true, &registry());
+        assert_eq!(out, "1. First step.\n\n2. Second step.\n");
     }
 
     // --- Nested list steps (sanity) ---
