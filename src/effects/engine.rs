@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-pub const ANALYSIS_ENGINE_VERSION: u32 = 12;
+pub const ANALYSIS_ENGINE_VERSION: u32 = 13;
 
 pub type IssueId = u32;
 
@@ -96,6 +96,10 @@ pub struct IndexedAnchor {
     pub url: String,
     #[serde(default)]
     pub text: String,
+    /// IDL definition kind for this anchor (e.g. "interface", "dictionary"),
+    /// present only when the anchor is an IDL type definition.
+    #[serde(default)]
+    pub idl_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -445,6 +449,10 @@ struct GraphBuilder<'a> {
     local_matches: Option<&'a super::local::LocalMatches>,
     nodes: BTreeMap<String, ExecutionNode>,
     anchor_nodes: BTreeMap<(String, String), String>,
+    /// Anchors whose `idl_kind` is a type-level IDL kind (interface, dictionary,
+    /// enum, typedef, …). Used to classify code-wrapped links with no verb as
+    /// Mention rather than CandidateInvoke.
+    idl_type_anchors: HashSet<(String, String)>,
     edges: BTreeMap<String, ExecutionEdge>,
     edge_triples: HashSet<(String, String, Execution)>,
     occurrences: BTreeMap<String, LocalOccurrence>,
@@ -463,6 +471,7 @@ impl<'a> GraphBuilder<'a> {
             local_matches: None,
             nodes: BTreeMap::new(),
             anchor_nodes: BTreeMap::new(),
+            idl_type_anchors: HashSet::new(),
             edges: BTreeMap::new(),
             edge_triples: HashSet::new(),
             occurrences: BTreeMap::new(),
@@ -498,6 +507,10 @@ impl<'a> GraphBuilder<'a> {
                         is_body: true,
                         definition_only: false,
                     });
+                if anchor.idl_kind.as_deref().is_some_and(is_idl_type_kind) {
+                    self.idl_type_anchors
+                        .insert((source.spec.clone(), anchor.anchor.clone()));
+                }
                 self.order += 1;
             }
             let Some(structure) = &source.structure else {
@@ -1087,11 +1100,20 @@ impl<'a> GraphBuilder<'a> {
                     .cloned()
                 {
                     let (relation, execution) = operation_relation(segment, operation);
-                    // A link to a non-algorithm section (anchor: node) that has
-                    // no verb-based invocation signal is a concept mention, not
-                    // an unresolved invocation candidate.
+                    // A link that has no verb-based invocation signal and whose
+                    // target is either a non-algorithm section (anchor: node) or
+                    // an IDL type definition (interface, dictionary, enum, …) is
+                    // a concept mention, not an unresolved invocation candidate.
+                    // Code-wrapped Wattsi links such as `DOMException` carry no
+                    // data-link-type, so link_is_type_mention cannot detect them
+                    // at parse time; we rely on the idl_kind metadata here.
                     let is_non_algorithm_target = target.starts_with("anchor:");
-                    if relation == Relationship::CandidateInvoke && is_non_algorithm_target {
+                    let is_idl_type_target = self
+                        .idl_type_anchors
+                        .contains(&(target_anchor.spec.clone(), target_anchor.anchor.clone()));
+                    if relation == Relationship::CandidateInvoke
+                        && (is_non_algorithm_target || is_idl_type_target)
+                    {
                         self.add_edge(
                             &owner,
                             &target,
@@ -3203,6 +3225,23 @@ fn operation_relation(
     }
 }
 
+/// Returns true for IDL dfn kinds that name a type, not a member.
+/// Links to type-level IDL anchors without an invocation verb are Mentions.
+fn is_idl_type_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "interface"
+            | "dictionary"
+            | "enum"
+            | "typedef"
+            | "exception"
+            | "callback"
+            | "callback interface"
+            | "namespace"
+            | "mixin"
+    )
+}
+
 fn owner_for_site(algorithm: &StructuralAlgorithm, site_id: &str) -> Option<String> {
     if let Some(operation) = algorithm
         .operation_sites
@@ -3684,6 +3723,7 @@ mod tests {
                     .map(|segment| segment.text.as_str())
                     .collect::<Vec<_>>()
                     .join(" "),
+                idl_kind: None,
             })
             .chain(
                 ["fire", "queue", "consume", "host-operation"]
@@ -3692,6 +3732,7 @@ mod tests {
                         anchor: anchor.to_string(),
                         url: format!("https://example.test/spec#{anchor}"),
                         text: anchor.to_string(),
+                        idl_kind: None,
                     }),
             )
             .collect();
@@ -4247,6 +4288,7 @@ rules:
                     anchor: anchor.into(),
                     url: format!("https://example.test/spec#{anchor}"),
                     text: anchor.into(),
+                    idl_kind: None,
                 })
                 .collect(),
             structure: Some(structure),
@@ -4635,6 +4677,7 @@ rules:
                 anchor: alg.source.section_anchor.clone(),
                 url: alg.source.url.clone(),
                 text: String::new(),
+                idl_kind: None,
             })
             .chain(
                 [
@@ -4648,6 +4691,7 @@ rules:
                     anchor: anchor.to_string(),
                     url: format!("https://example.test/spec#{anchor}"),
                     text: String::new(),
+                    idl_kind: None,
                 }),
             )
             .collect();
@@ -4776,11 +4820,13 @@ rules:
                 anchor: alg.source.section_anchor.clone(),
                 url: alg.source.url.clone(),
                 text: String::new(),
+                idl_kind: None,
             })
             .chain(std::iter::once(IndexedAnchor {
                 anchor: "non-algo-target".to_string(),
                 url: "https://example.test/spec#non-algo-target".to_string(),
                 text: String::new(),
+                idl_kind: None,
             }))
             .collect();
         let sources = [SourceSpec {
@@ -4827,6 +4873,135 @@ rules:
         }
     }
 
+    /// A code-wrapped link with no data-link-type that targets an IDL interface
+    /// anchor (which may itself be an algorithm body) must be a Mention, not a
+    /// CandidateInvoke, so it does not produce unresolved_invocation issues.
+    /// This covers Wattsi HTML links like `<a href="#domexception"><code>DOMException</code></a>`.
+    #[test]
+    fn code_link_to_idl_interface_without_verb_is_mention() {
+        // "domexception" is an algorithm body (has a structural body id, not
+        // just an anchor: node) AND an IDL interface anchor. The link from
+        // "caller" has no data-link-type. Without the idl_type_anchors check
+        // it would become CandidateInvoke + unresolved_invocation.
+        let html = r##"
+          <div class="algorithm">
+            <p>To <dfn id="caller">run caller</dfn>:</p>
+            <ol>
+              <li><p>If <var>x</var> is a <a href="#domexception"><code>DOMException</code></a>, return.</p></li>
+              <li><p><a href="#callee">Run callee</a>.</p></li>
+            </ol>
+          </div>
+          <div class="algorithm">
+            <p>To <dfn id="callee">run callee</dfn>:</p>
+            <ol><li><p><a href="#fire">Fire an event</a> named <code>"load"</code>.</p></li></ol>
+          </div>
+          <div class="algorithm">
+            <p><dfn id="domexception">DOMException</dfn> interface:</p>
+            <ol><li><p>Placeholder step.</p></li></ol>
+          </div>
+          <p><dfn id="fire">fire an event</dfn> is a target stub.</p>
+        "##;
+
+        let package = load_package_files(&[(
+            "catalog.yaml",
+            include_str!("../../tests/fixtures/effects/engine/catalog.yaml"),
+        )])
+        .unwrap();
+        let catalog = load_catalog([package]).unwrap();
+        let structure =
+            extract_step_structure(html, "TEST", "https://example.test/spec", &"a".repeat(64));
+        let anchors: Vec<_> = structure
+            .algorithms
+            .iter()
+            .map(|alg| {
+                let is_idl = alg.source.section_anchor == "domexception";
+                IndexedAnchor {
+                    anchor: alg.source.section_anchor.clone(),
+                    url: alg.source.url.clone(),
+                    text: String::new(),
+                    idl_kind: is_idl.then(|| "interface".to_string()),
+                }
+            })
+            .chain(std::iter::once(IndexedAnchor {
+                anchor: "fire".to_string(),
+                url: "https://example.test/spec#fire".to_string(),
+                text: String::new(),
+                idl_kind: None,
+            }))
+            .collect();
+        let sources = [SourceSpec {
+            spec: "TEST".to_string(),
+            snapshot_sha: "a".repeat(64),
+            base_url: "https://example.test/spec".to_string(),
+            structure: Some(structure),
+            anchors,
+        }];
+        let local_matches = super::super::local::prepare(&sources[0], &catalog);
+        let artifact = analyze_with_local_matches(
+            AnalysisInput {
+                sources: &sources,
+                catalog: &catalog,
+                environment: "generic",
+                scope: AnalysisScope::Subject {
+                    subject: SubjectSelector {
+                        spec: "TEST".into(),
+                        anchor: "caller".into(),
+                        step_path: None,
+                        step_id: None,
+                        body_id: None,
+                    },
+                },
+                budgets: DiscoveryBudgets::default(),
+            },
+            Some(&local_matches),
+        )
+        .unwrap();
+
+        // The link to domexception must be a Mention edge.
+        let domexception_edges: Vec<_> = artifact
+            .relationships
+            .iter()
+            .filter(|edge| {
+                artifact
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == edge.to && node.subject.anchor == "domexception")
+            })
+            .collect();
+        assert!(
+            !domexception_edges.is_empty(),
+            "should have an edge to domexception"
+        );
+        for edge in &domexception_edges {
+            assert_eq!(
+                edge.relation,
+                Relationship::Mention,
+                "code link to IDL interface should be Mention, not {:?}",
+                edge.relation
+            );
+        }
+
+        // No unresolved_invocation issues.
+        let result = artifact
+            .summary(&selector("caller"), None, &artifact.sites)
+            .unwrap();
+        let unresolved: Vec<_> = result
+            .issues
+            .iter()
+            .filter(|issue| issue.code == IssueCode::UnresolvedInvocation)
+            .collect();
+        assert!(
+            unresolved.is_empty(),
+            "IDL type links must not produce unresolved_invocation, got {unresolved:?}"
+        );
+
+        // Effects from callee must still propagate (fire an event).
+        assert!(
+            !result.effects.is_empty(),
+            "effects from callee should propagate to caller"
+        );
+    }
+
     #[test]
     fn identical_sites_share_one_key_and_differ_by_step_text() {
         use crate::effects::graph::site_key;
@@ -4870,6 +5045,7 @@ rules:
                     .map(|segment| segment.text.as_str())
                     .collect::<Vec<_>>()
                     .join(" "),
+                idl_kind: None,
             })
             .chain(
                 ["fire", "queue", "consume", "host-operation"]
@@ -4878,6 +5054,7 @@ rules:
                         anchor: anchor.to_string(),
                         url: format!("https://example.test/spec#{anchor}"),
                         text: anchor.to_string(),
+                        idl_kind: None,
                     }),
             )
             .collect();

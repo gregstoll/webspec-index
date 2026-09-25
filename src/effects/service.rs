@@ -180,7 +180,10 @@ fn load_sources(conn: &Connection, catalog: &Catalog) -> Result<Vec<SourceSpec>,
                 UNION SELECT anchor FROM effect_anchors WHERE snapshot_id=?1
                 UNION SELECT from_anchor FROM refs WHERE snapshot_id=?1
                 UNION SELECT anchor FROM idl_defs WHERE snapshot_id=?1)
-                SELECT anchors.anchor,sections.content_text FROM anchors
+                SELECT anchors.anchor, sections.content_text,
+                    (SELECT MIN(kind) FROM idl_defs
+                     WHERE snapshot_id=?1 AND anchor=anchors.anchor) AS idl_kind
+                FROM anchors
                 LEFT JOIN sections ON sections.snapshot_id=?1 AND sections.anchor=anchors.anchor
                 ORDER BY anchors.anchor",
             )
@@ -193,10 +196,12 @@ fn load_sources(conn: &Connection, catalog: &Catalog) -> Result<Vec<SourceSpec>,
                 } else {
                     String::new()
                 };
+                let idl_kind: Option<String> = row.get(2)?;
                 Ok(IndexedAnchor {
                     url: format!("{}#{anchor}", base_url.trim_end_matches('#')),
                     anchor,
                     text,
+                    idl_kind,
                 })
             })
             .map_err(failure)?

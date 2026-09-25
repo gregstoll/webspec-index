@@ -139,6 +139,7 @@ fn validate_case(
                     .map(|s| s.text.as_str())
                     .collect::<Vec<_>>()
                     .join(" "),
+                idl_kind: None,
             })
             .collect();
         sources.push(SourceSpec {
@@ -461,5 +462,6 @@ fn stub(spec: &str, anchor: &str) -> IndexedAnchor {
         anchor: anchor.into(),
         url: format!("{}#{anchor}", base_url(spec)),
         text: anchor.into(),
+        idl_kind: None,
     }
 }
