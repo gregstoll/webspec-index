@@ -4,8 +4,8 @@
   "base_url": "https://dom.spec.whatwg.org",
   "anchor": "concept-flatten-options",
   "invariant": "S3",
-  "status": "known_bug",
-  "bug": "#4 the structural IR flattens <code>/<var>, so links inside them never become LinkSpans",
+  "status": "fixed",
+  "bug": "#4 (fixed in structure v8) the structural IR flattens <code>/<var>, so links inside them never become LinkSpans",
   "signature": "S3|algorithm/algo-div|missing:div.algorithm>ol>code>a",
   "expected": {
     "links": [

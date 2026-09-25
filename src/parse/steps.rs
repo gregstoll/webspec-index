@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use super::algorithms::step_number;
 
 /// Version of the serialized structural parse format.
-pub const STRUCTURE_VERSION: &str = "7";
+pub const STRUCTURE_VERSION: &str = "8";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuralSpec {
@@ -185,6 +185,14 @@ pub struct StructuralBranch {
     pub source: SourceIdentity,
     pub parent_step_id: String,
     pub label: String,
+    /// Canonical `<dt>` text in segment encoding; the label spans below index
+    /// it. Empty for `<ul>` items, whose text is in their segments.
+    #[serde(default)]
+    pub label_text: String,
+    #[serde(default)]
+    pub label_tokens: Vec<InlineToken>,
+    #[serde(default)]
+    pub label_links: Vec<LinkSpan>,
     pub items: Vec<StepItem>,
 }
 
@@ -501,21 +509,45 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
         if has_algorithm_ancestor(&container) {
             continue;
         }
-        let Some(dfn) = first_definition_outside_list(&container) else {
+        let Some(first) = first_definition_outside_list(&container) else {
             continue;
         };
-        let anchor = dfn.value().attr("id").unwrap().to_string();
-        if !seen.insert(anchor.clone()) {
+        let pairs = algorithm_pairs(&container);
+        if pairs.is_empty() {
+            let anchor = first.value().attr("id").unwrap().to_string();
+            if !seen.insert(anchor.clone()) {
+                continue;
+            }
+            let body = first_outer_list(&container).map(CandidateBody::List);
+            result.push(AlgorithmCandidate {
+                anchor,
+                title: nonempty_text(&first),
+                owner: container,
+                body,
+                order: document_order_position(document, &container),
+            });
             continue;
         }
-        let body = first_outer_list(&container).map(CandidateBody::List);
-        result.push(AlgorithmCandidate {
-            anchor,
-            title: nonempty_text(&dfn),
-            owner: container,
-            body,
-            order: document_order_position(document, &container),
-        });
+        for (dfn, intro, list) in pairs {
+            let anchor = dfn.value().attr("id").unwrap().to_string();
+            if !seen.insert(anchor.clone()) {
+                continue;
+            }
+            // The container's own algorithm keeps the container as owner, so
+            // its node ids match those of single-algorithm containers.
+            let owner = if dfn.id() == first.id() {
+                container
+            } else {
+                intro
+            };
+            result.push(AlgorithmCandidate {
+                anchor,
+                title: nonempty_text(&dfn),
+                owner,
+                body: Some(CandidateBody::List(list)),
+                order: document_order_position(document, &owner),
+            });
+        }
     }
 
     let dfn_selector = Selector::parse("dfn[id]").expect("valid dfn selector");
@@ -1199,6 +1231,9 @@ impl AlgorithmBuilder<'_> {
                 source: branch_source,
                 parent_step_id: step_id.to_string(),
                 label,
+                label_text: String::new(),
+                label_tokens: Vec::new(),
+                label_links: Vec::new(),
                 items: Vec::new(),
             });
             self.step_mut(step_id)
@@ -1221,10 +1256,17 @@ impl AlgorithmBuilder<'_> {
                 "dt" => {
                     let source = source_identity(&self.ctx, "branch", &dom_path(&child), None);
                     let id = source.node_id.clone();
+                    let mut label = CanonicalBuilder::new(&self.ctx);
+                    for node in child.children() {
+                        label.walk(node);
+                    }
                     self.algorithm.branches.push(StructuralBranch {
                         source,
                         parent_step_id: step_id.to_string(),
                         label: normalize_plain_text(&child.text().collect::<String>()),
+                        label_text: label.text.trim().to_string(),
+                        label_tokens: label.tokens,
+                        label_links: label.links,
                         items: Vec::new(),
                     });
                     self.step_mut(step_id)
@@ -1735,14 +1777,44 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
         let source_text = normalize_plain_text(&element.text().collect::<String>());
         let start = self.text.len();
         self.text.push(delimiter);
-        for character in source_text.chars() {
+        // Canonical byte offset of every source byte offset, escapes included.
+        let mut offsets = Vec::with_capacity(source_text.len() + 1);
+        for (index, character) in source_text.char_indices() {
+            offsets.resize(index + 1, self.text.len());
             if character == delimiter || character == '\\' {
                 self.text.push('\\');
             }
             self.text.push(character);
         }
+        offsets.resize(source_text.len() + 1, self.text.len());
         self.text.push(delimiter);
         let end = self.text.len();
+
+        let mut cursor = 0;
+        for link in element
+            .descendants()
+            .filter_map(ElementRef::wrap)
+            .filter(|descendant| matches!(descendant.value().name(), "a" | "emu-xref"))
+        {
+            let link_text = normalize_plain_text(&link.text().collect::<String>());
+            if link_text.is_empty() {
+                continue;
+            }
+            let span = if link_text == source_text {
+                TextSpan { start, end }
+            } else if let Some(found) = source_text[cursor..].find(&link_text) {
+                let from = cursor + found;
+                cursor = from + link_text.len();
+                TextSpan {
+                    start: offsets[from],
+                    end: offsets[cursor],
+                }
+            } else {
+                continue;
+            };
+            self.record_link(&link, span);
+        }
+
         self.tokens.push(InlineToken {
             kind,
             span: TextSpan { start, end },
@@ -1760,6 +1832,10 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
         if start == end {
             return;
         }
+        self.record_link(link, TextSpan { start, end });
+    }
+
+    fn record_link(&mut self, link: &ElementRef<'_>, span: TextSpan) {
         self.link_ordinal += 1;
         let href = link
             .value()
@@ -1782,8 +1858,8 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
             });
         self.links.push(LinkSpan {
             id,
-            span: TextSpan { start, end },
-            visible_text: self.text[start..end].to_string(),
+            span,
+            visible_text: self.text[span.start..span.end].to_string(),
             href,
             target,
             generator_id: link.value().attr("id").map(str::to_string),
@@ -2080,6 +2156,42 @@ fn first_definition_outside_list<'a>(container: &ElementRef<'a>) -> Option<Eleme
             .take_while(|ancestor| ancestor.id() != container.id())
             .all(|ancestor| !matches!(ancestor.value().name(), "ol" | "ul" | "dl"))
     })
+}
+
+/// `(dfn, intro block, steps)` for every `<ol>` of `container` outside other
+/// lists whose previous element sibling is a `p`, `div` or `dd` that defines a
+/// term outside lists and ends in a colon, in document order. The colon keeps
+/// a definition that sits between an algorithm's intro and its steps ("Parts
+/// marked fragment case …") from taking the steps over.
+fn algorithm_pairs<'a>(
+    container: &ElementRef<'a>,
+) -> Vec<(ElementRef<'a>, ElementRef<'a>, ElementRef<'a>)> {
+    let selector = Selector::parse("ol").expect("valid selector");
+    container
+        .select(&selector)
+        .filter(|list| {
+            list.ancestors()
+                .filter_map(ElementRef::wrap)
+                .take_while(|ancestor| ancestor.id() != container.id())
+                .all(|ancestor| !matches!(ancestor.value().name(), "ol" | "ul"))
+        })
+        .filter_map(|list| {
+            let intro = list
+                .prev_siblings()
+                .find(|sibling| match sibling.value() {
+                    Node::Text(text) => !text.text.trim().is_empty(),
+                    _ => true,
+                })
+                .and_then(ElementRef::wrap)?;
+            if !matches!(intro.value().name(), "p" | "div" | "dd")
+                || !own_plain_text(&intro).ends_with(':')
+            {
+                return None;
+            }
+            let dfn = first_definition_outside_list(&intro)?;
+            Some((dfn, intro, list))
+        })
+        .collect()
 }
 
 fn following_algorithm_block<'a>(owner: &ElementRef<'a>) -> Option<ElementRef<'a>> {
@@ -3025,5 +3137,117 @@ mod tests {
             .unwrap();
         assert!(nodes.contains(&body.id()));
         assert!(!nodes.contains(&props.id()));
+    }
+
+    fn algo(steps: &str) -> StructuralSpec {
+        extract_step_structure(
+            &format!(
+                r#"<div class="algorithm"><p>To <dfn id="a">a</dfn>:</p><ol>{steps}</ol></div>"#
+            ),
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "hash:x",
+        )
+    }
+
+    #[test]
+    fn links_inside_code_and_var_are_kept() {
+        let s = algo(
+            r##"<li><p>Let <var>d</var> be a new <code><a href="#document">Document</a></code> and <var><a href="#x">x</a></var>, typed <code><a href="#promise">Promise</a>&lt;T&gt;</code>.</p></li>"##,
+        );
+        let seg = &s.algorithms[0].segments[0];
+        let visible: Vec<_> = seg.links.iter().map(|l| l.visible_text.as_str()).collect();
+        assert_eq!(visible, ["`Document`", "*x*", "Promise"]);
+        let whole = &seg.links[0];
+        assert!(seg
+            .tokens
+            .iter()
+            .any(|t| t.kind == InlineTokenKind::Code && t.span == whole.span));
+        let inner = &seg.links[2];
+        assert_eq!(&seg.text[inner.span.start..inner.span.end], "Promise");
+        assert!(seg.text[..inner.span.start].ends_with('`'));
+    }
+
+    #[test]
+    fn dl_branch_labels_keep_canonical_text_and_links() {
+        let s = algo(
+            r##"<li><p>Let <var>document</var> be a new <code><a href="#document">Document</a></code>, with:</p>
+      <dl class="props"><dt><a href="#is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd>
+      <dt><a href="https://dom.spec.whatwg.org/#concept-document-type">type</a></dt><dd>"<code>html</code>"</dd></dl></li>"##,
+        );
+        assert_eq!(s.version, "8");
+        let branch = &s.algorithms[0].branches[0];
+        assert_eq!(branch.label, "is initial about:blank");
+        assert_eq!(branch.label_text, "is initial `about:blank`");
+        assert_eq!(
+            &branch.label_text[branch.label_links[0].span.start..branch.label_links[0].span.end],
+            "is initial `about:blank`"
+        );
+        assert_eq!(
+            s.algorithms[0].branches[1].label_links[0]
+                .target
+                .as_ref()
+                .unwrap()
+                .spec,
+            "DOM"
+        );
+    }
+
+    #[test]
+    fn v7_branch_payloads_still_deserialize() {
+        let branch: StructuralBranch = serde_json::from_str(r#"{"source":{"spec":"T","snapshot_sha":"s","section_anchor":"a","node_id":"n","url":"u"},"parent_step_id":"p","label":"x","items":[]}"#).unwrap();
+        assert!(branch.label_links.is_empty() && branch.label_text.is_empty());
+    }
+
+    #[test]
+    fn every_algorithm_in_one_container_is_extracted() {
+        let html = r#"<div data-algorithm=""><p>Each <code>Document</code> has an <dfn id="ancestor-origins-list">ancestor origins list</dfn>.</p>
+      <p>The <dfn id="ancestor-origins-list-creation-steps">ancestor origins list creation steps</dfn> are:</p><ol><li><p>Return.</p></li></ol>
+      <p>To <dfn id="second">do the second thing</dfn>:</p><ol><li><p>Return.</p></li></ol></div>"#;
+        let s = extract_step_structure(html, "HTML", "https://html.spec.whatwg.org/", "hash:x");
+        let anchors: Vec<_> = s
+            .algorithms
+            .iter()
+            .map(|a| a.source.section_anchor.as_str())
+            .collect();
+        assert_eq!(anchors, ["ancestor-origins-list-creation-steps", "second"]);
+    }
+
+    #[test]
+    fn definitions_between_intro_and_steps_do_not_split_the_algorithm() {
+        let html = r#"<div data-algorithm=""><p>The <dfn id="fragment-parsing">fragment parsing algorithm</dfn>, given <var>input</var>, has the following steps:</p>
+      <p>Parts marked <dfn id="fragment-case">fragment case</dfn> only occur when parsing fragments.</p><ol><li><p>Return.</p></li></ol>
+      <ul><li><p>A <dfn id="component">component</dfn> is:</p><ol><li>a digit</li></ol></li></ul></div>"#;
+        let s = extract_step_structure(html, "HTML", "https://html.spec.whatwg.org/", "hash:x");
+        let anchors: Vec<_> = s
+            .algorithms
+            .iter()
+            .map(|a| a.source.section_anchor.as_str())
+            .collect();
+        assert_eq!(anchors, ["fragment-parsing"]);
+    }
+
+    #[test]
+    fn single_algorithm_containers_keep_their_node_ids() {
+        let html = r#"<div class="algorithm"><p>To <dfn id="a">a</dfn>:</p><ol><li><p>Return.</p></li></ol></div>"#;
+        let document = Html::parse_document(html);
+        let container = document
+            .select(&Selector::parse("div").unwrap())
+            .next()
+            .unwrap();
+        let ctx = ExtractContext {
+            spec: "HTML",
+            base_url: "https://html.spec.whatwg.org/",
+            snapshot_sha: "hash:x",
+            anchor: "a",
+        };
+        let expected = source_identity(&ctx, "algorithm", &dom_path(&container), None).node_id;
+        let s = extract_step_structure_from_document(
+            &document,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "hash:x",
+        );
+        assert_eq!(s.algorithms[0].source.node_id, expected);
     }
 }

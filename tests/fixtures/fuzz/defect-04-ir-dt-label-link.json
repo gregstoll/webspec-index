@@ -4,8 +4,8 @@
   "base_url": "https://html.spec.whatwg.org",
   "anchor": "initialize-the-navigable",
   "invariant": "S3",
-  "status": "known_bug",
-  "bug": "#4 StructuralBranch.label is a plain string, so links on <dt> terms (dl.props, dl.switch) are lost from the IR",
+  "status": "fixed",
+  "bug": "#4 (fixed in structure v8) StructuralBranch.label is a plain string, so links on <dt> terms (dl.props, dl.switch) are lost from the IR",
   "signature": "S3|algorithm/algo-div|missing:ol>dl.props>dt>a",
   "expected": {
     "links": [

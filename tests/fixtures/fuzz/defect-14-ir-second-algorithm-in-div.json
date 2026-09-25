@@ -4,8 +4,8 @@
   "base_url": "https://drafts.csswg.org/css-backgrounds-3",
   "anchor": "adjusted-radius-dimension",
   "invariant": "S2",
-  "status": "known_bug",
-  "bug": "#14 the IR builds an algorithm only for the first dfn of a div[data-algorithm]: a second p+ol algorithm in the same div has none",
+  "status": "fixed",
+  "bug": "#14 (fixed in structure v8) the IR builds an algorithm only for the first dfn of a div[data-algorithm]: a second p+ol algorithm in the same div has none",
   "signature": "S2|algorithm/algo-sibling|no-ir-algorithm:ols=1",
   "expected": {
     "depth": 0,
