@@ -253,7 +253,7 @@ pub enum PathFeasibility {
     Unchecked,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueCode {
     MissingSpec,
@@ -271,7 +271,7 @@ pub enum IssueCode {
     ContextTruncated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GraphIssue {
     pub code: IssueCode,

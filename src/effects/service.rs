@@ -3,10 +3,10 @@ use super::bundled::default_catalog;
 use super::catalog::Catalog;
 #[cfg(any(feature = "native", test))]
 use super::engine::IssueId;
-use super::engine::{
-    self, AnalysisArtifact, ArtifactSummary, GraphInput, IndexedAnchor, SourceSpec,
-};
+use super::engine::{self, AnalysisArtifact, ArtifactSummary, IndexedAnchor, SourceSpec};
+use super::fragment::{build_fragment, Fragment, FragmentInput};
 use super::graph::ExecutionNode;
+use super::link::link;
 use super::model::*;
 #[cfg(any(feature = "native", test))]
 use crate::db;
@@ -438,18 +438,19 @@ fn no_result(subject: Subject, disabled: bool) -> EffectSummaryResult {
     }
 }
 
-/// Compute local matches for the given uncached sources.
+/// Build every source's fragment.
 ///
 /// `threads` overrides the thread count; `None` reads `WEBSPEC_EFFECTS_THREADS` from
 /// the environment and falls back to [`std::thread::available_parallelism`]. Under the
 /// `native` feature this dispatches work across a rayon thread pool; without that feature
 /// it falls back to a serial loop so wasm and lib-only builds are unaffected.
-fn parallel_prepare(
-    sources: &[super::engine::SourceSpec],
+fn build_fragments(
+    sources: &[SourceSpec],
     catalog: &Catalog,
-    uncached: &[usize],
+    environment: &str,
     threads: Option<usize>,
-) -> Vec<(usize, super::local::LocalMatches)> {
+) -> Vec<Fragment> {
+    let build = |source| build_fragment(&FragmentInput::for_source(source, catalog, environment));
     #[cfg(feature = "native")]
     {
         use rayon::prelude::*;
@@ -467,20 +468,12 @@ fn parallel_prepare(
             .num_threads(thread_count)
             .build()
             .expect("rayon thread pool");
-        pool.install(|| {
-            uncached
-                .par_iter()
-                .map(|&i| (i, super::local::prepare(&sources[i], catalog)))
-                .collect()
-        })
+        pool.install(|| sources.par_iter().map(build).collect())
     }
     #[cfg(not(feature = "native"))]
     {
         let _ = threads;
-        uncached
-            .iter()
-            .map(|&i| (i, super::local::prepare(&sources[i], catalog)))
-            .collect()
+        sources.iter().map(build).collect()
     }
 }
 
@@ -498,106 +491,10 @@ pub fn build_and_store_graph(
             let sources = load_sources(&tx, catalog)?;
             (generation, m, sources)
         };
-        let mut matches = super::local::LocalMatches::new();
-        {
-            let keys: Vec<String> = sources
-                .iter()
-                .map(|s| super::local::input_key(s, catalog, &options.environment))
-                .collect();
-            let mut cached_locals: Vec<Option<super::local::LocalMatches>> =
-                Vec::with_capacity(sources.len());
-            let mut uncached: Vec<usize> = Vec::new();
-            for (i, key) in keys.iter().enumerate() {
-                match storage::load_local_matches(conn, key).map_err(failure)? {
-                    Some(text) => {
-                        cached_locals.push(Some(serde_json::from_str(&text).map_err(failure)?));
-                    }
-                    None => {
-                        cached_locals.push(None);
-                        uncached.push(i);
-                    }
-                }
-            }
-            let computed: Vec<(usize, super::local::LocalMatches)> =
-                parallel_prepare(&sources, catalog, &uncached, threads);
-            for (i, local) in &computed {
-                storage::store_local_matches(
-                    conn,
-                    &keys[*i],
-                    &serde_json::to_string(local).map_err(failure)?,
-                )
-                .map_err(failure)?;
-            }
-            let mut computed_map: std::collections::HashMap<usize, super::local::LocalMatches> =
-                computed.into_iter().collect();
-            for (i, slot) in cached_locals.iter_mut().enumerate() {
-                if slot.is_none() {
-                    *slot = Some(
-                        computed_map
-                            .remove(&i)
-                            .expect("every uncached source was computed"),
-                    );
-                }
-            }
-            for local in cached_locals.into_iter().flatten() {
-                matches.extend(local);
-            }
-        }
-        let graph = engine::build_graph(
-            GraphInput {
-                sources: &sources,
-                catalog,
-                environment: &options.environment,
-            },
-            Some(&matches),
-        )?;
-
-        // Compute missing_inputs from graph algorithm roots.
-        let indexed: BTreeMap<_, BTreeSet<_>> = sources
-            .iter()
-            .map(|source| {
-                (
-                    source.spec.clone(),
-                    source.anchors.iter().map(|a| a.anchor.clone()).collect(),
-                )
-            })
-            .collect();
-        let algorithm_roots: std::collections::HashSet<(String, String)> = graph
-            .nodes
-            .values()
-            .filter(|n| n.is_body && n.subject.body_id.is_none())
-            .map(|n| (n.subject.spec.clone(), n.subject.anchor.clone()))
-            .collect();
-        let mut missing = BTreeSet::new();
-        for source in &sources {
-            for algorithm in source.structure.iter().flat_map(|s| &s.algorithms) {
-                if !algorithm_roots
-                    .contains(&(source.spec.clone(), algorithm.source.section_anchor.clone()))
-                {
-                    continue;
-                }
-                for target in algorithm
-                    .operation_sites
-                    .iter()
-                    .filter(|op| op.role != crate::parse::steps::ReferenceRole::Mention)
-                    .filter_map(|op| op.target.as_ref())
-                {
-                    if !indexed
-                        .get(&target.spec)
-                        .is_some_and(|anchors| anchors.contains(&target.anchor))
-                    {
-                        missing.insert((target.spec.clone(), target.anchor.clone()));
-                    }
-                }
-            }
-        }
-        m.missing_inputs = missing
-            .into_iter()
-            .map(|(spec, anchor)| MissingInput {
-                spec,
-                anchor: Some(anchor),
-            })
-            .collect();
+        let fragments = build_fragments(&sources, catalog, &options.environment, threads);
+        let linked = link(&fragments, catalog, &options.environment)?;
+        m.missing_inputs = linked.missing_inputs;
+        let graph = linked.graph;
 
         let sk = graph_semantic_key(&m, generation)?;
         let meta = storage::StoredGraphMeta {
@@ -1472,36 +1369,26 @@ mod tests {
     }
 
     #[test]
-    fn global_recompute_reuses_scoped_local_matches() {
+    fn graph_build_neither_reads_nor_writes_local_matches() {
         let (conn, _) = setup();
         let catalog = default_catalog(&[]).unwrap();
-        build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM effect_local_matches", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            2
-        );
-        conn.execute_batch("CREATE TRIGGER reject_local_match_write BEFORE INSERT ON effect_local_matches BEGIN SELECT RAISE(ABORT,'local matches must be reused'); END;").unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_local_match_write BEFORE INSERT ON effect_local_matches BEGIN SELECT RAISE(ABORT,'local matches are not cached'); END;").unwrap();
         build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1)).unwrap();
     }
 
     #[cfg(feature = "native")]
     #[test]
-    fn parallel_local_matches_produce_identical_graphs() {
+    fn parallel_fragments_produce_identical_graphs() {
         let (conn, _) = setup();
         let catalog = default_catalog(&[]).unwrap();
         let options = request("TEST", "R").options;
 
         build_and_store_graph(&conn, &catalog, &options, Some(1)).unwrap();
-        let meta1 = storage::load_graph_meta(&conn).unwrap().unwrap();
+        let serial = storage::load_graph(&conn).unwrap().unwrap();
+        build_and_store_graph(&conn, &catalog, &options, Some(4)).unwrap();
+        let parallel = storage::load_graph(&conn).unwrap().unwrap();
 
-        conn.execute("DELETE FROM effect_local_matches", [])
-            .unwrap();
-        build_and_store_graph(&conn, &catalog, &options, Some(2)).unwrap();
-        let meta2 = storage::load_graph_meta(&conn).unwrap().unwrap();
-
-        assert_eq!(meta1.semantic_key, meta2.semantic_key);
+        assert_eq!(serial, parallel);
     }
 
     #[test]

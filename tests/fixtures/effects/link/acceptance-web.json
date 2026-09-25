@@ -1,0 +1,4621 @@
+{
+  "anchor_nodes": [
+    [
+      "TEST",
+      "caller-r",
+      "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847"
+    ],
+    [
+      "TEST",
+      "caller-s",
+      "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3"
+    ],
+    [
+      "TEST",
+      "clipped-context",
+      "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed"
+    ],
+    [
+      "TEST",
+      "consume",
+      "anchor:TEST#consume"
+    ],
+    [
+      "TEST",
+      "cycle-r",
+      "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453"
+    ],
+    [
+      "TEST",
+      "cycle-s",
+      "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545"
+    ],
+    [
+      "TEST",
+      "direct",
+      "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd"
+    ],
+    [
+      "TEST",
+      "fire",
+      "anchor:TEST#fire"
+    ],
+    [
+      "TEST",
+      "host-caller",
+      "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535"
+    ],
+    [
+      "TEST",
+      "host-implementation",
+      "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b"
+    ],
+    [
+      "TEST",
+      "host-operation",
+      "anchor:TEST#host-operation"
+    ],
+    [
+      "TEST",
+      "item-clipped-context",
+      "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a"
+    ],
+    [
+      "TEST",
+      "mention",
+      "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4"
+    ],
+    [
+      "TEST",
+      "nested-context",
+      "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8"
+    ],
+    [
+      "TEST",
+      "queue",
+      "anchor:TEST#queue"
+    ],
+    [
+      "TEST",
+      "same-segment",
+      "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f"
+    ],
+    [
+      "TEST",
+      "text-definition",
+      "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26"
+    ],
+    [
+      "TEST",
+      "text-only",
+      "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f"
+    ],
+    [
+      "TEST",
+      "text-other",
+      "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d"
+    ],
+    [
+      "TEST",
+      "unknown-timing",
+      "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602"
+    ],
+    [
+      "TEST",
+      "variable",
+      "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af"
+    ]
+  ],
+  "definitions": {
+    "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc": [
+      "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141"
+    ],
+    "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71": [
+      "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b"
+    ],
+    "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d": [
+      "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4"
+    ],
+    "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293": [
+      "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570"
+    ]
+  },
+  "edges": {
+    "rel_046345284155806eef74": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "preceding_exit",
+          "site_key": "site_fecb598934d8fb7e3287"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+      "id": "rel_046345284155806eef74",
+      "relation": "invoke",
+      "site_id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+      "site_key": "site_c9e35e9c4912ee5700cb",
+      "to": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715"
+    },
+    "rel_135612379d93c74502e7": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+      "id": "rel_135612379d93c74502e7",
+      "relation": "invoke",
+      "site_id": "src-2519091f1464798f5d2dd6c42540e7a4a085370f7c21a029bea63068d928fd87",
+      "site_key": "site_5a31a3321962e6f3b7eb",
+      "to": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453"
+    },
+    "rel_15a90eb3038de1fa9b13": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+      "id": "rel_15a90eb3038de1fa9b13",
+      "relation": "invoke",
+      "site_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+      "site_key": "site_985754bd4543e30cb137",
+      "to": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead"
+    },
+    "rel_18f7c5c03d3691dcef16": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+      "id": "rel_18f7c5c03d3691dcef16",
+      "relation": "invoke",
+      "site_id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+      "site_key": "site_4de72aeffebda3dd1e01",
+      "to": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc"
+    },
+    "rel_199d6f6a88dff27fea1a": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "binding",
+          "site_key": "site_93e8962f6b93b750901f"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "unknown",
+      "from": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+      "id": "rel_199d6f6a88dff27fea1a",
+      "relation": "candidate_invoke",
+      "site_id": "src-e14e55e0522023475ede31b402ba8a439ffbd22df42a3808afb5d7e5f97e10da",
+      "site_key": "site_623a8d13b9ad63d06e84",
+      "to": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141"
+    },
+    "rel_1b6600f2ea8c7197efae": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+      "id": "rel_1b6600f2ea8c7197efae",
+      "relation": "invoke",
+      "site_id": "src-11309bd24ffd8c553973bd58c656e7e1f81877b2ea4b557f8ea3752428d31e03",
+      "site_key": "site_1d8717e30e196693d0c9",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_1bc52d27fcd20d21aed3": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+      "id": "rel_1bc52d27fcd20d21aed3",
+      "relation": "invoke",
+      "site_id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+      "site_key": "site_eeaffccc80de8b532856",
+      "to": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d"
+    },
+    "rel_1e05db3e5c5b708f5e2b": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+      "id": "rel_1e05db3e5c5b708f5e2b",
+      "relation": "invoke",
+      "site_id": "src-e96818fa30c8771f71ce9539410aea6a46b4b9a3d43e58ca9030676bc0a9e597",
+      "site_key": "site_c56a9e72b1ec1f569db0",
+      "to": "anchor:TEST#host-operation"
+    },
+    "rel_21cf75fcce2ff4084215": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_f5a3e67485cbc0d7b97d"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+      "id": "rel_21cf75fcce2ff4084215",
+      "relation": "invoke",
+      "site_id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+      "site_key": "site_5166bce3b072630c9dda",
+      "to": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1"
+    },
+    "rel_25382adf4e39bc5c54ab": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+      "id": "rel_25382adf4e39bc5c54ab",
+      "relation": "invoke",
+      "site_id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+      "site_key": "site_e08a8edb2839a595984a",
+      "to": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71"
+    },
+    "rel_254fb7f453269bf03a31": {
+      "boundary": {
+        "effect": {
+          "kind": "scheduling.enqueue",
+          "params": {
+            "queue": "microtask"
+          }
+        },
+        "execution": "separate",
+        "operation_site_id": "src-6b95f0de0a5a9779c72b72fd842dfda955b417825d5d298db015c12819f6347b"
+      },
+      "context": [
+        {
+          "kind": "binding",
+          "site_key": "site_ab02d2b9a97ce559a36a"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "separate",
+      "from": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+      "id": "rel_254fb7f453269bf03a31",
+      "relation": "schedule_body",
+      "site_id": "src-6b95f0de0a5a9779c72b72fd842dfda955b417825d5d298db015c12819f6347b",
+      "site_key": "site_82e6904cf7aa63c6dac2",
+      "to": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4"
+    },
+    "rel_28783de408d4ba4b280a": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+      "id": "rel_28783de408d4ba4b280a",
+      "relation": "invoke",
+      "site_id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+      "site_key": "site_f27be75772c1a7f0b6a9",
+      "to": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da"
+    },
+    "rel_2c1ecddfbd125aa737ec": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+      "id": "rel_2c1ecddfbd125aa737ec",
+      "relation": "invoke",
+      "site_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+      "site_key": "site_8ed17afe667e8f316bb8",
+      "to": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef"
+    },
+    "rel_32cababdde49a39b7193": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+      "id": "rel_32cababdde49a39b7193",
+      "relation": "invoke",
+      "site_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+      "site_key": "site_c3c58d05cb4f2d4dc352",
+      "to": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3"
+    },
+    "rel_333008a35361298252a5": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+      "id": "rel_333008a35361298252a5",
+      "relation": "invoke",
+      "site_id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+      "site_key": "site_a3ca49e1ecc7aec0877c",
+      "to": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac"
+    },
+    "rel_33b92feb0259e7e4b08a": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_f5a3e67485cbc0d7b97d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_ce7af3b8878c082864f4"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+      "id": "rel_33b92feb0259e7e4b08a",
+      "relation": "invoke",
+      "site_id": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+      "site_key": "site_47041ae56d7a20cb7f40",
+      "to": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c"
+    },
+    "rel_37de0eb34196e8abfa1b": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+      "id": "rel_37de0eb34196e8abfa1b",
+      "relation": "invoke",
+      "site_id": "src-34c5616fde4482772f290689ffaa2e348cf37837b3b996ded86af4e0379e4c83",
+      "site_key": "site_dae5711893e1742e99c1",
+      "to": "anchor:TEST#queue"
+    },
+    "rel_3a22f855fd37fde658b0": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453",
+      "id": "rel_3a22f855fd37fde658b0",
+      "relation": "invoke",
+      "site_id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+      "site_key": "site_5395172b9acd6e27da7e",
+      "to": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1"
+    },
+    "rel_3e82d3326be4ca07f742": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535",
+      "id": "rel_3e82d3326be4ca07f742",
+      "relation": "invoke",
+      "site_id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+      "site_key": "site_f5bc3a6f639479da33c1",
+      "to": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e"
+    },
+    "rel_3f770c35a4f4b4e0e252": {
+      "boundary": {
+        "effect": {
+          "kind": "scheduling.enqueue",
+          "params": {
+            "queue": "microtask"
+          }
+        },
+        "execution": "separate",
+        "operation_site_id": "src-e2676edd12eaabd03381b32397cdfda503fc7d12f7d24f33347cc9e38e74d97d"
+      },
+      "context": [],
+      "context_truncated": false,
+      "execution": "separate",
+      "from": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+      "id": "rel_3f770c35a4f4b4e0e252",
+      "relation": "schedule_body",
+      "site_id": "src-e2676edd12eaabd03381b32397cdfda503fc7d12f7d24f33347cc9e38e74d97d",
+      "site_key": "site_31c8e665f8ee6fd660da",
+      "to": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57"
+    },
+    "rel_3ff9c2be2c9f8809110d": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+      "id": "rel_3ff9c2be2c9f8809110d",
+      "relation": "invoke",
+      "site_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+      "site_key": "site_0d16b429d3294b34d689",
+      "to": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53"
+    },
+    "rel_4714a9b6e5620b68c663": {
+      "boundary": {
+        "effect": {
+          "kind": "scheduling.enqueue",
+          "params": {
+            "queue": "microtask"
+          }
+        },
+        "execution": "separate",
+        "operation_site_id": "src-a25396f026f141fb3a4f1a22b24a5867bf93fa7efa106f2f2c332e016ed6d93c"
+      },
+      "context": [
+        {
+          "kind": "binding",
+          "site_key": "site_c52aac3b89e0234b9b06"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "separate",
+      "from": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+      "id": "rel_4714a9b6e5620b68c663",
+      "relation": "schedule_body",
+      "site_id": "src-a25396f026f141fb3a4f1a22b24a5867bf93fa7efa106f2f2c332e016ed6d93c",
+      "site_key": "site_26a725cdc57f6dedf414",
+      "to": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570"
+    },
+    "rel_484bef3d0e8bdee60bf0": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+      "id": "rel_484bef3d0e8bdee60bf0",
+      "relation": "invoke",
+      "site_id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+      "site_key": "site_cf0d004ca5af8507aec2",
+      "to": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321"
+    },
+    "rel_4872b74ddedd09849f02": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+      "id": "rel_4872b74ddedd09849f02",
+      "relation": "invoke",
+      "site_id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+      "site_key": "site_11e3bde91ff78e04efba",
+      "to": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031"
+    },
+    "rel_48a7a9805bed14a8ae55": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_f5a3e67485cbc0d7b97d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_ce7af3b8878c082864f4"
+        }
+      ],
+      "context_truncated": true,
+      "execution": "inline",
+      "from": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+      "id": "rel_48a7a9805bed14a8ae55",
+      "relation": "invoke",
+      "site_id": "src-1fb032c01eec7b2b8ed86b9b0165a1365e40c376ff1fc74b1f552e3ee9a62d78",
+      "site_key": "site_399172bf839a6001f50c",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_4a51f4b83918660ad5cc": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+      "id": "rel_4a51f4b83918660ad5cc",
+      "relation": "invoke",
+      "site_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+      "site_key": "site_895dffe6c443d0fa710c",
+      "to": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0"
+    },
+    "rel_4e51aa2223157ccbeae7": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+      "id": "rel_4e51aa2223157ccbeae7",
+      "relation": "invoke",
+      "site_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+      "site_key": "site_53f4887b27a423b97ec7",
+      "to": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc"
+    },
+    "rel_593a4b8712db08e1073d": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+      "id": "rel_593a4b8712db08e1073d",
+      "relation": "invoke",
+      "site_id": "src-b980070ec7cbe5a0ccad7ce6e5415922b7c783678ff35b65b99c45a35a09c31a",
+      "site_key": "site_b5760fbc29e5448a4060",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_5bbaa950e78191b92bf4": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+      "id": "rel_5bbaa950e78191b92bf4",
+      "relation": "invoke",
+      "site_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+      "site_key": "site_25711ca77cdbd1903969",
+      "to": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872"
+    },
+    "rel_5e61b6ca61bb25d6fa87": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_7ddbcb51bee3e86cd5e8"
+        }
+      ],
+      "context_truncated": true,
+      "execution": "inline",
+      "from": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+      "id": "rel_5e61b6ca61bb25d6fa87",
+      "relation": "invoke",
+      "site_id": "src-42f256e87241161d034283316eb6f3e1544a9149129ee2d62cb9d096bfea4534",
+      "site_key": "site_f4ef1fc4c44767242573",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_5f1c97b78a1492b89443": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+      "id": "rel_5f1c97b78a1492b89443",
+      "relation": "invoke",
+      "site_id": "src-106e20c0b50c6b54439c5287cd64d19c547ad13fde856bf47f228cc92805e508",
+      "site_key": "site_15db3a0552b0a3b5e075",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_6a23893b51a303a73445": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+      "id": "rel_6a23893b51a303a73445",
+      "relation": "invoke",
+      "site_id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+      "site_key": "site_5afaa511ddca79695626",
+      "to": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6"
+    },
+    "rel_6b4399292e578caf099d": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d",
+      "id": "rel_6b4399292e578caf099d",
+      "relation": "invoke",
+      "site_id": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a",
+      "site_key": "site_da85fdb2a9d3b1b7d94d",
+      "to": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a"
+    },
+    "rel_6d61a2a8f5057464b839": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+      "id": "rel_6d61a2a8f5057464b839",
+      "relation": "invoke",
+      "site_id": "src-084ab1db5396528983796be0d64b92754cb89947cfc42e09f51b2b9f0847cb16",
+      "site_key": "site_0ca78b15d83947708309",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_6e0c1e5b4cc3c20b3295": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+      "id": "rel_6e0c1e5b4cc3c20b3295",
+      "relation": "mention",
+      "site_id": "src-ba64a330fd02b919a7b7efee4cc75a522116cc2b8f7393d93614500e88583ddc",
+      "site_key": "site_1097236084b52a303d51",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_742a1bfce10c890e882e": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+      "id": "rel_742a1bfce10c890e882e",
+      "relation": "invoke",
+      "site_id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+      "site_key": "site_571aa3571accf78eb928",
+      "to": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749"
+    },
+    "rel_75bef6a33c7465578a43": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_f5a3e67485cbc0d7b97d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_ce7af3b8878c082864f4"
+        }
+      ],
+      "context_truncated": true,
+      "execution": "inline",
+      "from": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+      "id": "rel_75bef6a33c7465578a43",
+      "relation": "invoke",
+      "site_id": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+      "site_key": "site_d02f7b419f2c23817628",
+      "to": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f"
+    },
+    "rel_76d6c9627168b1158e56": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+      "id": "rel_76d6c9627168b1158e56",
+      "relation": "invoke",
+      "site_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+      "site_key": "site_1adf21df7da18407fb69",
+      "to": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464"
+    },
+    "rel_79fb16df918d616b64c3": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_a51a6d60e94918e56718"
+        },
+        {
+          "kind": "preceding_exit",
+          "site_key": "site_fecb598934d8fb7e3287"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+      "id": "rel_79fb16df918d616b64c3",
+      "relation": "invoke",
+      "site_id": "src-8bb2f077a61b0d56575d6683e83b20946529ded5a25cb3aa19d8a59aef24a500",
+      "site_key": "site_c505a2b41577a5861b1c",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_80279c02880c60811b31": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_a51a6d60e94918e56718"
+        },
+        {
+          "kind": "preceding_exit",
+          "site_key": "site_fecb598934d8fb7e3287"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+      "id": "rel_80279c02880c60811b31",
+      "relation": "invoke",
+      "site_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+      "site_key": "site_f0072272bce99cda9feb",
+      "to": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe"
+    },
+    "rel_80572f404e1edad952cc": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_f5a3e67485cbc0d7b97d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_ce7af3b8878c082864f4"
+        }
+      ],
+      "context_truncated": true,
+      "execution": "inline",
+      "from": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+      "id": "rel_80572f404e1edad952cc",
+      "relation": "invoke",
+      "site_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+      "site_key": "site_80d1f261a17a096a8f8a",
+      "to": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3"
+    },
+    "rel_909cc57879d0dd91f179": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+      "id": "rel_909cc57879d0dd91f179",
+      "relation": "mention",
+      "site_id": "src-e14e55e0522023475ede31b402ba8a439ffbd22df42a3808afb5d7e5f97e10da",
+      "site_key": "site_623a8d13b9ad63d06e84",
+      "to": "anchor:TEST#consume"
+    },
+    "rel_9258445ad7253d578f7a": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+      "id": "rel_9258445ad7253d578f7a",
+      "relation": "invoke",
+      "site_id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+      "site_key": "site_6d4805cbfb6319adcb86",
+      "to": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c"
+    },
+    "rel_9536297e3b223cfa5e6a": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+      "id": "rel_9536297e3b223cfa5e6a",
+      "relation": "invoke",
+      "site_id": "src-4aa2391c56072ed5dad22d420b2d6f343405aafd73db637ea53a79f53a715fa1",
+      "site_key": "site_652bc148493b9a3374dc",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_99e19dcef45e82b2f940": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+      "id": "rel_99e19dcef45e82b2f940",
+      "relation": "invoke",
+      "site_id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+      "site_key": "site_8cb08d97d55adab127eb",
+      "to": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80"
+    },
+    "rel_9ddc50c1ac14e60dcc70": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+      "id": "rel_9ddc50c1ac14e60dcc70",
+      "relation": "invoke",
+      "site_id": "src-98f05d7194f2e7dab3a79ed0dbc07a73741f83467c3cd807baddb933a24fae10",
+      "site_key": "site_1c4aeb77dc49d100305e",
+      "to": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545"
+    },
+    "rel_a4ef6aec17669bfaa102": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+      "id": "rel_a4ef6aec17669bfaa102",
+      "relation": "invoke",
+      "site_id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+      "site_key": "site_50595f7233f6b7c1b357",
+      "to": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6"
+    },
+    "rel_ad694db3e1f7e086c8f6": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+      "id": "rel_ad694db3e1f7e086c8f6",
+      "relation": "invoke",
+      "site_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+      "site_key": "site_df2a717773b640f30ac4",
+      "to": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62"
+    },
+    "rel_b55fa60c13caa6ee6f5a": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+      "id": "rel_b55fa60c13caa6ee6f5a",
+      "relation": "invoke",
+      "site_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+      "site_key": "site_3baae8ccf6d04a193784",
+      "to": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb"
+    },
+    "rel_b8852378cc6b39f605c1": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+      "id": "rel_b8852378cc6b39f605c1",
+      "relation": "invoke",
+      "site_id": "src-6b95f0de0a5a9779c72b72fd842dfda955b417825d5d298db015c12819f6347b",
+      "site_key": "site_82e6904cf7aa63c6dac2",
+      "to": "anchor:TEST#queue"
+    },
+    "rel_b9a5eea27dfd09700198": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+      "id": "rel_b9a5eea27dfd09700198",
+      "relation": "invoke",
+      "site_id": "src-e2676edd12eaabd03381b32397cdfda503fc7d12f7d24f33347cc9e38e74d97d",
+      "site_key": "site_31c8e665f8ee6fd660da",
+      "to": "anchor:TEST#queue"
+    },
+    "rel_bd16682deed4367146ec": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+      "id": "rel_bd16682deed4367146ec",
+      "relation": "invoke",
+      "site_id": "src-164ffe4bbcfc06dea695839bc6d987bcf468e42ee9f4569faae1037eb35b9c4f",
+      "site_key": "site_7de2c5946fc69e74223e",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_c17da48e8adb9dd264b4": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+      "id": "rel_c17da48e8adb9dd264b4",
+      "relation": "invoke",
+      "site_id": "src-a25396f026f141fb3a4f1a22b24a5867bf93fa7efa106f2f2c332e016ed6d93c",
+      "site_key": "site_26a725cdc57f6dedf414",
+      "to": "anchor:TEST#queue"
+    },
+    "rel_c65e1eee532e7d279239": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "anchor:TEST#host-operation",
+      "id": "rel_c65e1eee532e7d279239",
+      "relation": "implements",
+      "site_id": "anchor:TEST#host-operation",
+      "site_key": "site_0f4fe5ce5d032c0cc1d9",
+      "to": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b"
+    },
+    "rel_cc9271f855a392d7b045": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4",
+      "id": "rel_cc9271f855a392d7b045",
+      "relation": "invoke",
+      "site_id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+      "site_key": "site_a0c974e2ca35f54d4f43",
+      "to": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393"
+    },
+    "rel_d28395ab2cc1a73f57dd": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+      "id": "rel_d28395ab2cc1a73f57dd",
+      "relation": "invoke",
+      "site_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+      "site_key": "site_84d720d0ac80d8836020",
+      "to": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0"
+    },
+    "rel_d82c6b1e11192435b701": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+      "id": "rel_d82c6b1e11192435b701",
+      "relation": "invoke",
+      "site_id": "src-31c5fdbc4e3453c304813d6058d27793acba2968da4ce2cc963e31177fac6c6d",
+      "site_key": "site_a76ab9c29367c0cbc707",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_da537fbe05427cfd44b2": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_7ddbcb51bee3e86cd5e8"
+        }
+      ],
+      "context_truncated": true,
+      "execution": "inline",
+      "from": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+      "id": "rel_da537fbe05427cfd44b2",
+      "relation": "invoke",
+      "site_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+      "site_key": "site_953369ed75bc35ac12d4",
+      "to": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475"
+    },
+    "rel_db36f21e46965afde46b": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+      "id": "rel_db36f21e46965afde46b",
+      "relation": "invoke",
+      "site_id": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34",
+      "site_key": "site_f40ff79a54833105289e",
+      "to": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34"
+    },
+    "rel_e09611a38643d79507f1": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+      "id": "rel_e09611a38643d79507f1",
+      "relation": "invoke",
+      "site_id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+      "site_key": "site_03e1a2fb9d8028f98183",
+      "to": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481"
+    },
+    "rel_e488a042668bc8cb5407": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+      "id": "rel_e488a042668bc8cb5407",
+      "relation": "invoke",
+      "site_id": "src-ce4e675d8eef947c77f3bbaa1bf694b78da89c6fa014aa93aff64f808ee589f2",
+      "site_key": "site_f9307a5bd10f1718d6b1",
+      "to": "anchor:TEST#fire"
+    },
+    "rel_eb400b351c03763acb80": {
+      "boundary": null,
+      "context": [
+        {
+          "kind": "enclosing",
+          "site_key": "site_48049e5d73c25044c8b3"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_1e98fda221bdea6ddd7c"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_e949207150154b2a052d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_edb270fc3ac4044d63c7"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_37247c67a37810948f7d"
+        },
+        {
+          "kind": "enclosing",
+          "site_key": "site_2231b1d7da4020da1a15"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+      "id": "rel_eb400b351c03763acb80",
+      "relation": "invoke",
+      "site_id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+      "site_key": "site_4ea0aacd1d2be7d9d807",
+      "to": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7"
+    },
+    "rel_ee655d65b0c0fb263d40": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+      "id": "rel_ee655d65b0c0fb263d40",
+      "relation": "invoke",
+      "site_id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+      "site_key": "site_0b8fd71887ea86d0a150",
+      "to": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293"
+    },
+    "rel_f3cd232780b628339833": {
+      "boundary": {
+        "effect": {
+          "kind": "scheduling.enqueue",
+          "params": {
+            "queue": "microtask"
+          }
+        },
+        "execution": "separate",
+        "operation_site_id": "src-b6f3979c89d6fd84eaea57f174ce99722e2c6bbbf4f534d43cd223f5e0aa973f"
+      },
+      "context": [
+        {
+          "kind": "binding",
+          "site_key": "site_ed9b1b8caf30e73bfedb"
+        }
+      ],
+      "context_truncated": false,
+      "execution": "separate",
+      "from": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+      "id": "rel_f3cd232780b628339833",
+      "relation": "schedule_body",
+      "site_id": "src-b6f3979c89d6fd84eaea57f174ce99722e2c6bbbf4f534d43cd223f5e0aa973f",
+      "site_key": "site_a1359521da31d65b6258",
+      "to": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b"
+    },
+    "rel_f579af4249df680a7c88": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+      "id": "rel_f579af4249df680a7c88",
+      "relation": "invoke",
+      "site_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+      "site_key": "site_bcd53c1e177fb899e815",
+      "to": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9"
+    },
+    "rel_f70c78bb15f7e6701f03": {
+      "boundary": null,
+      "context": [],
+      "context_truncated": false,
+      "execution": "inline",
+      "from": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+      "id": "rel_f70c78bb15f7e6701f03",
+      "relation": "invoke",
+      "site_id": "src-b6f3979c89d6fd84eaea57f174ce99722e2c6bbbf4f534d43cd223f5e0aa973f",
+      "site_key": "site_a1359521da31d65b6258",
+      "to": "anchor:TEST#queue"
+    }
+  },
+  "effect_categories": {
+    "event.fire": "events",
+    "scheduling.enqueue": "async",
+    "script.opportunity": "script"
+  },
+  "issues": {
+    "anchor:TEST#consume": [
+      [
+        "\"unsupported_structure\"",
+        "indexed anchor has no reusable algorithm body or declared terminal semantics",
+        null
+      ]
+    ],
+    "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead": [
+      [
+        "\"unresolved_argument\"",
+        "effect argument could not be resolved from typed source tokens",
+        "site_9f4e5d474e3311058e17"
+      ]
+    ],
+    "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da": [
+      [
+        "\"unresolved_body_binding\"",
+        "step-body argument has no continuation timing contract",
+        "site_623a8d13b9ad63d06e84"
+      ]
+    ]
+  },
+  "nodes": {
+    "anchor:TEST#consume": {
+      "definition_only": false,
+      "id": "anchor:TEST#consume",
+      "is_body": true,
+      "subject": {
+        "anchor": "consume",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "anchor:TEST#fire": {
+      "definition_only": false,
+      "id": "anchor:TEST#fire",
+      "is_body": true,
+      "subject": {
+        "anchor": "fire",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "anchor:TEST#host-operation": {
+      "definition_only": false,
+      "id": "anchor:TEST#host-operation",
+      "is_body": true,
+      "subject": {
+        "anchor": "host-operation",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "anchor:TEST#queue": {
+      "definition_only": false,
+      "id": "anchor:TEST#queue",
+      "is_body": true,
+      "subject": {
+        "anchor": "queue",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead": {
+      "definition_only": false,
+      "id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+      "is_body": false,
+      "subject": {
+        "anchor": "variable",
+        "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1": {
+      "definition_only": false,
+      "id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4": {
+      "definition_only": false,
+      "id": "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4",
+      "is_body": true,
+      "subject": {
+        "anchor": "mention",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc": {
+      "definition_only": false,
+      "id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+      "is_body": false,
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0": {
+      "definition_only": false,
+      "id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-only",
+        "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26": {
+      "definition_only": false,
+      "id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+      "is_body": true,
+      "subject": {
+        "anchor": "text-definition",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f": {
+      "definition_only": false,
+      "id": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc": {
+      "definition_only": false,
+      "id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+      "is_body": false,
+      "subject": {
+        "anchor": "host-implementation",
+        "body_id": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe": {
+      "definition_only": false,
+      "id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+      "is_body": false,
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+        "step_path": [
+          2,
+          1
+        ]
+      }
+    },
+    "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3": {
+      "definition_only": false,
+      "id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd": {
+      "definition_only": false,
+      "id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+      "is_body": true,
+      "subject": {
+        "anchor": "direct",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a": {
+      "definition_only": false,
+      "id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+      "is_body": true,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3": {
+      "definition_only": false,
+      "id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+      "is_body": true,
+      "subject": {
+        "anchor": "caller-s",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715": {
+      "definition_only": false,
+      "id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+      "is_body": false,
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031": {
+      "definition_only": false,
+      "id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+        "step_path": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321": {
+      "definition_only": false,
+      "id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af": {
+      "definition_only": false,
+      "id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+      "is_body": true,
+      "subject": {
+        "anchor": "variable",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535": {
+      "definition_only": false,
+      "id": "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535",
+      "is_body": true,
+      "subject": {
+        "anchor": "host-caller",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8": {
+      "definition_only": false,
+      "id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+      "is_body": true,
+      "subject": {
+        "anchor": "nested-context",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1": {
+      "definition_only": false,
+      "id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+      "is_body": false,
+      "subject": {
+        "anchor": "cycle-r",
+        "body_id": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393": {
+      "definition_only": false,
+      "id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+      "is_body": false,
+      "subject": {
+        "anchor": "mention",
+        "body_id": "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464": {
+      "definition_only": false,
+      "id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+      "is_body": false,
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f": {
+      "definition_only": false,
+      "id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+      "is_body": true,
+      "subject": {
+        "anchor": "text-only",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da": {
+      "definition_only": false,
+      "id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+      "is_body": false,
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b": {
+      "definition_only": false,
+      "id": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+      "is_body": true,
+      "subject": {
+        "anchor": "host-implementation",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0": {
+      "definition_only": false,
+      "id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+      "is_body": false,
+      "subject": {
+        "anchor": "direct",
+        "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481": {
+      "definition_only": false,
+      "id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+        "step_path": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57": {
+      "definition_only": true,
+      "id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+      "is_body": true,
+      "subject": {
+        "anchor": "same-segment",
+        "body_id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570": {
+      "definition_only": true,
+      "id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+      "is_body": true,
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53": {
+      "definition_only": false,
+      "id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6": {
+      "definition_only": false,
+      "id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545": {
+      "definition_only": false,
+      "id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+      "is_body": true,
+      "subject": {
+        "anchor": "cycle-s",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749": {
+      "definition_only": false,
+      "id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872": {
+      "definition_only": false,
+      "id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80": {
+      "definition_only": false,
+      "id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+      "is_body": false,
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e": {
+      "definition_only": false,
+      "id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+      "is_body": false,
+      "subject": {
+        "anchor": "host-caller",
+        "body_id": "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34": {
+      "definition_only": false,
+      "id": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-only",
+        "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f": {
+      "definition_only": false,
+      "id": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+      "is_body": true,
+      "subject": {
+        "anchor": "same-segment",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9": {
+      "definition_only": false,
+      "id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141": {
+      "definition_only": true,
+      "id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+      "is_body": true,
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6": {
+      "definition_only": false,
+      "id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+      "is_body": false,
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb": {
+      "definition_only": false,
+      "id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+      "is_body": false,
+      "subject": {
+        "anchor": "same-segment",
+        "body_id": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac": {
+      "definition_only": false,
+      "id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a": {
+      "definition_only": false,
+      "id": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-other",
+        "body_id": "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4": {
+      "definition_only": true,
+      "id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+      "is_body": true,
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b": {
+      "definition_only": true,
+      "id": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+      "is_body": true,
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d": {
+      "definition_only": false,
+      "id": "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d",
+      "is_body": true,
+      "subject": {
+        "anchor": "text-other",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71": {
+      "definition_only": false,
+      "id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602": {
+      "definition_only": false,
+      "id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+      "is_body": true,
+      "subject": {
+        "anchor": "unknown-timing",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475": {
+      "definition_only": false,
+      "id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+      "is_body": false,
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d": {
+      "definition_only": false,
+      "id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453": {
+      "definition_only": false,
+      "id": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453",
+      "is_body": true,
+      "subject": {
+        "anchor": "cycle-r",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7": {
+      "definition_only": false,
+      "id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62": {
+      "definition_only": false,
+      "id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c": {
+      "definition_only": false,
+      "id": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+      "is_body": false,
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293": {
+      "definition_only": false,
+      "id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef": {
+      "definition_only": false,
+      "id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+      "is_body": false,
+      "subject": {
+        "anchor": "cycle-s",
+        "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+        "step_path": [
+          1
+        ]
+      }
+    },
+    "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847": {
+      "definition_only": false,
+      "id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+      "is_body": true,
+      "subject": {
+        "anchor": "caller-r",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    },
+    "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c": {
+      "definition_only": false,
+      "id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+      "is_body": false,
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+        "step_path": [
+          1,
+          1
+        ]
+      }
+    },
+    "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3": {
+      "definition_only": false,
+      "id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+      "is_body": false,
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+        "step_path": [
+          2
+        ]
+      }
+    },
+    "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed": {
+      "definition_only": false,
+      "id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+      "is_body": true,
+      "subject": {
+        "anchor": "clipped-context",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      }
+    }
+  },
+  "occurrences": {
+    "occ_00ef27d62e2e967c41ff": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_0d9b4aca9dacfffd6d48",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "src-b6f3979c89d6fd84eaea57f174ce99722e2c6bbbf4f534d43cd223f5e0aa973f",
+            "segment_id": "src-64228fee8d11381d486375ab56eda4498ee42b935f71ffa2ec67ad680d375d15",
+            "span": {
+              "end": 17,
+              "start": 0
+            },
+            "step_text": "Queue a microtask, given *A*.",
+            "subject": {
+              "anchor": "text-definition",
+              "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+              "step_path": [
+                2
+              ]
+            },
+            "url": "https://example.test/spec#text-definition"
+          }
+        }
+      ],
+      "id": "occ_00ef27d62e2e967c41ff",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62"
+    },
+    "occ_05adbfad8cb8c3e0fd35": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_ba6ad805e9ec37d731b8",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-8bb2f077a61b0d56575d6683e83b20946529ded5a25cb3aa19d8a59aef24a500",
+            "segment_id": "src-8704e8e8920c28fdcbe617daf71e61d9606b2675de8176c1edc00ef1115ad660",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "nested-context",
+              "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+              "step_path": [
+                2,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#nested-context"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_ba4c7992aeb5f81c96ef",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-8bb2f077a61b0d56575d6683e83b20946529ded5a25cb3aa19d8a59aef24a500",
+            "segment_id": "src-8704e8e8920c28fdcbe617daf71e61d9606b2675de8176c1edc00ef1115ad660",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "nested-context",
+              "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+              "step_path": [
+                2,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#nested-context"
+          }
+        }
+      ],
+      "id": "occ_05adbfad8cb8c3e0fd35",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe"
+    },
+    "occ_0eeb16240dc2afefe468": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_f6a8c1e5a46a842523c3",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "anchor:TEST#queue",
+            "subject": {
+              "anchor": "queue",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST"
+            },
+            "url": "https://example.test/spec#queue"
+          }
+        }
+      ],
+      "id": "occ_0eeb16240dc2afefe468",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "anchor:TEST#queue"
+    },
+    "occ_12e7b56305ef933703ef": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_2a0b73814f6412b60312",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-31c5fdbc4e3453c304813d6058d27793acba2968da4ce2cc963e31177fac6c6d",
+            "segment_id": "src-58b6719d6bde079ea65e5b4df0372b63c6fd427f0af80a31bb7acef8befd2937",
+            "span": {
+              "end": 43,
+              "start": 18
+            },
+            "step_text": "Run cycle R, then fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "cycle-s",
+              "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#cycle-s"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_4f4e6a650953763a9d05",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-31c5fdbc4e3453c304813d6058d27793acba2968da4ce2cc963e31177fac6c6d",
+            "segment_id": "src-58b6719d6bde079ea65e5b4df0372b63c6fd427f0af80a31bb7acef8befd2937",
+            "span": {
+              "end": 43,
+              "start": 18
+            },
+            "step_text": "Run cycle R, then fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "cycle-s",
+              "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#cycle-s"
+          }
+        }
+      ],
+      "id": "occ_12e7b56305ef933703ef",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef"
+    },
+    "occ_18b5559181ee6bae5ec2": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_50809facda2f24b820e0",
+          "rule_id": "engine-test/text-definition-checkpoint",
+          "site": {
+            "id": "match_8097a7cebf64f7304d67",
+            "segment_id": "src-7a171c7eefbd045e2880e3c7455af37cc86ada6d18371f64fc6d6275a0b925d0",
+            "span": {
+              "end": 30,
+              "start": 0
+            },
+            "step_text": "Perform a text-only checkpoint.",
+            "subject": {
+              "anchor": "text-definition",
+              "body_id": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#text-definition"
+          }
+        }
+      ],
+      "id": "occ_18b5559181ee6bae5ec2",
+      "issue_codes": [],
+      "kind": "script.opportunity",
+      "params": {},
+      "subject_id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c"
+    },
+    "occ_3fa72013d102eb36b2ef": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_16266a2c8aad907b1f77",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "anchor:TEST#fire",
+            "subject": {
+              "anchor": "fire",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST"
+            },
+            "url": "https://example.test/spec#fire"
+          }
+        }
+      ],
+      "id": "occ_3fa72013d102eb36b2ef",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": null
+      },
+      "subject_id": "anchor:TEST#fire"
+    },
+    "occ_4ddcb007578b2ff9a22d": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_8b5dac32a424cfcbd4e0",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-084ab1db5396528983796be0d64b92754cb89947cfc42e09f51b2b9f0847cb16",
+            "segment_id": "src-fa71de98dbbfcef5b5dc8a22a24ebeac827f1deae3fa38543d2b7cdc44b15e66",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "unknown-timing",
+              "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#unknown-timing"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_f3be066e028c098d8e99",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-084ab1db5396528983796be0d64b92754cb89947cfc42e09f51b2b9f0847cb16",
+            "segment_id": "src-fa71de98dbbfcef5b5dc8a22a24ebeac827f1deae3fa38543d2b7cdc44b15e66",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "unknown-timing",
+              "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#unknown-timing"
+          }
+        }
+      ],
+      "id": "occ_4ddcb007578b2ff9a22d",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464"
+    },
+    "occ_4f05f0af149aafb08633": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "*name*"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": null
+          },
+          "id": "ev_61b3b1522e1f66ccfe4c",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-4aa2391c56072ed5dad22d420b2d6f343405aafd73db637ea53a79f53a715fa1",
+            "segment_id": "src-27250904255a1007ac5c3e0dcfc3bd0e05cc87061f7d3cba9439114ddc9c5351",
+            "span": {
+              "end": 13,
+              "start": 0
+            },
+            "step_text": "Fire an event named *name*.",
+            "subject": {
+              "anchor": "variable",
+              "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#variable"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "*name*"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": null
+          },
+          "id": "ev_ba379fc16a5058654119",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-4aa2391c56072ed5dad22d420b2d6f343405aafd73db637ea53a79f53a715fa1",
+            "segment_id": "src-27250904255a1007ac5c3e0dcfc3bd0e05cc87061f7d3cba9439114ddc9c5351",
+            "span": {
+              "end": 13,
+              "start": 0
+            },
+            "step_text": "Fire an event named *name*.",
+            "subject": {
+              "anchor": "variable",
+              "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#variable"
+          }
+        }
+      ],
+      "id": "occ_4f05f0af149aafb08633",
+      "issue_codes": [
+        "unresolved_argument"
+      ],
+      "kind": "event.fire",
+      "params": {
+        "name": null
+      },
+      "subject_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead"
+    },
+    "occ_4fceaab22b60ff370e4f": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_18594d780e4a2656e33f",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-42f256e87241161d034283316eb6f3e1544a9149129ee2d62cb9d096bfea4534",
+            "segment_id": "src-25afcccb9c011f3d31f583fd981623efc7750ef5c8aeafec41d38ecedd361cbe",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "clipped-context",
+              "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#clipped-context"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_dbb85cc01c6dc0c356b5",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-42f256e87241161d034283316eb6f3e1544a9149129ee2d62cb9d096bfea4534",
+            "segment_id": "src-25afcccb9c011f3d31f583fd981623efc7750ef5c8aeafec41d38ecedd361cbe",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "clipped-context",
+              "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#clipped-context"
+          }
+        }
+      ],
+      "id": "occ_4fceaab22b60ff370e4f",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475"
+    },
+    "occ_621933a7cf6899ee032b": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_171523a95a7e3af062c0",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "src-e2676edd12eaabd03381b32397cdfda503fc7d12f7d24f33347cc9e38e74d97d",
+            "segment_id": "src-95be5e5f8e134951acc4158676741b133200715cb24663fc47af6e8ad5be445b-prefix",
+            "span": {
+              "end": 17,
+              "start": 0
+            },
+            "step_text": "Queue a microtask",
+            "subject": {
+              "anchor": "same-segment",
+              "body_id": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#same-segment"
+          }
+        }
+      ],
+      "id": "occ_621933a7cf6899ee032b",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb"
+    },
+    "occ_6e6fcd95c518bcc87f05": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_a2c38337240a2d678ce9",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-106e20c0b50c6b54439c5287cd64d19c547ad13fde856bf47f228cc92805e508",
+            "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "direct",
+              "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#direct"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_23db73c82dbdf28f7650",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-106e20c0b50c6b54439c5287cd64d19c547ad13fde856bf47f228cc92805e508",
+            "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "direct",
+              "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#direct"
+          }
+        }
+      ],
+      "id": "occ_6e6fcd95c518bcc87f05",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0"
+    },
+    "occ_7ee662f18f1111916fd4": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"b\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "b"
+          },
+          "id": "ev_50eeae7a661be6b96c4e",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-11309bd24ffd8c553973bd58c656e7e1f81877b2ea4b557f8ea3752428d31e03",
+            "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+            "span": {
+              "end": 57,
+              "start": 32
+            },
+            "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "direct",
+              "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#direct"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"b\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "b"
+          },
+          "id": "ev_b3fde10810a2144afd94",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-11309bd24ffd8c553973bd58c656e7e1f81877b2ea4b557f8ea3752428d31e03",
+            "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+            "span": {
+              "end": 57,
+              "start": 32
+            },
+            "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "direct",
+              "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#direct"
+          }
+        }
+      ],
+      "id": "occ_7ee662f18f1111916fd4",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "b"
+      },
+      "subject_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0"
+    },
+    "occ_98150b9127595677ea65": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_582bde74dfdbeb4d2754",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-ce4e675d8eef947c77f3bbaa1bf694b78da89c6fa014aa93aff64f808ee589f2",
+            "segment_id": "src-972854e64923ed8ce68bd57a31dd168c75bdb559a225a0edad2cc964ac0fd30a",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "caller-r",
+              "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#caller-r"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_770718c048ff067a37ae",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-ce4e675d8eef947c77f3bbaa1bf694b78da89c6fa014aa93aff64f808ee589f2",
+            "segment_id": "src-972854e64923ed8ce68bd57a31dd168c75bdb559a225a0edad2cc964ac0fd30a",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "caller-r",
+              "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#caller-r"
+          }
+        }
+      ],
+      "id": "occ_98150b9127595677ea65",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53"
+    },
+    "occ_9b0f1212fa974fbd9d4e": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_45b9f4dd2540f2afd483",
+          "rule_id": "engine-test/text-script-opportunity",
+          "site": {
+            "id": "match_310f4b2d17634a22c1a8",
+            "segment_id": "src-ed691143f2b246c6886e416c1f73e0566c9f258336eb23014ebc71c91fc4d6d9",
+            "span": {
+              "end": 29,
+              "start": 0
+            },
+            "step_text": "At this point scripts may run. At this point scripts may run.",
+            "subject": {
+              "anchor": "text-only",
+              "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#text-only"
+          }
+        }
+      ],
+      "id": "occ_9b0f1212fa974fbd9d4e",
+      "issue_codes": [],
+      "kind": "script.opportunity",
+      "params": {},
+      "subject_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0"
+    },
+    "occ_aebe0541f2b915a85074": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"b\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "b"
+          },
+          "id": "ev_cf489acb37ca649bf479",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-164ffe4bbcfc06dea695839bc6d987bcf468e42ee9f4569faae1037eb35b9c4f",
+            "segment_id": "src-c609e5d8299665db50fb3509fe667d0e6e0c797a5e1a60da4650ec03cd5547f6",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "caller-s",
+              "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#caller-s"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"b\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "b"
+          },
+          "id": "ev_ebbb5eabd053d77036c5",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-164ffe4bbcfc06dea695839bc6d987bcf468e42ee9f4569faae1037eb35b9c4f",
+            "segment_id": "src-c609e5d8299665db50fb3509fe667d0e6e0c797a5e1a60da4650ec03cd5547f6",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"b\"`.",
+            "subject": {
+              "anchor": "caller-s",
+              "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+              "step_path": [
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#caller-s"
+          }
+        }
+      ],
+      "id": "occ_aebe0541f2b915a85074",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "b"
+      },
+      "subject_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9"
+    },
+    "occ_c242fb3717a604663661": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_5dccd9a98afcb4ab28bb",
+          "rule_id": "engine-test/text-script-opportunity",
+          "site": {
+            "id": "match_479349c19189ec60c26e",
+            "segment_id": "src-ed691143f2b246c6886e416c1f73e0566c9f258336eb23014ebc71c91fc4d6d9",
+            "span": {
+              "end": 60,
+              "start": 31
+            },
+            "step_text": "At this point scripts may run. At this point scripts may run.",
+            "subject": {
+              "anchor": "text-only",
+              "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#text-only"
+          }
+        }
+      ],
+      "id": "occ_c242fb3717a604663661",
+      "issue_codes": [],
+      "kind": "script.opportunity",
+      "params": {},
+      "subject_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0"
+    },
+    "occ_d95d7012de50ca694bf7": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_2496f73424f0996e1ed2",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "src-6b95f0de0a5a9779c72b72fd842dfda955b417825d5d298db015c12819f6347b",
+            "segment_id": "src-c268b71d6fc6869c38561da982dd8877a1db580531583261895df6c8a13df798",
+            "span": {
+              "end": 17,
+              "start": 0
+            },
+            "step_text": "Queue a microtask, given *B*.",
+            "subject": {
+              "anchor": "caller-s",
+              "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+              "step_path": [
+                2
+              ]
+            },
+            "url": "https://example.test/spec#caller-s"
+          }
+        }
+      ],
+      "id": "occ_d95d7012de50ca694bf7",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3"
+    },
+    "occ_db48cb7388dde25ce4c7": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_3b2944fab24be5a545da",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-b980070ec7cbe5a0ccad7ce6e5415922b7c783678ff35b65b99c45a35a09c31a",
+            "segment_id": "src-95be5e5f8e134951acc4158676741b133200715cb24663fc47af6e8ad5be445b-body",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "same-segment",
+              "body_id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#same-segment"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_3eee1922777f5852c344",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-b980070ec7cbe5a0ccad7ce6e5415922b7c783678ff35b65b99c45a35a09c31a",
+            "segment_id": "src-95be5e5f8e134951acc4158676741b133200715cb24663fc47af6e8ad5be445b-body",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "same-segment",
+              "body_id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#same-segment"
+          }
+        }
+      ],
+      "id": "occ_db48cb7388dde25ce4c7",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57"
+    },
+    "occ_e3d6767c59564ee80f17": {
+      "evidence": [
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_999c42e54a639edcc62f",
+          "rule_id": "engine-test/fire-generic",
+          "site": {
+            "id": "src-1fb032c01eec7b2b8ed86b9b0165a1365e40c376ff1fc74b1f552e3ee9a62d78",
+            "segment_id": "src-8465ef3ea65e6ace6006fd516e698e959bc135d193ec23b682dff34169e6f773",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "item-clipped-context",
+              "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+              "step_path": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#item-clipped-context"
+          }
+        },
+        {
+          "argument_expressions": {
+            "name": "`\"a\"`"
+          },
+          "basis": "matched",
+          "captures": {
+            "name": "a"
+          },
+          "id": "ev_dca7d603e412d9a323aa",
+          "rule_id": "engine-test/fire-name",
+          "site": {
+            "id": "src-1fb032c01eec7b2b8ed86b9b0165a1365e40c376ff1fc74b1f552e3ee9a62d78",
+            "segment_id": "src-8465ef3ea65e6ace6006fd516e698e959bc135d193ec23b682dff34169e6f773",
+            "span": {
+              "end": 25,
+              "start": 0
+            },
+            "step_text": "Fire an event named `\"a\"`.",
+            "subject": {
+              "anchor": "item-clipped-context",
+              "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+              "step_path": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+              ]
+            },
+            "url": "https://example.test/spec#item-clipped-context"
+          }
+        }
+      ],
+      "id": "occ_e3d6767c59564ee80f17",
+      "issue_codes": [],
+      "kind": "event.fire",
+      "params": {
+        "name": "a"
+      },
+      "subject_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3"
+    },
+    "occ_e456d499eddf05b16d45": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_6d9a3a2637a8cf1d264e",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "src-34c5616fde4482772f290689ffaa2e348cf37837b3b996ded86af4e0379e4c83",
+            "segment_id": "src-79c0f2ef8cd630ffefc5e788bda47dcba6b2329ab92ffb52fec9dc2355e9fa7d",
+            "span": {
+              "end": 17,
+              "start": 0
+            },
+            "step_text": "Queue a microtask.",
+            "subject": {
+              "anchor": "host-implementation",
+              "body_id": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+              "step_path": [
+                1
+              ]
+            },
+            "url": "https://example.test/spec#host-implementation"
+          }
+        }
+      ],
+      "id": "occ_e456d499eddf05b16d45",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc"
+    },
+    "occ_f2482046fd5abd9408d4": {
+      "evidence": [
+        {
+          "basis": "matched",
+          "id": "ev_0f127c4e5f21b0e4f961",
+          "rule_id": "engine-test/queue",
+          "site": {
+            "id": "src-a25396f026f141fb3a4f1a22b24a5867bf93fa7efa106f2f2c332e016ed6d93c",
+            "segment_id": "src-66a09b3adc769f0e72abe65c3f4e4acf327bd52639aeb97808a8101dfa941e41",
+            "span": {
+              "end": 17,
+              "start": 0
+            },
+            "step_text": "Queue a microtask, given *A*.",
+            "subject": {
+              "anchor": "caller-r",
+              "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+              "snapshot_sha": "hash:TEST",
+              "spec": "TEST",
+              "step_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+              "step_path": [
+                2
+              ]
+            },
+            "url": "https://example.test/spec#caller-r"
+          }
+        }
+      ],
+      "id": "occ_f2482046fd5abd9408d4",
+      "issue_codes": [],
+      "kind": "scheduling.enqueue",
+      "params": {
+        "queue": "microtask"
+      },
+      "subject_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872"
+    }
+  },
+  "sites": {
+    "site_03e1a2fb9d8028f98183": {
+      "id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+        "step_path": [
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_0b8fd71887ea86d0a150": {
+      "id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_0ca78b15d83947708309": {
+      "id": "src-084ab1db5396528983796be0d64b92754cb89947cfc42e09f51b2b9f0847cb16",
+      "segment_id": "src-fa71de98dbbfcef5b5dc8a22a24ebeac827f1deae3fa38543d2b7cdc44b15e66",
+      "step_text": "Fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_0d16b429d3294b34d689": {
+      "id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_0f4fe5ce5d032c0cc1d9": {
+      "id": "anchor:TEST#host-operation",
+      "subject": {
+        "anchor": "host-operation",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST"
+      },
+      "url": "https://example.test/spec#host-operation"
+    },
+    "site_1097236084b52a303d51": {
+      "id": "src-ba64a330fd02b919a7b7efee4cc75a522116cc2b8f7393d93614500e88583ddc",
+      "segment_id": "src-c7dc90da4891231646da6e32e37c98dc1b7fafd6cf936f870b603047440c4c29",
+      "step_text": "See the fire an event algorithm for background.",
+      "subject": {
+        "anchor": "mention",
+        "body_id": "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#mention"
+    },
+    "site_11e3bde91ff78e04efba": {
+      "id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+        "step_path": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_15db3a0552b0a3b5e075": {
+      "id": "src-106e20c0b50c6b54439c5287cd64d19c547ad13fde856bf47f228cc92805e508",
+      "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+      "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+      "subject": {
+        "anchor": "direct",
+        "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#direct"
+    },
+    "site_1adf21df7da18407fb69": {
+      "id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-9f2e16bc6bb8786f43b03c89435d6e4d163c0ee4edbae7c6fa0b5e091ed6f141",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5f9e7ac950befc8a42eb9394adf72570b93f1ea244c35de6273651aa044a5464",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_1c4aeb77dc49d100305e": {
+      "id": "src-98f05d7194f2e7dab3a79ed0dbc07a73741f83467c3cd807baddb933a24fae10",
+      "segment_id": "src-7e72f1fcb1834e311fe022ce6494bc81a78d42a0a13646b05933f89b48d8b9af",
+      "step_text": "Run cycle S.",
+      "subject": {
+        "anchor": "cycle-r",
+        "body_id": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#cycle-r"
+    },
+    "site_1d8717e30e196693d0c9": {
+      "id": "src-11309bd24ffd8c553973bd58c656e7e1f81877b2ea4b557f8ea3752428d31e03",
+      "segment_id": "src-9b8a6220a13fe161a40d64000b70a52d652520513a166158d0667acca38a3e29",
+      "step_text": "Fire an event named `\"a\"`; then fire an event named `\"b\"`.",
+      "subject": {
+        "anchor": "direct",
+        "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#direct"
+    },
+    "site_1e98fda221bdea6ddd7c": {
+      "id": "src-1b3f4589517f7aa8fd44d8dc517a2aac85dab2e7cb2f8d5946aa494b65c219b2",
+      "segment_id": "src-1b3f4589517f7aa8fd44d8dc517a2aac85dab2e7cb2f8d5946aa494b65c219b2",
+      "step_text": "Loop level 2:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_2231b1d7da4020da1a15": {
+      "id": "src-2b476cabfd5a0d1e8b5f40840047471b1ee7620975a23f75bf9a3bae74859c6e",
+      "segment_id": "src-2b476cabfd5a0d1e8b5f40840047471b1ee7620975a23f75bf9a3bae74859c6e",
+      "step_text": "Loop level 6:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_25711ca77cdbd1903969": {
+      "id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_26a725cdc57f6dedf414": {
+      "id": "src-a25396f026f141fb3a4f1a22b24a5867bf93fa7efa106f2f2c332e016ed6d93c",
+      "segment_id": "src-66a09b3adc769f0e72abe65c3f4e4acf327bd52639aeb97808a8101dfa941e41",
+      "step_text": "Queue a microtask, given *A*.",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-72ff3537dc802cb4b6b961714e765ecd8821c1d1760bf108c4e4906f85038872",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_31c8e665f8ee6fd660da": {
+      "id": "src-e2676edd12eaabd03381b32397cdfda503fc7d12f7d24f33347cc9e38e74d97d",
+      "segment_id": "src-95be5e5f8e134951acc4158676741b133200715cb24663fc47af6e8ad5be445b-prefix",
+      "step_text": "Queue a microtask",
+      "subject": {
+        "anchor": "same-segment",
+        "body_id": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#same-segment"
+    },
+    "site_37247c67a37810948f7d": {
+      "id": "src-3c355c9ce49e32eed5ad6364873ab406296ecc3ce4ea5889d01b3aaf76c248a0",
+      "segment_id": "src-3c355c9ce49e32eed5ad6364873ab406296ecc3ce4ea5889d01b3aaf76c248a0",
+      "step_text": "Loop level 5:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_399172bf839a6001f50c": {
+      "id": "src-1fb032c01eec7b2b8ed86b9b0165a1365e40c376ff1fc74b1f552e3ee9a62d78",
+      "segment_id": "src-8465ef3ea65e6ace6006fd516e698e959bc135d193ec23b682dff34169e6f773",
+      "step_text": "Fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_3baae8ccf6d04a193784": {
+      "id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+      "subject": {
+        "anchor": "same-segment",
+        "body_id": "src-9a58950925a35771ff95eed6de398b58c91f87004994cceed8f2530bc7dfbf0f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#same-segment"
+    },
+    "site_47041ae56d7a20cb7f40": {
+      "id": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f162befa05b0aea5680a4a2a441aa656703dfcb2f5283b2e1f144d46dd73886c",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_48049e5d73c25044c8b3": {
+      "id": "src-7d0ee2c80952b832ed3b827d046d3f99157425d707be96aabaea59c8bdb2cba7",
+      "segment_id": "src-7d0ee2c80952b832ed3b827d046d3f99157425d707be96aabaea59c8bdb2cba7",
+      "step_text": "Loop level 1:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_4de72aeffebda3dd1e01": {
+      "id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_4ea0aacd1d2be7d9d807": {
+      "id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_50595f7233f6b7c1b357": {
+      "id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    },
+    "site_5166bce3b072630c9dda": {
+      "id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_5395172b9acd6e27da7e": {
+      "id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+      "subject": {
+        "anchor": "cycle-r",
+        "body_id": "src-e446cbb53964865629666ee6d4900ad18c0395d16923ee21ebef4d429faf3453",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5533ebd0ecc3b69af2f662e13f99041f2f6365b6e8611cf37689390acd1839e1",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#cycle-r"
+    },
+    "site_53f4887b27a423b97ec7": {
+      "id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+      "subject": {
+        "anchor": "host-implementation",
+        "body_id": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#host-implementation"
+    },
+    "site_571aa3571accf78eb928": {
+      "id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-700e1bdcd8e6b6303a8e5ea63b5c1e3a4aa811cab52454ccdd0a9a6467bbf749",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_5a31a3321962e6f3b7eb": {
+      "id": "src-2519091f1464798f5d2dd6c42540e7a4a085370f7c21a029bea63068d928fd87",
+      "segment_id": "src-58b6719d6bde079ea65e5b4df0372b63c6fd427f0af80a31bb7acef8befd2937",
+      "step_text": "Run cycle R, then fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "cycle-s",
+        "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#cycle-s"
+    },
+    "site_5afaa511ddca79695626": {
+      "id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6f04d7ab647adf959af12d9ca98ba5f95465f63325494a688be5388caddeb7a6",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_623a8d13b9ad63d06e84": {
+      "id": "src-e14e55e0522023475ede31b402ba8a439ffbd22df42a3808afb5d7e5f97e10da",
+      "segment_id": "src-87ee1995a5d64bef3b21b75c58295d41b855a47145f5927e37156919732bbc81",
+      "step_text": "Consume these steps, given *A*.",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_652bc148493b9a3374dc": {
+      "id": "src-4aa2391c56072ed5dad22d420b2d6f343405aafd73db637ea53a79f53a715fa1",
+      "segment_id": "src-27250904255a1007ac5c3e0dcfc3bd0e05cc87061f7d3cba9439114ddc9c5351",
+      "step_text": "Fire an event named *name*.",
+      "subject": {
+        "anchor": "variable",
+        "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#variable"
+    },
+    "site_6d4805cbfb6319adcb86": {
+      "id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-b9ed0bedccfd37d9b92359016e1ab49f725b46e54a5d09456c4c0bfe1a67cd8b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f5dbfba5771fbe35e2dbae1d86215b405cf6f376ba472f9aab8eb3b137cc0a1c",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#text-definition"
+    },
+    "site_7ddbcb51bee3e86cd5e8": {
+      "id": "src-b8292ce89be89c48f13e4b5883a812d91cb97f87981c7db0b21e5c48ab957518",
+      "segment_id": "src-b8292ce89be89c48f13e4b5883a812d91cb97f87981c7db0b21e5c48ab957518",
+      "step_text": "If this deliberately long condition xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#clipped-context"
+    },
+    "site_7de2c5946fc69e74223e": {
+      "id": "src-164ffe4bbcfc06dea695839bc6d987bcf468e42ee9f4569faae1037eb35b9c4f",
+      "segment_id": "src-c609e5d8299665db50fb3509fe667d0e6e0c797a5e1a60da4650ec03cd5547f6",
+      "step_text": "Fire an event named `\"b\"`.",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_80d1f261a17a096a8f8a": {
+      "id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-239361bfc21de214d0a94362a559230be588799f3c456e948a57203623a83ab3",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_82e6904cf7aa63c6dac2": {
+      "id": "src-6b95f0de0a5a9779c72b72fd842dfda955b417825d5d298db015c12819f6347b",
+      "segment_id": "src-c268b71d6fc6869c38561da982dd8877a1db580531583261895df6c8a13df798",
+      "step_text": "Queue a microtask, given *B*.",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_84d720d0ac80d8836020": {
+      "id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+      "subject": {
+        "anchor": "direct",
+        "body_id": "src-26b39034afec5fe146669c5d4126bc53447446289d43d0425368e561a0ac5dcd",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-63c1addc85930a408dfb92a07e9a6b0e2bb079c609fb036411196989aefca3c0",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#direct"
+    },
+    "site_895dffe6c443d0fa710c": {
+      "id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+      "subject": {
+        "anchor": "text-only",
+        "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0f1d2882ed021ace1d8a7c6d80fb812ce87a75cd0d43f23466cf29998f059bf0",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#text-only"
+    },
+    "site_8cb08d97d55adab127eb": {
+      "id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-89958873a42574a4b2f5fcdde740c7d76d819b0acb619065cbb174f0e426ae80",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#clipped-context"
+    },
+    "site_8ed17afe667e8f316bb8": {
+      "id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+      "subject": {
+        "anchor": "cycle-s",
+        "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#cycle-s"
+    },
+    "site_93e8962f6b93b750901f": {
+      "id": "src-9c0b2927104241a2e2412c1bcb9bfb8f417407c70c87301c513cc3dc091c9508",
+      "step_text": "A is the locally defined body used at this call site",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0f18859d76a921a2e4406c696011395c0b69a1d4317a9d69d49e3ba769aa72fc",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_953369ed75bc35ac12d4": {
+      "id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#clipped-context"
+    },
+    "site_985754bd4543e30cb137": {
+      "id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+      "subject": {
+        "anchor": "variable",
+        "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#variable"
+    },
+    "site_9f4e5d474e3311058e17": {
+      "id": "src-4aa2391c56072ed5dad22d420b2d6f343405aafd73db637ea53a79f53a715fa1",
+      "segment_id": "src-27250904255a1007ac5c3e0dcfc3bd0e05cc87061f7d3cba9439114ddc9c5351",
+      "span": {
+        "end": 13,
+        "start": 0
+      },
+      "step_text": "Fire an event named *name*.",
+      "subject": {
+        "anchor": "variable",
+        "body_id": "src-48d025a565983b6e5dc983c2df0a946bdb79cdcfeab1d9f39fe2e629917807af",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-0070fca8c325c398b9c35dfb2bc02f4d809fff1a48c22271b3c3c398f813eead",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#variable"
+    },
+    "site_a0c974e2ca35f54d4f43": {
+      "id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+      "subject": {
+        "anchor": "mention",
+        "body_id": "src-0666fe2bf620768b107d786ce696e2456417f57c65d61fb4e9ed7ae32e73c3d4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-5b68db807b4b565de2d7a7c481a2443e0b6c8eb97301039aac1fa3df0bdf1393",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#mention"
+    },
+    "site_a1359521da31d65b6258": {
+      "id": "src-b6f3979c89d6fd84eaea57f174ce99722e2c6bbbf4f534d43cd223f5e0aa973f",
+      "segment_id": "src-64228fee8d11381d486375ab56eda4498ee42b935f71ffa2ec67ad680d375d15",
+      "step_text": "Queue a microtask, given *A*.",
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#text-definition"
+    },
+    "site_a3ca49e1ecc7aec0877c": {
+      "id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b2e48c9cc37ee4782a6b284a23af88b5f9aa66c47e405dfe6eaf2fa7a26769ac",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_a51a6d60e94918e56718": {
+      "id": "src-7149b9d20d22e5ccad62565d0068bede37c83fdcc730fa7b0083ad4745bde7a4",
+      "segment_id": "src-7149b9d20d22e5ccad62565d0068bede37c83fdcc730fa7b0083ad4745bde7a4",
+      "step_text": "If the document is active, then:",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    },
+    "site_a76ab9c29367c0cbc707": {
+      "id": "src-31c5fdbc4e3453c304813d6058d27793acba2968da4ce2cc963e31177fac6c6d",
+      "segment_id": "src-58b6719d6bde079ea65e5b4df0372b63c6fd427f0af80a31bb7acef8befd2937",
+      "step_text": "Run cycle R, then fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "cycle-s",
+        "body_id": "src-6ffd14a53cde327964f94c97c06585d691a019a43352ee52d377dc3576a1e545",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f30c978f0150509862d7c2b251a28c400023249a94679ece7ea111e21ab023ef",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#cycle-s"
+    },
+    "site_ab02d2b9a97ce559a36a": {
+      "id": "src-4e142b53359f38977404dd46e7112a25a67367a577150317b0d9918fc88b66f9",
+      "step_text": "B is the locally defined body used at this call site",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_b5760fbc29e5448a4060": {
+      "id": "src-b980070ec7cbe5a0ccad7ce6e5415922b7c783678ff35b65b99c45a35a09c31a",
+      "segment_id": "src-95be5e5f8e134951acc4158676741b133200715cb24663fc47af6e8ad5be445b-body",
+      "step_text": "fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "same-segment",
+        "body_id": "src-648c91249841fa5acbd2bc0bb65d33e1d9c1b439df57cda14d8ecb930303de57",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b162ba9e258001eb7e7a84389a541f40771e74bea27f87827458ccdb9b32d7bb",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#same-segment"
+    },
+    "site_bcd53c1e177fb899e815": {
+      "id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-b6c96433974851913ee893b2eb697ab3594599b7d5164035bb80b43537b698b4",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-9c654d06cd53766509b60ca1e34efbdde16873e046392063369ee6e72601f0a9",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_c3c58d05cb4f2d4dc352": {
+      "id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f94a41696681b43731bd119d8b149a8d13a37339457737bdfc4b52adef2032b3",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_c505a2b41577a5861b1c": {
+      "id": "src-8bb2f077a61b0d56575d6683e83b20946529ded5a25cb3aa19d8a59aef24a500",
+      "segment_id": "src-8704e8e8920c28fdcbe617daf71e61d9606b2675de8176c1edc00ef1115ad660",
+      "step_text": "Fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+        "step_path": [
+          2,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    },
+    "site_c52aac3b89e0234b9b06": {
+      "id": "src-639f50107375f58c2a70830aed526abf9eaf32eda8d59de5fca55e77220f77ff",
+      "step_text": "A is the locally defined body used at this call site",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-f4bd2618c6564795c893f131348f115c9c52216786f9c39b623b3dbe719bd847",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-f2ec23b0faf19a91bfd298dd19617b3f30b75a85dcea7f4d1875353323122293",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_c56a9e72b1ec1f569db0": {
+      "id": "src-e96818fa30c8771f71ce9539410aea6a46b4b9a3d43e58ca9030676bc0a9e597",
+      "segment_id": "src-2c2a75c74783bde4185e85f094d1cb9b890be2780297b3ff9cccc78f1bb8a90e",
+      "step_text": "Call the host operation.",
+      "subject": {
+        "anchor": "host-caller",
+        "body_id": "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#host-caller"
+    },
+    "site_c9e35e9c4912ee5700cb": {
+      "id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-344c6a1b3952308906bfd1b8582d176b1f8be039a3de9e08d0b6b67dc26a9715",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    },
+    "site_ce7af3b8878c082864f4": {
+      "id": "src-5c723ca4ab4aa2f0a7d87308e0e8655b6fe635c6702d3a4125c0b6d974e3db8f",
+      "segment_id": "src-5c723ca4ab4aa2f0a7d87308e0e8655b6fe635c6702d3a4125c0b6d974e3db8f",
+      "step_text": "Loop level 8:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-039d112b85c417a32404fd36120543209ce2f082ed67623efff830cd735e00f1",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_cf0d004ca5af8507aec2": {
+      "id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-487d47d03436ff4c6d4f3a73717e007d64228b68d12e47ca2ddce38fa4da1321",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_d02f7b419f2c23817628": {
+      "id": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-13bbee42b31bbaada6eda8a7821b09acb3a928bcb054898ac6d5150b2b993e8f",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_da85fdb2a9d3b1b7d94d": {
+      "id": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a",
+      "subject": {
+        "anchor": "text-other",
+        "body_id": "src-c7df2c67c5f418e6414af6f033458f785df01e9b02972d29ab79c5ba3e12390d",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-b4865994b81ab98fb2af0bbc300289532ef9e55727d5b1ff59ec5401f0bc6e6a",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#text-other"
+    },
+    "site_dae5711893e1742e99c1": {
+      "id": "src-34c5616fde4482772f290689ffaa2e348cf37837b3b996ded86af4e0379e4c83",
+      "segment_id": "src-79c0f2ef8cd630ffefc5e788bda47dcba6b2329ab92ffb52fec9dc2355e9fa7d",
+      "step_text": "Queue a microtask.",
+      "subject": {
+        "anchor": "host-implementation",
+        "body_id": "src-637a12f8c5498396719d6069ab2cbb12df7b2e8e578b4cb661a4a72e70fa712b",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-14471c9e10adf4f7571d873f06be4e9f40cc0cff60ac277bf9cd83ab357178dc",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#host-implementation"
+    },
+    "site_df2a717773b640f30ac4": {
+      "id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ef1aded018211cb2d42a131c800a8b883953470be1a6b733d342e798a3fa2f62",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#text-definition"
+    },
+    "site_e08a8edb2839a595984a": {
+      "id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#text-definition"
+    },
+    "site_e949207150154b2a052d": {
+      "id": "src-b73c381edb78029f9ee8f2aacfd21560a813ad1163fefd81a317026b0c99030d",
+      "segment_id": "src-b73c381edb78029f9ee8f2aacfd21560a813ad1163fefd81a317026b0c99030d",
+      "step_text": "Loop level 3:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6470963c6259da1a1b8dcd402d07b5dc821fed8c3f72b65a5fce3be8119be481",
+        "step_path": [
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_ed9b1b8caf30e73bfedb": {
+      "id": "src-87c23f4feed9938fa219c1309abe4464b634e99480fcfc71dfd468b9c7bc92da",
+      "step_text": "A is the locally defined body used at this call site",
+      "subject": {
+        "anchor": "text-definition",
+        "body_id": "src-1238f3f2456c3d07019a5888cbba6780024041564ea25665f945067b44e7db26",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-cf1cdd1b0169db6f13fe734cb21ca9b0dd22e5d477a79f8e91aa79a37ad22c71",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#text-definition"
+    },
+    "site_edb270fc3ac4044d63c7": {
+      "id": "src-9cb29cb82ae7d99b326d554c2829a32676265518e9af4afaa70209c57bdf3289",
+      "segment_id": "src-9cb29cb82ae7d99b326d554c2829a32676265518e9af4afaa70209c57bdf3289",
+      "step_text": "Loop level 4:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-3d6c9cf1610bc64b1b0d289c2b2ef8ff154cb608124f408bbcd36e8b7d8ae031",
+        "step_path": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_eeaffccc80de8b532856": {
+      "id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+      "subject": {
+        "anchor": "caller-s",
+        "body_id": "src-321af838a5f4275a8a9be69d59c62a7055e3fad974e2f9ecbd4e690f23f4ffc3",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-e24d469e45d48bc97e302335f3c705707b3247a91efd31042385c25d0b4ae56d",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-s"
+    },
+    "site_f0072272bce99cda9feb": {
+      "id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-18de42fcf0df2a75faa96dada408efd48a245e2c22d548a3db596e0877449bbe",
+        "step_path": [
+          2,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    },
+    "site_f27be75772c1a7f0b6a9": {
+      "id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+      "subject": {
+        "anchor": "unknown-timing",
+        "body_id": "src-d7188f423b07d2ce2bb4ae725e23d368794060d6345ed7d0b66efd794a172602",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-634acc54a55dac11c3552a6f8bef850d4c1bdab45b9fa79ffbf3339a7e8730da",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#unknown-timing"
+    },
+    "site_f40ff79a54833105289e": {
+      "id": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34",
+      "subject": {
+        "anchor": "text-only",
+        "body_id": "src-61a67910322b123538009e1352af609b2dc43f21a5828a09616a7b3f37be077f",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-91cf6a40369eb0832e73e2a35291fb489528816d516b38834dc61f62dae52f34",
+        "step_path": [
+          2
+        ]
+      },
+      "url": "https://example.test/spec#text-only"
+    },
+    "site_f4ef1fc4c44767242573": {
+      "id": "src-42f256e87241161d034283316eb6f3e1544a9149129ee2d62cb9d096bfea4534",
+      "segment_id": "src-25afcccb9c011f3d31f583fd981623efc7750ef5c8aeafec41d38ecedd361cbe",
+      "step_text": "Fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "clipped-context",
+        "body_id": "src-fdc855e91c17c2fdbc05f974d73bdccb0647f4b509c40203bf29010650970bed",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-da76aadcc084326b83988285e578a71bb5a07a608ab3965660d99339463bf475",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#clipped-context"
+    },
+    "site_f5a3e67485cbc0d7b97d": {
+      "id": "src-3e4ed3973a3853a07063c311f06d3d12679e84fecabcffcb80e23ab44d1411f1",
+      "segment_id": "src-3e4ed3973a3853a07063c311f06d3d12679e84fecabcffcb80e23ab44d1411f1",
+      "step_text": "Loop level 7:",
+      "subject": {
+        "anchor": "item-clipped-context",
+        "body_id": "src-2ce80798e9cee03f104ffbdc037c795b33f8a280f2f3541627a6f9784383ad4a",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-ecf48b9f3bc314b6b4c03d2a064e992f1bce42689919a4314a59b12754c32af7",
+        "step_path": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#item-clipped-context"
+    },
+    "site_f5bc3a6f639479da33c1": {
+      "id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+      "subject": {
+        "anchor": "host-caller",
+        "body_id": "src-4a8dceed329cbbc8927af3182b5b07e96cd9f1077975f7ca64d4811915922535",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-8f292a9cae613a5cd370d1fd40b096b2c3444443dd6007b3832352f061dfed5e",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#host-caller"
+    },
+    "site_f9307a5bd10f1718d6b1": {
+      "id": "src-ce4e675d8eef947c77f3bbaa1bf694b78da89c6fa014aa93aff64f808ee589f2",
+      "segment_id": "src-972854e64923ed8ce68bd57a31dd168c75bdb559a225a0edad2cc964ac0fd30a",
+      "step_text": "Fire an event named `\"a\"`.",
+      "subject": {
+        "anchor": "caller-r",
+        "body_id": "src-6a3663790b024fe36d62f29c68bc7a011546541503189f6bf23bb8a791e6e570",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-6b7897f3858e51d3f9234b0121547b4f2b08fbec68cb73c347c9eb16aed97f53",
+        "step_path": [
+          1,
+          1
+        ]
+      },
+      "url": "https://example.test/spec#caller-r"
+    },
+    "site_fecb598934d8fb7e3287": {
+      "id": "src-985c760fc902baabb670121df8876c8c6b2fd824c3f5e84584dd6c6e49905360",
+      "segment_id": "src-985c760fc902baabb670121df8876c8c6b2fd824c3f5e84584dd6c6e49905360",
+      "step_text": "Return.",
+      "subject": {
+        "anchor": "nested-context",
+        "body_id": "src-4d0e1332e0fb42e8387b7dd68bcfbff016d511500ae3c37ce759116a66df65d8",
+        "snapshot_sha": "hash:TEST",
+        "spec": "TEST",
+        "step_id": "src-a1a18dab99024d4cae40dec8daa9a8cb2138d102282aa86081094fd1cf7d12e6",
+        "step_path": [
+          1
+        ]
+      },
+      "url": "https://example.test/spec#nested-context"
+    }
+  }
+}
