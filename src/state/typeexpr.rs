@@ -184,7 +184,7 @@ fn try_enumerated(s: &str) -> Option<TypeExpr> {
         .captures_iter(inner)
         .map(|c| c[1].to_string())
         .collect();
-    (!vals.is_empty()).then(|| TypeExpr::Enumerated(vals))
+    (!vals.is_empty()).then_some(TypeExpr::Enumerated(vals))
 }
 
 fn try_infra_word_phrase(bare: &str, links: &[(String, TypeRef)]) -> Option<TypeExpr> {
