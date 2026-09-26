@@ -271,6 +271,7 @@ const INFRA_OPS: &[(&str, MutationOp, &[&str])] = &[
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ParsedSource {
+    /// `Init` statements first, then the statements of each clause in order.
     pub statements: Vec<Statement>,
     /// link index (into `source.links`) → (class, statement id) for every
     /// link a statement positions.
@@ -1564,7 +1565,11 @@ impl Parser<'_> {
         text.len()
     }
 
+    /// A lexicon verb or an Infra operation link, then a space, at `pos`.
     fn verb_follows(&self, pos: usize) -> bool {
+        if let Some((_, after_link, ..)) = self.infra_op(pos) {
+            return self.lit(after_link, " ");
+        }
         self.enc
             .verb_at(pos)
             .is_some_and(|verb| self.lit(pos + verb.len(), " "))
@@ -2457,5 +2462,21 @@ mod tests {
         assert_eq!(p.statements.len(), 1);
         assert!(!p.clauses[0].consumed);
         assert_eq!(p.clauses[0].verb.as_deref(), Some("append"));
+    }
+
+    #[test]
+    fn value_ends_before_a_following_infra_clause() {
+        let (s, p) = one(
+            r##"Set <var>x</var>’s <a href="#a">a</a> to <var>y</var>, and <a href="https://infra.spec.whatwg.org/#list-append">append</a> <var>z</var> to <var>w</var>’s <a href="#b">b</a>."##,
+        );
+        assert_eq!(p.statements.len(), 2);
+        assert!(matches!(
+            &p.statements[1].kind,
+            StatementKind::Mutate {
+                op: MutationOp::Append,
+                ..
+            }
+        ));
+        assert_eq!(role_of(&s, &p, "b"), Some(OccurrenceClass::Write));
     }
 }
