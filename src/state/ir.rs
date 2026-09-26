@@ -222,7 +222,6 @@ pub enum OpaqueReason {
 
 /// Clause-initial mutation verbs (§7.4). They decide between `read` and
 /// `unclassified`; they never produce a write.
-#[allow(dead_code)]
 pub(crate) const LEXICON: [&str; 21] = [
     "set",
     "unset",
@@ -268,7 +267,6 @@ const INFRA_OPS: &[(&str, MutationOp, &[&str])] = &[
     ("queue-dequeue", MutationOp::Dequeue, &[" from "]),
 ];
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ParsedSource {
     /// `Init` statements first, then the statements of each clause in order.
@@ -279,7 +277,6 @@ pub(crate) struct ParsedSource {
     pub clauses: Vec<Clause>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Clause {
     /// Byte offset into the source text.
@@ -291,7 +288,6 @@ pub(crate) struct Clause {
 }
 
 /// `stmt-` + sha256(source_id \0 kind \0 start \0 end).
-#[allow(dead_code)]
 pub(crate) fn statement_id(source_id: &str, kind: &str, span: TextSpan) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source_id.as_bytes());
@@ -524,7 +520,6 @@ impl Encoded {
 /// Parse one statement source (§7.3). Every clause gets a `Clause`; each
 /// clause that starts with a lexicon verb and yields no structured statement
 /// gets an `Opaque` statement.
-#[allow(dead_code)]
 pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
     let enc = Encoded::new(source);
     let mut p = Parser {

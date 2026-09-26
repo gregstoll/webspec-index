@@ -42,7 +42,6 @@ fn regex(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
 }
 
 /// Result of applying R3/R4/R5 to the list the dfn lives in (§6.3).
-#[allow(dead_code)]
 enum ListCandidate<'a> {
     /// R3: the intro paragraph matches `R2` — the dfn is a property of the named owner(s).
     Property {
@@ -276,10 +275,9 @@ pub(crate) fn concept_dfns(document: &Html) -> Vec<ConceptDfn> {
         .select(sel)
         .filter(is_concept_dfn)
         .map(|dfn| {
-            let (name, names) = dfn_names(&dfn);
+            let (_, names) = dfn_names(&dfn);
             ConceptDfn {
                 id: dfn.value().attr("id").unwrap_or_default().to_string(),
-                name,
                 names,
             }
         })

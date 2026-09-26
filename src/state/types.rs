@@ -1,5 +1,4 @@
 //! IDL type collection (§6.2): builds a `TypeTable` from IDL definitions and concept dfns.
-#![allow(dead_code)]
 use crate::model::ParsedIdlDefinition;
 use crate::parse::idl::extract_idl_text;
 use crate::state::model::{
@@ -15,7 +14,6 @@ use std::sync::OnceLock;
 /// A concept dfn that may alias an IDL type. Produced by `declare.rs::concept_dfns`.
 pub(crate) struct ConceptDfn {
     pub id: String,
-    pub name: String,
     pub names: Vec<String>,
 }
 
@@ -528,7 +526,6 @@ mod tests {
         ];
         let concepts = vec![ConceptDfn {
             id: "concept-node".into(),
-            name: "node".into(),
             names: vec!["node".into()],
         }];
         let t = collect_types(&doc, "DOM", "https://dom.spec.whatwg.org/", &idl, &concepts);
@@ -579,7 +576,6 @@ mod tests {
         ];
         let concept = |id: &str, names: &[&str]| ConceptDfn {
             id: id.into(),
-            name: names[0].into(),
             names: names.iter().map(|n| n.to_string()).collect(),
         };
         let concepts = vec![

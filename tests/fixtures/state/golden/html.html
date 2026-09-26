@@ -1,0 +1,1057 @@
+<!doctype html><html><body>
+<h4 id="the-document-object"><span class="secno">3.1.1</span> The <code id="the-document-object:document"><a href="#document">Document</a></code> object<a href="#the-document-object" class="self-link"></a></h4>
+<pre><code class="idl"><c- b="">enum</c-> <dfn id="documentreadystate" data-dfn-type="enum"><c- g="">DocumentReadyState</c-></dfn> { <c- s="">"loading"</c->, <c- s="">"interactive"</c->, <c- s="">"complete"</c-> };
+<c- b="">enum</c-> <dfn id="documentvisibilitystate" data-dfn-type="enum"><c- g="">DocumentVisibilityState</c-></dfn> { <c- s="">"visible"</c->, <c- s="">"hidden"</c-> };
+<c- b="">typedef</c-> (<a href="#htmlscriptelement" id="the-document-object:htmlscriptelement"><c- n="">HTMLScriptElement</c-></a> <c- b="">or</c-> <a id="the-document-object:svgscriptelement" href="https://svgwg.org/svg2-draft/interact.html#InterfaceSVGScriptElement" data-x-internal="svgscriptelement"><c- n="">SVGScriptElement</c-></a>) <dfn id="htmlorsvgscriptelement" data-dfn-type="typedef"><c- g="">HTMLOrSVGScriptElement</c-></dfn>;
+
+[<a id="the-document-object:legacyoverridebuiltins" href="https://webidl.spec.whatwg.org/#LegacyOverrideBuiltIns" data-x-internal="legacyoverridebuiltins"><c- g="">LegacyOverrideBuiltIns</c-></a>]
+<c- b="">partial</c-> <c- b="">interface</c-> <dfn data-lt="" id="document"><c- g="">Document</c-></dfn> {
+  <c- b="">static</c-> <a href="#document" id="the-document-object:document-2"><c- n="">Document</c-></a> <a href="#dom-parsehtmlunsafe" id="the-document-object:dom-parsehtmlunsafe"><c- g="">parseHTMLUnsafe</c-></a>((<code id="the-document-object:tt-trustedhtml"><a data-x-internal="tt-trustedhtml" href="https://w3c.github.io/trusted-types/dist/spec/#trustedhtml"><c- n="">TrustedHTML</c-></a></code> <c- b="">or</c-> <c- b="">DOMString</c->) <c- g="">html</c->, <c- b="">optional</c-> <a href="#parsehtmlunsafeoptions" id="the-document-object:parsehtmlunsafeoptions"><c- n="">ParseHTMLUnsafeOptions</c-></a> <c- g="">options</c-> = {});
+  <c- b="">static</c-> <a href="#document" id="the-document-object:document-3"><c- n="">Document</c-></a> <a href="#dom-parsehtml" id="the-document-object:dom-parsehtml"><c- g="">parseHTML</c-></a>(<c- b="">DOMString</c-> <c- g="">html</c->, <c- b="">optional</c-> <a href="#sethtmloptions" id="the-document-object:sethtmloptions"><c- n="">SetHTMLOptions</c-></a> <c- g="">options</c-> = {});
+
+  // <a href="#resource-metadata-management" id="the-document-object:resource-metadata-management">resource metadata management</a>
+  [<c- g="">PutForwards</c->=<a href="#dom-location-href" id="the-document-object:dom-location-href"><c- n="">href</c-></a>, <a id="the-document-object:legacyunforgeable" href="https://webidl.spec.whatwg.org/#LegacyUnforgeable" data-x-internal="legacyunforgeable"><c- g="">LegacyUnforgeable</c-></a>] <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#location" id="the-document-object:location"><c- n="">Location</c-></a>? <a href="#dom-document-location" id="the-document-object:dom-document-location"><c- g="">location</c-></a>;
+  <c- b="">attribute</c-> <c- b="">USVString</c-> <a href="#dom-document-domain" id="the-document-object:dom-document-domain"><c- g="">domain</c-></a>;
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <c- b="">USVString</c-> <a href="#dom-document-referrer" id="the-document-object:dom-document-referrer"><c- g="">referrer</c-></a>;
+  <c- b="">attribute</c-> <c- b="">USVString</c-> <a href="#dom-document-cookie" id="the-document-object:dom-document-cookie"><c- g="">cookie</c-></a>;
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <c- b="">DOMString</c-> <a href="#dom-document-lastmodified" id="the-document-object:dom-document-lastmodified"><c- g="">lastModified</c-></a>;
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#documentreadystate" id="the-document-object:documentreadystate"><c- n="">DocumentReadyState</c-></a> <a href="#dom-document-readystate" id="the-document-object:dom-document-readystate"><c- g="">readyState</c-></a>;
+
+  // <a href="#dom-tree-accessors" id="the-document-object:dom-tree-accessors">DOM tree accessors</a>
+  <a href="#dom-document-nameditem"><c- b="">getter</c-></a> <c- b="">object</c-> (<c- b="">DOMString</c-> <c- g="">name</c->);
+  [<a href="#cereactions" id="the-document-object:cereactions"><c- g="">CEReactions</c-></a>] <c- b="">attribute</c-> <c- b="">DOMString</c-> <a href="#document.title" id="the-document-object:document.title"><c- g="">title</c-></a>;
+  [<a href="#cereactions" id="the-document-object:cereactions-2"><c- g="">CEReactions</c-></a>] <c- b="">attribute</c-> <c- b="">DOMString</c-> <a href="#dom-document-dir" id="the-document-object:dom-document-dir"><c- g="">dir</c-></a>;
+  [<a href="#cereactions" id="the-document-object:cereactions-3"><c- g="">CEReactions</c-></a>] <c- b="">attribute</c-> <a href="#htmlelement" id="the-document-object:htmlelement"><c- n="">HTMLElement</c-></a>? <a href="#dom-document-body" id="the-document-object:dom-document-body"><c- g="">body</c-></a>;
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#htmlheadelement" id="the-document-object:htmlheadelement"><c- n="">HTMLHeadElement</c-></a>? <a href="#dom-document-head" id="the-document-object:dom-document-head"><c- g="">head</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-images" id="the-document-object:dom-document-images"><c- g="">images</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection-2" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-embeds" id="the-document-object:dom-document-embeds"><c- g="">embeds</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection-3" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-plugins" id="the-document-object:dom-document-plugins"><c- g="">plugins</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection-4" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-links" id="the-document-object:dom-document-links"><c- g="">links</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection-5" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-forms" id="the-document-object:dom-document-forms"><c- g="">forms</c-></a>;
+  [<c- g="">SameObject</c->] <c- b="">readonly</c-> <c- b="">attribute</c-> <a id="the-document-object:htmlcollection-6" href="https://dom.spec.whatwg.org/#interface-htmlcollection" data-x-internal="htmlcollection"><c- n="">HTMLCollection</c-></a> <a href="#dom-document-scripts" id="the-document-object:dom-document-scripts"><c- g="">scripts</c-></a>;
+  <c- n="">NodeList</c-> <a href="#dom-document-getelementsbyname" id="the-document-object:dom-document-getelementsbyname"><c- g="">getElementsByName</c-></a>(<c- b="">DOMString</c-> <c- g="">elementName</c->);
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#htmlorsvgscriptelement" id="the-document-object:htmlorsvgscriptelement"><c- n="">HTMLOrSVGScriptElement</c-></a>? <a href="#dom-document-currentscript" id="the-document-object:dom-document-currentscript"><c- g="">currentScript</c-></a>; // classic scripts in a document tree only
+
+  // <a href="#dynamic-markup-insertion" id="the-document-object:dynamic-markup-insertion">dynamic markup insertion</a>
+  [<a href="#cereactions" id="the-document-object:cereactions-4"><c- g="">CEReactions</c-></a>] <a href="#document" id="the-document-object:document-4"><c- n="">Document</c-></a> <a href="#dom-document-open" id="the-document-object:dom-document-open"><c- g="">open</c-></a>(<c- b="">optional</c-> <c- b="">DOMString</c-> <c- g="">unused1</c->, <c- b="">optional</c-> <c- b="">DOMString</c-> <c- g="">unused2</c->); // both arguments are <a href="#dom-document-open-unused-arguments">ignored</a>
+  <a href="#windowproxy" id="the-document-object:windowproxy"><c- n="">WindowProxy</c-></a>? <a href="#dom-document-open-window" id="the-document-object:dom-document-open-window"><c- g="">open</c-></a>(<c- b="">USVString</c-> <c- g="">url</c->, <c- b="">DOMString</c-> <c- g="">name</c->, <c- b="">DOMString</c-> <c- g="">features</c->);
+  [<a href="#cereactions" id="the-document-object:cereactions-5"><c- g="">CEReactions</c-></a>] <c- b="">undefined</c-> <a href="#dom-document-close" id="the-document-object:dom-document-close"><c- g="">close</c-></a>();
+  [<a href="#cereactions" id="the-document-object:cereactions-6"><c- g="">CEReactions</c-></a>] <c- b="">undefined</c-> <a href="#dom-document-write" id="the-document-object:dom-document-write"><c- g="">write</c-></a>((<code id="the-document-object:tt-trustedhtml-2"><a data-x-internal="tt-trustedhtml" href="https://w3c.github.io/trusted-types/dist/spec/#trustedhtml"><c- n="">TrustedHTML</c-></a></code> <c- b="">or</c-> <c- b="">DOMString</c->)... <c- g="">text</c->);
+  [<a href="#cereactions" id="the-document-object:cereactions-7"><c- g="">CEReactions</c-></a>] <c- b="">undefined</c-> <a href="#dom-document-writeln" id="the-document-object:dom-document-writeln"><c- g="">writeln</c-></a>((<code id="the-document-object:tt-trustedhtml-3"><a data-x-internal="tt-trustedhtml" href="https://w3c.github.io/trusted-types/dist/spec/#trustedhtml"><c- n="">TrustedHTML</c-></a></code> <c- b="">or</c-> <c- b="">DOMString</c->)... <c- g="">text</c->);
+
+  // <a href="#editing" id="the-document-object:editing">user interaction</a>
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#windowproxy" id="the-document-object:windowproxy-2"><c- n="">WindowProxy</c-></a>? <a href="#dom-document-defaultview" id="the-document-object:dom-document-defaultview"><c- g="">defaultView</c-></a>;
+  <c- b="">boolean</c-> <a href="#dom-document-hasfocus" id="the-document-object:dom-document-hasfocus"><c- g="">hasFocus</c-></a>();
+  [<a href="#cereactions" id="the-document-object:cereactions-8"><c- g="">CEReactions</c-></a>] <c- b="">attribute</c-> <c- b="">DOMString</c-> <a href="#designMode" id="the-document-object:designMode"><c- g="">designMode</c-></a>;
+  [<a href="#cereactions" id="the-document-object:cereactions-9"><c- g="">CEReactions</c-></a>] <c- b="">boolean</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#execcommand%28%29" id="the-document-object:execCommand" data-x-internal="execCommand"><c- g="">execCommand</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->, <c- b="">optional</c-> <c- b="">boolean</c-> <c- g="">showUI</c-> = <c- b="">false</c->, <c- b="">optional</c-> <c- b="">DOMString</c-> <c- g="">value</c-> = "");
+  <c- b="">boolean</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#querycommandenabled%28%29" id="the-document-object:dom-document-querycommandenabled" data-x-internal="dom-document-querycommandenabled"><c- g="">queryCommandEnabled</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->);
+  <c- b="">boolean</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#querycommandindeterm%28%29" id="the-document-object:dom-document-querycommandindeterm" data-x-internal="dom-document-querycommandindeterm"><c- g="">queryCommandIndeterm</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->);
+  <c- b="">boolean</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#querycommandstate%28%29" id="the-document-object:dom-document-querycommandstate" data-x-internal="dom-document-querycommandstate"><c- g="">queryCommandState</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->);
+  <c- b="">boolean</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#querycommandsupported%28%29" id="the-document-object:dom-document-querycommandsupported" data-x-internal="dom-document-querycommandsupported"><c- g="">queryCommandSupported</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->);
+  <c- b="">DOMString</c-> <a href="https://w3c.github.io/editing/docs/execCommand/#querycommandvalue%28%29" id="the-document-object:dom-document-querycommandvalue" data-x-internal="dom-document-querycommandvalue"><c- g="">queryCommandValue</c-></a>(<c- b="">DOMString</c-> <c- g="">commandId</c->);
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <c- b="">boolean</c-> <a href="#dom-document-hidden" id="the-document-object:dom-document-hidden"><c- g="">hidden</c-></a>;
+  <c- b="">readonly</c-> <c- b="">attribute</c-> <a href="#documentvisibilitystate" id="the-document-object:documentvisibilitystate"><c- n="">DocumentVisibilityState</c-></a> <a href="#dom-document-visibilitystate" id="the-document-object:dom-document-visibilitystate"><c- g="">visibilityState</c-></a>;
+
+  // special <a href="#event-handler-idl-attributes" id="the-document-object:event-handler-idl-attributes">event handler IDL attributes</a> that only apply to Document objects
+  [<a id="the-document-object:legacylenientthis" href="https://webidl.spec.whatwg.org/#LegacyLenientThis" data-x-internal="legacylenientthis"><c- g="">LegacyLenientThis</c-></a>] <c- b="">attribute</c-> <a href="#eventhandler" id="the-document-object:eventhandler"><c- n="">EventHandler</c-></a> <a href="#handler-onreadystatechange" id="the-document-object:handler-onreadystatechange"><c- g="">onreadystatechange</c-></a>;
+  <c- b="">attribute</c-> <a href="#eventhandler" id="the-document-object:eventhandler-2"><c- n="">EventHandler</c-></a> <a href="#handler-onvisibilitychange" id="the-document-object:handler-onvisibilitychange"><c- g="">onvisibilitychange</c-></a>;
+
+  // <a href="#Document-partial">also has obsolete members</a>
+};
+<a href="#document" id="the-document-object:document-5"><c- n="">Document</c-></a> <c- b="">includes</c-> <a href="#globaleventhandlers" id="the-document-object:globaleventhandlers"><c- n="">GlobalEventHandlers</c-></a>;</code></pre>
+<p>Each <code id="the-document-object:document-11"><a href="#document">Document</a></code> has an <dfn id="is-initial-about:blank">is initial <code>about:blank</code></dfn>, which is a
+  boolean, initially false.</p>
+<p>Each <code id="the-document-object:document-18"><a href="#document">Document</a></code> has an <dfn id="open-dialogs-list">open dialogs list</dfn>, which is a <a id="the-document-object:list" href="https://infra.spec.whatwg.org/#list" data-x-internal="list">list</a> of
+  <code id="the-document-object:the-dialog-element"><a href="#the-dialog-element">dialog</a></code> elements, initially empty.</p>
+<div data-algorithm="">
+  <p>The <dfn id="rendered-text-fragment">rendered text fragment</dfn> for a string <var>input</var> given a
+  <code id="the-innertext-idl-attribute:document"><a href="#document">Document</a></code> <var>document</var> is the result of running the following steps:</p>
+
+  <ol><li><p>Let <var>fragment</var> be the result of <a href="https://dom.spec.whatwg.org/#create-a-document-fragment" id="the-innertext-idl-attribute:create-a-document-fragment" data-x-internal="create-a-document-fragment">creating
+   a document fragment</a> given <var>document</var>.</p></li><li><p>Let <var>position</var> be a <a id="the-innertext-idl-attribute:position-variable" href="https://infra.spec.whatwg.org/#string-position-variable" data-x-internal="position-variable">position variable</a> for <var>input</var>,
+   initially pointing at the start of <var>input</var>.</p></li><li><p>Let <var>text</var> be the empty string.</p></li><li>
+    <p>While <var>position</var> is not past the end of <var>input</var>:</p>
+
+    <ol><li><p><a id="the-innertext-idl-attribute:collect-a-sequence-of-code-points" href="https://infra.spec.whatwg.org/#collect-a-sequence-of-code-points" data-x-internal="collect-a-sequence-of-code-points">Collect a sequence of code points</a> that are not U+000A LF or U+000D CR from
+     <var>input</var> given <var>position</var>, and set <var>text</var> to the result.</p></li><li><p>If <var>text</var> is not the empty string, then <a href="https://dom.spec.whatwg.org/#concept-node-append" id="the-innertext-idl-attribute:concept-node-append-2" data-x-internal="concept-node-append">append</a> a new <code id="the-innertext-idl-attribute:text-5"><a data-x-internal="text" href="https://dom.spec.whatwg.org/#interface-text">Text</a></code> node whose <a href="https://dom.spec.whatwg.org/#concept-cd-data" id="the-innertext-idl-attribute:concept-cd-data-2" data-x-internal="concept-cd-data">data</a> is <var>text</var> and <a id="the-innertext-idl-attribute:node-document-5" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> is
+     <var>document</var> to <var>fragment</var>.</p></li><li>
+      <p>While <var>position</var> is not past the end of <var>input</var>, and the code point at
+      <var>position</var> is either U+000A LF or U+000D CR:</p>
+
+      <ol><li><p>If the code point at <var>position</var> is U+000D CR and the next code point is
+       U+000A LF, then advance <var>position</var> to the next code point in
+       <var>input</var>.</p></li><li><p>Advance <var>position</var> to the next code point in <var>input</var>.</p></li><li><p><a href="https://dom.spec.whatwg.org/#concept-node-append" id="the-innertext-idl-attribute:concept-node-append-3" data-x-internal="concept-node-append">Append</a> the result of <a href="https://dom.spec.whatwg.org/#concept-create-element" id="the-innertext-idl-attribute:create-an-element" data-x-internal="create-an-element">creating an element</a> given <var>document</var>, "<code>br</code>",
+       and the <a id="the-innertext-idl-attribute:html-namespace-2" href="https://infra.spec.whatwg.org/#html-namespace" data-x-internal="html-namespace-2">HTML namespace</a> to <var>fragment</var>.</p></li></ol>
+     </li></ol>
+   </li><li><p>Return <var>fragment</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>When the user agent is to <dfn id="update-the-image-data">update the image data</dfn> of an <code id="updating-the-image-data:the-img-element"><a href="#the-img-element">img</a></code> element
+  <var>element</var>, optionally with the <i>restart animation</i> flag set, optionally with the
+  <i>maybe omit events</i> flag set, it must run the following steps:</p>
+
+  <ol><li>
+    <p>If <var>element</var>'s <a id="updating-the-image-data:node-document" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> is not <a href="#fully-active" id="updating-the-image-data:fully-active">fully active</a>:</p>
+
+    <ol><li><p>Continue running this algorithm <a href="#in-parallel" id="updating-the-image-data:in-parallel-3">in parallel</a>.</p></li><li><p>Wait until <var>element</var>'s <a id="updating-the-image-data:node-document-2" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> is <a href="#fully-active" id="updating-the-image-data:fully-active-2">fully
+     active</a>.</p></li><li><p>If another instance of this algorithm for <var>element</var> was started after this instance
+     (even if it aborted and is no longer running), then return.</p></li><li><p><a href="#queue-a-microtask" id="updating-the-image-data:queue-a-microtask">Queue a microtask</a> to continue this algorithm.</p></li></ol>
+   </li><li><p>If the user agent cannot support images, or its support for images has been disabled, then
+   <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request">abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request">current request</a> and the <a href="#pending-request" id="updating-the-image-data:pending-request">pending
+   request</a>, set the <a href="#current-request" id="updating-the-image-data:current-request-2">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state">state</a> to
+   <a href="#img-none" id="updating-the-image-data:img-none">unavailable</a>, set the <a href="#pending-request" id="updating-the-image-data:pending-request-2">pending request</a> to null, and
+   return.</p></li><li><p>Let <var>previousURL</var> be the <a href="#current-request" id="updating-the-image-data:current-request-3">current request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url">current URL</a>.</p></li><li><p>Let <var>selected source</var> be null and <var>selected pixel density</var> be undefined.
+
+   </p></li><li><p>If <var>element</var> does not <a href="#use-srcset-or-picture" id="updating-the-image-data:use-srcset-or-picture">use <code>srcset</code> or
+   <code>picture</code></a> and it has a <code id="updating-the-image-data:attr-img-src"><a href="#attr-img-src">src</a></code> attribute
+   specified whose value is not the empty string, then set <var>selected source</var> to the value
+   of <var>element</var>'s <code id="updating-the-image-data:attr-img-src-2"><a href="#attr-img-src">src</a></code> attribute and set <var>selected
+   pixel density</var> to 1.0.</p></li><li><p>Set <var>element</var>'s <a href="#last-selected-source" id="updating-the-image-data:last-selected-source">last selected source</a> to <var>selected
+   source</var>.</p></li><li>
+    <p>If <var>selected source</var> is not null:</p>
+
+    <ol><li><p>Let <var>urlString</var> be the result of <a href="#encoding-parsing-and-serializing-a-url" id="updating-the-image-data:encoding-parsing-and-serializing-a-url">encoding-parsing-and-serializing a
+     URL</a> given <var>selected source</var>, relative to <var>element</var>'s <a id="updating-the-image-data:node-document-3" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node
+     document</a>.</p></li><li><p>If <var>urlString</var> is failure, then abort this inner set of steps.</p></li><li><p>Let <var>key</var> be a tuple consisting of <var>urlString</var>, <var>element</var>'s
+     <code id="updating-the-image-data:attr-img-crossorigin"><a href="#attr-img-crossorigin">crossorigin</a></code> attribute's mode, and, if that
+     mode is not <a href="#attr-crossorigin-none" id="updating-the-image-data:attr-crossorigin-none">No CORS</a>, <var>element</var>'s
+     <a id="updating-the-image-data:node-document-4" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="updating-the-image-data:concept-document-origin" data-x-internal="concept-document-origin">origin</a>.</p></li><li>
+      <p>If the <a href="#list-of-available-images" id="updating-the-image-data:list-of-available-images">list of available images</a> contains an entry for <var>key</var>:</p>
+
+      <ol><li><p>Set the <a href="#ignore-higher-layer-caching" id="updating-the-image-data:ignore-higher-layer-caching">ignore higher-layer caching</a> flag for that entry.</p></li><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-2">Abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-4">current request</a> and the
+       <a href="#pending-request" id="updating-the-image-data:pending-request-3">pending request</a>.</p></li><li><p>Set the <a href="#pending-request" id="updating-the-image-data:pending-request-4">pending request</a> to null.</p></li><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-5">current request</a> to a new <a href="#image-request" id="updating-the-image-data:image-request">image request</a> whose <a href="#img-req-data" id="updating-the-image-data:img-req-data">image data</a> is that of the entry and whose <a href="#img-req-state" id="updating-the-image-data:img-req-state-2">state</a> is <a href="#img-all" id="updating-the-image-data:img-all">completely
+       available</a>.</p></li><li><p><a href="#prepare-an-image-for-presentation" id="updating-the-image-data:prepare-an-image-for-presentation">Prepare the <span>current request</span>
+       for presentation</a> given <var>element</var>.</p></li><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-6">current request</a>'s <a href="#current-pixel-density" id="updating-the-image-data:current-pixel-density">current pixel density</a> to <var>selected
+       pixel density</var>.</p></li><li>
+        <p><a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task">Queue an element task</a> on the <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source">DOM manipulation task source</a>
+        given <var>element</var> and the following steps:</p>
+
+        <ol><li><p>If <i>restart animation</i> is set, then <a href="#restart-the-animation" id="updating-the-image-data:restart-the-animation">restart the
+         animation</a>.</p></li><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-7">current request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url-2">current URL</a> to
+         <var>urlString</var>.</p></li><li><p>If <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+         <var>urlString</var>, then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire" data-x-internal="concept-event-fire">fire an event</a> named
+         <code id="updating-the-image-data:event-load"><a href="#event-load">load</a></code> at <var>element</var>.</p></li></ol>
+       </li><li><p>Abort the <a href="#update-the-image-data" id="updating-the-image-data:update-the-image-data">update the image data</a> algorithm.</p></li></ol>
+     </li></ol>
+   </li><li><p><a href="#queue-a-microtask" id="updating-the-image-data:queue-a-microtask-2">Queue a microtask</a> to perform the rest of this algorithm, allowing the <a href="#concept-task" id="updating-the-image-data:concept-task">task</a> that invoked this algorithm to continue.</p></li><li>
+    <p>If another instance of this algorithm for <var>element</var> was started after
+    this instance (even if it aborted and is no longer running), then return.</p>
+
+    <p class="note">Only the last instance takes effect, to avoid multiple requests when, for
+    example, the <code id="updating-the-image-data:attr-img-src-3"><a href="#attr-img-src">src</a></code>, <code id="updating-the-image-data:attr-img-srcset"><a href="#attr-img-srcset">srcset</a></code>,
+    and <code id="updating-the-image-data:attr-img-crossorigin-2"><a href="#attr-img-crossorigin">crossorigin</a></code> attributes are all set in
+    succession.</p>
+   </li><li><p>Let <var>selected source</var> and <var>selected pixel density</var> be the URL and pixel
+   density that results from <a href="#select-an-image-source" id="updating-the-image-data:select-an-image-source">selecting an image source</a>,
+   respectively.</p></li><li>
+    <p>If <var>selected source</var> is null:</p>
+
+    <ol><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-8">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-3">state</a> to
+     <a href="#img-error" id="updating-the-image-data:img-error">broken</a>, <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-3">abort the image request</a> for the
+     <a href="#current-request" id="updating-the-image-data:current-request-9">current request</a> and the <a href="#pending-request" id="updating-the-image-data:pending-request-5">pending request</a>, and set the <a href="#pending-request" id="updating-the-image-data:pending-request-6">pending
+     request</a> to null.</p></li><li>
+      <p><a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task-2">Queue an element task</a> on the <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source-2">DOM manipulation task source</a> given
+      <var>element</var> and the following steps:</p>
+
+      <ol><li><p>Change the <a href="#current-request" id="updating-the-image-data:current-request-10">current request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url-3">current
+       URL</a> to the empty string.</p></li><li>
+        <p>If all of the following are true:</p>
+
+        <ul><li><p><var>element</var> has a <code id="updating-the-image-data:attr-img-src-4"><a href="#attr-img-src">src</a></code> attribute or it
+         <a href="#use-srcset-or-picture" id="updating-the-image-data:use-srcset-or-picture-2">uses <code>srcset</code> or
+         <code>picture</code></a>; and</p></li><li><p><i>maybe omit events</i> is not set or <var>previousURL</var> is not the empty
+         string,</p></li></ul>
+
+        <p>then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-2" data-x-internal="concept-event-fire">fire an event</a> named <code id="updating-the-image-data:event-error"><a href="#event-error">error</a></code> at <var>element</var>.</p>
+       </li></ol>
+     </li><li><p>Return.</p></li></ol>
+   </li><li><p>Let <var>urlString</var> be the result of <a href="#encoding-parsing-and-serializing-a-url" id="updating-the-image-data:encoding-parsing-and-serializing-a-url-2">encoding-parsing-and-serializing a
+   URL</a> given <var>selected source</var>, relative to <var>element</var>'s <a id="updating-the-image-data:node-document-5" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node
+   document</a>.</p></li><li>
+    <p>If <var>urlString</var> is failure:</p>
+
+    <ol><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-4">Abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-11">current request</a> and the
+     <a href="#pending-request" id="updating-the-image-data:pending-request-7">pending request</a>.</p></li><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-12">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-4">state</a> to
+     <a href="#img-error" id="updating-the-image-data:img-error-2">broken</a>.</p></li><li><p>Set the <a href="#pending-request" id="updating-the-image-data:pending-request-8">pending request</a> to null.</p></li><li>
+      <p><a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task-3">Queue an element task</a> on the <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source-3">DOM manipulation task
+      source</a> given <var>element</var> and the following steps:</p>
+
+      <ol><li><p>Change the <a href="#current-request" id="updating-the-image-data:current-request-13">current request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url-4">current
+       URL</a> to <var>selected source</var>.</p></li><li><p>If <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+       <var>selected source</var>, then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-3" data-x-internal="concept-event-fire">fire an event</a>
+       named <code id="updating-the-image-data:event-error-2"><a href="#event-error">error</a></code> at <var>element</var>.</p></li></ol>
+     </li><li><p>Return.</p></li></ol>
+   </li><li><p>If the <a href="#pending-request" id="updating-the-image-data:pending-request-9">pending request</a> is not null and <var>urlString</var> is the same as
+   the <a href="#pending-request" id="updating-the-image-data:pending-request-10">pending request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url-5">current URL</a>, then
+   return.</p></li><li>
+    <p>If <var>urlString</var> is the same as the <a href="#current-request" id="updating-the-image-data:current-request-14">current request</a>'s <a href="#img-req-url" id="updating-the-image-data:img-req-url-6">current URL</a> and the <a href="#current-request" id="updating-the-image-data:current-request-15">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-5">state</a> is <a href="#img-inc" id="updating-the-image-data:img-inc">partially available</a>:</p>
+
+    <ol><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-5">Abort the image request</a> for the <a href="#pending-request" id="updating-the-image-data:pending-request-11">pending request</a>.</p></li><li><p>If <i>restart animation</i> is set, then <a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task-4">queue an element task</a> on the
+     <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source-4">DOM manipulation task source</a> given <var>element</var> to <a href="#restart-the-animation" id="updating-the-image-data:restart-the-animation-2">restart
+     the animation</a>.</p></li><li><p>Return.</p></li></ol>
+   </li><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-6">Abort the image request</a> for the <a href="#pending-request" id="updating-the-image-data:pending-request-12">pending request</a>.</p></li><li><p>Set <var>image request</var> to a new <a href="#image-request" id="updating-the-image-data:image-request-2">image request</a> whose <a href="#img-req-url" id="updating-the-image-data:img-req-url-7">current URL</a> is <var>urlString</var>.</p></li><li><p>If the <a href="#current-request" id="updating-the-image-data:current-request-16">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-6">state</a> is <a href="#img-none" id="updating-the-image-data:img-none-2">unavailable</a> or <a href="#img-error" id="updating-the-image-data:img-error-3">broken</a>, then set the
+   <a href="#current-request" id="updating-the-image-data:current-request-17">current request</a> to <var>image request</var>. Otherwise, set the <a href="#pending-request" id="updating-the-image-data:pending-request-13">pending
+   request</a> to <var>image request</var>.</p></li><li><p>Let <var>request</var> be the result of <a href="#create-a-potential-cors-request" id="updating-the-image-data:create-a-potential-cors-request">creating a potential-CORS request</a> given <var>urlString</var>, "<code>image</code>", and the current state of <var>element</var>'s <code id="updating-the-image-data:attr-img-crossorigin-3"><a href="#attr-img-crossorigin">crossorigin</a></code> content attribute.</p></li><li><p>Set <var>request</var>'s <a href="https://fetch.spec.whatwg.org/#concept-request-client" id="updating-the-image-data:concept-request-client" data-x-internal="concept-request-client">client</a> to
+   <var>element</var>'s <a id="updating-the-image-data:node-document-6" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a href="#relevant-settings-object" id="updating-the-image-data:relevant-settings-object">relevant settings object</a>.</p></li><li><p>If <var>element</var> <a href="#use-srcset-or-picture" id="updating-the-image-data:use-srcset-or-picture-3">uses <code>srcset</code> or
+   <code>picture</code></a>, set <var>request</var>'s <a href="https://fetch.spec.whatwg.org/#concept-request-initiator" id="updating-the-image-data:concept-request-initiator" data-x-internal="concept-request-initiator">initiator</a> to "<code>imageset</code>".</p></li><li><p>Set <var>request</var>'s <a href="https://fetch.spec.whatwg.org/#concept-request-referrer-policy" id="updating-the-image-data:concept-request-referrer-policy" data-x-internal="concept-request-referrer-policy">referrer
+   policy</a> to the current state of <var>element</var>'s <code id="updating-the-image-data:attr-img-referrerpolicy"><a href="#attr-img-referrerpolicy">referrerpolicy</a></code> attribute.</p></li><li><p>Set <var>request</var>'s <a href="https://fetch.spec.whatwg.org/#request-priority" id="updating-the-image-data:concept-request-priority" data-x-internal="concept-request-priority">priority</a> to the current state of <var>element</var>'s
+   <code id="updating-the-image-data:attr-img-fetchpriority"><a href="#attr-img-fetchpriority">fetchpriority</a></code> attribute.</p></li><li><p>Let <var>delay load event</var> be true if the <code id="updating-the-image-data:the-img-element-2"><a href="#the-img-element">img</a></code>'s <a href="#lazy-loading-attribute" id="updating-the-image-data:lazy-loading-attribute">lazy loading
+   attribute</a> is in the <a href="#attr-loading-eager-state" id="updating-the-image-data:attr-loading-eager-state">Eager</a> state, or if
+   <a href="#concept-n-noscript" id="updating-the-image-data:concept-n-noscript">scripting is disabled</a> for the <code id="updating-the-image-data:the-img-element-3"><a href="#the-img-element">img</a></code>, and
+   false otherwise.</p></li><li>
+    <p>If the <a href="#will-lazy-load-element-steps" id="updating-the-image-data:will-lazy-load-element-steps">will lazy load element steps</a> given the <code id="updating-the-image-data:the-img-element-4"><a href="#the-img-element">img</a></code> return true:</p>
+
+    <ol><li><p>Set the <code id="updating-the-image-data:the-img-element-5"><a href="#the-img-element">img</a></code>'s <a href="#lazy-load-resumption-steps" id="updating-the-image-data:lazy-load-resumption-steps">lazy load resumption steps</a> to the rest of this
+     algorithm starting with the step labeled <i>fetch the image</i>.</p></li><li><p><a href="#start-intersection-observing-a-lazy-loading-element" id="updating-the-image-data:start-intersection-observing-a-lazy-loading-element">Start intersection-observing a lazy loading element</a> for
+     <var>element</var>.</p></li><li><p>Return.</p></li></ol>
+   </li><li>
+    
+    <p><i>Fetch the image</i>: <a href="https://fetch.spec.whatwg.org/#concept-fetch" id="updating-the-image-data:concept-fetch" data-x-internal="concept-fetch">Fetch</a> <var>request</var>. Return
+    from this algorithm, and run the remaining steps as part of the fetch's <i id="updating-the-image-data:processresponse"><a data-x-internal="processresponse" href="https://fetch.spec.whatwg.org/#process-response">processResponse</a></i> for the <a href="https://fetch.spec.whatwg.org/#concept-response" id="updating-the-image-data:concept-response" data-x-internal="concept-response">response</a> <var>response</var>.</p>
+
+    
+
+    <p>The resource obtained in this fashion, if any, is <var>image request</var>'s <a href="#img-req-data" id="updating-the-image-data:img-req-data-2">image data</a>. It can be either <a href="#cors-same-origin" id="updating-the-image-data:cors-same-origin">CORS-same-origin</a> or
+    <a href="#cors-cross-origin" id="updating-the-image-data:cors-cross-origin">CORS-cross-origin</a>; this affects the image's interaction with other APIs (e.g.,
+    when used on a <code id="updating-the-image-data:the-canvas-element"><a href="#the-canvas-element">canvas</a></code>).</p>
+
+    
+    <p>When <var>delay load event</var> is true, fetching the image must <a href="#delay-the-load-event" id="updating-the-image-data:delay-the-load-event">delay the load
+    event</a> of <var>element</var>'s <a id="updating-the-image-data:node-document-7" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> until the <a href="#concept-task" id="updating-the-image-data:concept-task-2">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-2">queued</a> by the
+    <a href="#networking-task-source" id="updating-the-image-data:networking-task-source">networking task source</a> once the resource has been fetched (<a href="#img-load">defined below</a>) has been run.
+    </p>
+
+    <p class="warning">This, unfortunately, can be used to perform a rudimentary port scan of the
+    user's local network (especially in conjunction with scripting, though scripting isn't actually
+    necessary to carry out such an attack). User agents may implement <a href="#concept-origin" id="updating-the-image-data:concept-origin">cross-origin</a> access control policies that are stricter than those
+    described above to mitigate this attack, but unfortunately such policies are typically not
+    compatible with existing web content.</p>
+   </li><li>
+    <p>As soon as possible, jump to the first applicable entry from the following list:</p>
+
+    <dl class="switch"><dt>If the resource type is <code id="updating-the-image-data:multipart/x-mixed-replace"><a href="#multipart/x-mixed-replace">multipart/x-mixed-replace</a></code></dt><dd>
+      <p>The next <a href="#concept-task" id="updating-the-image-data:concept-task-3">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-3">queued</a> by the <a href="#networking-task-source" id="updating-the-image-data:networking-task-source-2">networking task source</a> while the image is being
+      fetched must run the following steps:</p>
+
+      <ol><li>
+        <p>If <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-14">pending request</a>
+        and at least one body part has been completely decoded,
+        <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-7">abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-18">current request</a>,
+        and <a href="#upgrade-the-pending-request-to-the-current-request" id="updating-the-image-data:upgrade-the-pending-request-to-the-current-request">upgrade the pending request to the current request</a>.</p>
+       </li><li><p>Otherwise, if <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-15">pending request</a> and the
+       user agent is able to determine that <var>image request</var>'s image is corrupted in some
+       fatal way such that the image dimensions cannot be obtained, <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-8">abort the image
+       request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-19">current request</a>, <a href="#upgrade-the-pending-request-to-the-current-request" id="updating-the-image-data:upgrade-the-pending-request-to-the-current-request-2">upgrade the pending request to the
+       current request</a>, and set the <a href="#current-request" id="updating-the-image-data:current-request-20">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-7">state</a> to <a href="#img-error" id="updating-the-image-data:img-error-4">broken</a>.</p></li><li><p>Otherwise, if <var>image request</var> is the <a href="#current-request" id="updating-the-image-data:current-request-21">current request</a>, its <a href="#img-req-state" id="updating-the-image-data:img-req-state-8">state</a> is <a href="#img-none" id="updating-the-image-data:img-none-3">unavailable</a>, and the
+       user agent is able to determine <var>image request</var>'s image's width and height, set the
+       <a href="#current-request" id="updating-the-image-data:current-request-22">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-9">state</a> to <a href="#img-inc" id="updating-the-image-data:img-inc-2">partially available</a>.</p></li><li><p>Otherwise, if <var>image request</var> is the <a href="#current-request" id="updating-the-image-data:current-request-23">current request</a>, its <a href="#img-req-state" id="updating-the-image-data:img-req-state-10">state</a> is <a href="#img-none" id="updating-the-image-data:img-none-4">unavailable</a>, and the
+       user agent is able to determine that <var>image request</var>'s image is corrupted in some
+       fatal way such that the image dimensions cannot be obtained, set the <a href="#current-request" id="updating-the-image-data:current-request-24">current
+       request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-11">state</a> to <a href="#img-error" id="updating-the-image-data:img-error-5">broken</a>.
+       </p>
+       </li></ol>
+
+      <p>Each <a href="#concept-task" id="updating-the-image-data:concept-task-4">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-4">queued</a> by the <a href="#networking-task-source" id="updating-the-image-data:networking-task-source-3">networking task source</a> while the image is being
+      fetched must update the presentation of the image, but as each new body part comes in, if the
+      user agent is able to determine the image's width and height, it must <a href="#prepare-an-image-for-presentation" id="updating-the-image-data:prepare-an-image-for-presentation-2">prepare <var>element</var>'s <span>current request</span>
+      for presentation</a> given <var>element</var> and replace the previous image.
+      Once one body part has been completely decoded, perform the following steps:</p>
+
+      <ol><li><p>Set <var>element</var>'s <a href="#current-request" id="updating-the-image-data:current-request-25">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-12">state</a> to <a href="#img-all" id="updating-the-image-data:img-all-2">completely
+       available</a>.</p></li><li><p>If <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+       <var>urlString</var>, then <a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task-5">queue an element task</a> on the <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source-5">DOM manipulation task source</a>
+       given <var>element</var> to <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-4" data-x-internal="concept-event-fire">fire an event</a>
+       named <code id="updating-the-image-data:event-load-2"><a href="#event-load">load</a></code> at <var>element</var>.</p></li></ol>
+      
+     </dd><dt>If the resource type and data corresponds to a supported image format, <a href="#img-determine-type">as described below</a></dt><dd>
+      <p>The next <a href="#concept-task" id="updating-the-image-data:concept-task-5">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-5">queued</a> by the <a href="#networking-task-source" id="updating-the-image-data:networking-task-source-4">networking task source</a> while the image is being
+      fetched must run the following steps:</p>
+
+      <ol><li><p>If the user agent is able to determine <var>image request</var>'s image's width and
+       height, and <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-16">pending request</a>, set <var>image
+       request</var>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-13">state</a> to <a href="#img-inc" id="updating-the-image-data:img-inc-3">partially
+       available</a>.</p></li><li><p>Otherwise, if the user agent is able to determine <var>image request</var>'s image's
+       width and height, and <var>image request</var> is the <a href="#current-request" id="updating-the-image-data:current-request-26">current request</a>, <a href="#prepare-an-image-for-presentation" id="updating-the-image-data:prepare-an-image-for-presentation-3">prepare <var>image request</var> for
+       presentation</a> given <var>element</var> and set <var>image request</var>'s
+       <a href="#img-req-state" id="updating-the-image-data:img-req-state-14">state</a> to <a href="#img-inc" id="updating-the-image-data:img-inc-4">partially
+       available</a>.</p></li><li>
+        <p>Otherwise, if the user agent is able to determine that <var>image request</var>'s image
+        is corrupted in some fatal way such that the image dimensions cannot be obtained, and
+        <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-17">pending request</a>:</p>
+
+        <ol><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-9">Abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-27">current request</a> and the
+         <a href="#pending-request" id="updating-the-image-data:pending-request-18">pending request</a>.</p></li><li><p><a href="#upgrade-the-pending-request-to-the-current-request" id="updating-the-image-data:upgrade-the-pending-request-to-the-current-request-3">Upgrade the pending request to the current request</a>.</p></li><li><p>Set the <a href="#current-request" id="updating-the-image-data:current-request-28">current request</a>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-15">state</a> to
+         <a href="#img-error" id="updating-the-image-data:img-error-6">broken</a>.</p></li><li><p><a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-5" data-x-internal="concept-event-fire">Fire an event</a> named <code id="updating-the-image-data:event-error-3"><a href="#event-error">error</a></code> at <var>element</var>.</p></li></ol>
+       </li><li>
+        <p>Otherwise, if the user agent is able to determine that <var>image request</var>'s image
+        is corrupted in some fatal way such that the image dimensions cannot be obtained, and
+        <var>image request</var> is the <a href="#current-request" id="updating-the-image-data:current-request-29">current request</a>:</p>
+
+        <ol><li><p><a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-10">Abort the image request</a> for <var>image request</var>.</p></li><li><p>If <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+         <var>urlString</var>, then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-6" data-x-internal="concept-event-fire">fire an event</a> named
+         <code id="updating-the-image-data:event-error-4"><a href="#event-error">error</a></code> at <var>element</var>.</p></li></ol>
+       </li></ol>
+
+      <p id="img-load">That <a href="#concept-task" id="updating-the-image-data:concept-task-6">task</a>, and each subsequent <a href="#concept-task" id="updating-the-image-data:concept-task-7">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-6">queued</a> by the
+      <a href="#networking-task-source" id="updating-the-image-data:networking-task-source-5">networking task source</a> while the image is being fetched, must, if <var>image
+      request</var> is the <a href="#current-request" id="updating-the-image-data:current-request-30">current request</a>, update the presentation of the image
+      appropriately (e.g., if the image is a progressive JPEG, each packet can improve the
+      resolution of the image).</p>
+
+      <p>Furthermore, the last <a href="#concept-task" id="updating-the-image-data:concept-task-8">task</a> that is <a href="#queue-a-task" id="updating-the-image-data:queue-a-task-7">queued</a> by the <a href="#networking-task-source" id="updating-the-image-data:networking-task-source-6">networking task source</a> once the resource has been
+      fetched must additionally run these steps:</p>
+
+      <ol><li><p>If <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-19">pending request</a>,
+       <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-11">abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-31">current request</a>,
+       <a href="#upgrade-the-pending-request-to-the-current-request" id="updating-the-image-data:upgrade-the-pending-request-to-the-current-request-4">upgrade the pending request to the current request</a>, and
+       <a href="#prepare-an-image-for-presentation" id="updating-the-image-data:prepare-an-image-for-presentation-4">prepare <var>image request</var> for
+       presentation</a> given <var>element</var>.</p></li><li><p>Set <var>image request</var> to the <a href="#img-all" id="updating-the-image-data:img-all-3">completely
+       available</a> state.</p></li><li><p>Add the image to the <a href="#list-of-available-images" id="updating-the-image-data:list-of-available-images-2">list of available images</a> using the key
+       <var>key</var>, with the <a href="#ignore-higher-layer-caching" id="updating-the-image-data:ignore-higher-layer-caching-2">ignore higher-layer caching</a> flag set.</p></li><li><p>If <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+       <var>urlString</var>, then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-7" data-x-internal="concept-event-fire">fire an event</a> named
+       <code id="updating-the-image-data:event-load-3"><a href="#event-load">load</a></code> at <var>element</var>.</p></li></ol>
+     </dd><dt>Otherwise</dt><dd><p>The image data is not in a supported file format; the user agent must set <var>image
+     request</var>'s <a href="#img-req-state" id="updating-the-image-data:img-req-state-16">state</a> to <a href="#img-error" id="updating-the-image-data:img-error-7">broken</a>, <a href="#abort-the-image-request" id="updating-the-image-data:abort-the-image-request-12">abort the image request</a> for the <a href="#current-request" id="updating-the-image-data:current-request-32">current
+     request</a> and the <a href="#pending-request" id="updating-the-image-data:pending-request-20">pending request</a>, <a href="#upgrade-the-pending-request-to-the-current-request" id="updating-the-image-data:upgrade-the-pending-request-to-the-current-request-5">upgrade the pending request to the
+     current request</a> if <var>image request</var> is the <a href="#pending-request" id="updating-the-image-data:pending-request-21">pending request</a>, and
+     then, if <i>maybe omit events</i> is not set or <var>previousURL</var> is not equal to
+     <var>urlString</var>, <a href="#queue-an-element-task" id="updating-the-image-data:queue-an-element-task-6">queue an element task</a> on the <a href="#dom-manipulation-task-source" id="updating-the-image-data:dom-manipulation-task-source-6">DOM manipulation task
+     source</a> given <var>element</var> to <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="updating-the-image-data:concept-event-fire-8" data-x-internal="concept-event-fire">fire an
+     event</a> named <code id="updating-the-image-data:event-error-5"><a href="#event-error">error</a></code> at <var>element</var>.</p></dd></dl>
+   </li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="show-a-modal-dialog">show a modal dialog</dfn> given a <code id="the-dialog-element:the-dialog-element-27"><a href="#the-dialog-element">dialog</a></code> element <var>subject</var> and an
+  <code id="the-dialog-element:element-2"><a data-x-internal="element" href="https://dom.spec.whatwg.org/#interface-element">Element</a></code> or null <var>source</var>:</p>
+
+  <ol><li><p>If <var>subject</var> has an <code id="the-dialog-element:attr-dialog-open-14"><a href="#attr-dialog-open">open</a></code> attribute and
+   <a href="#is-modal" id="the-dialog-element:is-modal-3">is modal</a> of <var>subject</var> is true, then return.</p></li><li><p>If <var>subject</var> has an <code id="the-dialog-element:attr-dialog-open-15"><a href="#attr-dialog-open">open</a></code> attribute, then
+   throw an <a id="the-dialog-element:invalidstateerror-2" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a> <code id="the-dialog-element:domexception-2"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>If <var>subject</var>'s <a id="the-dialog-element:node-document-5" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> is not <a href="#fully-active" id="the-dialog-element:fully-active-3">fully active</a>, then
+   throw an <a id="the-dialog-element:invalidstateerror-3" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a> <code id="the-dialog-element:domexception-3"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>If <var>subject</var> is not <a id="the-dialog-element:connected-3" href="https://dom.spec.whatwg.org/#connected" data-x-internal="connected">connected</a>, then throw an
+   <a id="the-dialog-element:invalidstateerror-4" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a> <code id="the-dialog-element:domexception-4"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>If <var>subject</var> is in the <a href="#popover-showing-state" id="the-dialog-element:popover-showing-state">popover showing
+   state</a>, then throw an <a id="the-dialog-element:invalidstateerror-5" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a>
+   <code id="the-dialog-element:domexception-5"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>If the result of <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="the-dialog-element:concept-event-fire-2" data-x-internal="concept-event-fire">firing an event</a> named <code id="the-dialog-element:event-beforetoggle-2"><a href="#event-beforetoggle">beforetoggle</a></code>, using <code id="the-dialog-element:toggleevent-2"><a href="#toggleevent">ToggleEvent</a></code>, with the <code id="the-dialog-element:dom-event-cancelable-2"><a data-x-internal="dom-event-cancelable" href="https://dom.spec.whatwg.org/#dom-event-cancelable">cancelable</a></code> attribute initialized to true, the <code id="the-dialog-element:dom-toggleevent-oldstate-2"><a href="#dom-toggleevent-oldstate">oldState</a></code> attribute initialized to "<code>closed</code>", the <code id="the-dialog-element:dom-toggleevent-newstate-2"><a href="#dom-toggleevent-newstate">newState</a></code>
+   attribute initialized to "<code>open</code>", and the <code id="the-dialog-element:dom-toggleevent-source"><a href="#dom-toggleevent-source">source</a></code> attribute initialized to <var>source</var> at
+   <var>subject</var> is false, then return.</p></li><li><p>If <var>subject</var> has an <code id="the-dialog-element:attr-dialog-open-16"><a href="#attr-dialog-open">open</a></code> attribute,
+   then return.</p></li><li><p>If <var>subject</var> is not <a id="the-dialog-element:connected-4" href="https://dom.spec.whatwg.org/#connected" data-x-internal="connected">connected</a>, then return.</p></li><li><p>If <var>subject</var> is in the <a href="#popover-showing-state" id="the-dialog-element:popover-showing-state-2">popover showing
+   state</a>, then return.</p></li><li><p><a href="#queue-a-dialog-toggle-event-task" id="the-dialog-element:queue-a-dialog-toggle-event-task-2">Queue a dialog toggle event task</a> given <var>subject</var>, "<code>closed</code>", "<code>open</code>", and <var>source</var>.</p></li><li><p>Add an <code id="the-dialog-element:attr-dialog-open-17"><a href="#attr-dialog-open">open</a></code> attribute to <var>subject</var>, whose
+   value is the empty string.</p></li><li><p><a id="the-dialog-element:assert" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>subject</var>'s <a href="#dialog-close-watcher" id="the-dialog-element:dialog-close-watcher-3">close
+   watcher</a> is not null.</p></li><li><p>Set <a href="#is-modal" id="the-dialog-element:is-modal-4">is modal</a> of <var>subject</var> to true.</p></li><li>
+    <p>Set <var>subject</var>'s <a id="the-dialog-element:node-document-6" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> to be <a href="#blocked-by-a-modal-dialog" id="the-dialog-element:blocked-by-a-modal-dialog-2">blocked by the modal dialog</a> <var>subject</var>.</p>
+
+    <p id="note-dialog-plus-focus-fixup" class="note"><a href="#note-dialog-plus-focus-fixup" class="self-link"></a>This will cause the <a href="#focused-area-of-the-document" id="the-dialog-element:focused-area-of-the-document">focused area of the
+    document</a> to become <a href="#inert" id="the-dialog-element:inert">inert</a> (unless that currently focused area is a
+    <a id="the-dialog-element:shadow-including-descendant" href="https://dom.spec.whatwg.org/#concept-shadow-including-descendant" data-x-internal="shadow-including-descendant">shadow-including descendant</a> of <var>subject</var>). In such cases, the
+    <a href="#focused-area-of-the-document" id="the-dialog-element:focused-area-of-the-document-2">focused area of the document</a> will soon be <a href="#focus-fixup-rule">reset</a> to
+    the <a id="the-dialog-element:viewport" href="https://drafts.csswg.org/css2/#viewport" data-x-internal="viewport">viewport</a>. In a couple steps we will attempt to find a better candidate to
+    focus.</p>
+   </li><li><p>If <var>subject</var>'s <a id="the-dialog-element:node-document-7" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a id="the-dialog-element:top-layer-2" href="https://drafts.csswg.org/css-position-4/#document-top-layer" data-x-internal="top-layer">top layer</a> does not
+   already <a href="https://infra.spec.whatwg.org/#list-contain" id="the-dialog-element:list-contains-2" data-x-internal="list-contains">contain</a> <var>subject</var>, then <a id="the-dialog-element:add-an-element-to-the-top-layer" href="https://drafts.csswg.org/css-position-4/#add-an-element-to-the-top-layer" data-x-internal="add-an-element-to-the-top-layer">add an element
+   to the top layer</a> given <var>subject</var>.</p></li><li><p>Set <var>subject</var>'s <a href="#previously-focused-element" id="the-dialog-element:previously-focused-element-2">previously focused element</a> to the
+   <a href="#focused" id="the-dialog-element:focused-4">focused</a> element.</p></li><li><p>Let <var>document</var> be <var>subject</var>'s <a id="the-dialog-element:node-document-8" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>.</p></li><li><p>Let <var>hideUntil</var> be the result of running <a href="#topmost-popover-ancestor" id="the-dialog-element:topmost-popover-ancestor-2">topmost popover ancestor</a>
+   given <var>subject</var>, null, and false.</p></li><li><p>Run <a href="#hide-popovers-until" id="the-dialog-element:hide-popovers-until-2">hide popovers until</a> given <var>document</var>, <var>hideUntil</var>,
+   false, and true.</p></li><li><p>Run the <a href="#dialog-focusing-steps" id="the-dialog-element:dialog-focusing-steps-6">dialog focusing steps</a> given <var>subject</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>The <dfn id="dialog-setup-steps">dialog setup steps</dfn>, given a <code id="the-dialog-element:the-dialog-element-38"><a href="#the-dialog-element">dialog</a></code> element <var>subject</var>, are
+  as follows:</p>
+
+  <ol><li><p><a id="the-dialog-element:assert-5" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>subject</var> has an <code id="the-dialog-element:attr-dialog-open-26"><a href="#attr-dialog-open">open</a></code>
+   attribute.</p></li><li><p><a id="the-dialog-element:assert-6" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>subject</var> is <a id="the-dialog-element:connected-6" href="https://dom.spec.whatwg.org/#connected" data-x-internal="connected">connected</a>.</p></li><li><p><a id="the-dialog-element:assert-7" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>subject</var>'s <a id="the-dialog-element:node-document-14" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a href="#open-dialogs-list" id="the-dialog-element:open-dialogs-list">open dialogs
+   list</a> does not <a href="https://infra.spec.whatwg.org/#list-contain" id="the-dialog-element:list-contains-3" data-x-internal="list-contains">contain</a> <var>subject</var>.</p></li><li><p>Add <var>subject</var> to <var>subject</var>'s <a id="the-dialog-element:node-document-15" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a href="#open-dialogs-list" id="the-dialog-element:open-dialogs-list-2">open
+   dialogs list</a>.</p></li><li><p><a href="#set-the-dialog-close-watcher" id="the-dialog-element:set-the-dialog-close-watcher">Set the dialog close watcher</a> with <var>subject</var>.</p></li></ol>
+  </div>
+<p>A <dfn id="sandboxing-flag-set" data-export="">sandboxing flag set</dfn> is a set of zero or more of the following flags, which
+  are used to restrict the abilities that potentially untrusted resources have:</p>
+<dl><dt>The <dfn id="sandboxed-navigation-browsing-context-flag" data-export="">sandboxed navigation browsing context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxLinks">prevents content from navigating browsing contexts other
+    than the sandboxed browsing context itself</a> (or browsing contexts further nested inside it),
+    <a href="#auxiliary-browsing-context" id="sandboxing:auxiliary-browsing-context">auxiliary browsing contexts</a> (which are protected
+    by the <a href="#sandboxed-auxiliary-navigation-browsing-context-flag" id="sandboxing:sandboxed-auxiliary-navigation-browsing-context-flag">sandboxed auxiliary navigation browsing context flag</a> defined next), and the
+    <a href="#top-level-browsing-context" id="sandboxing:top-level-browsing-context">top-level browsing context</a> (which is protected by the <a href="#sandboxed-top-level-navigation-without-user-activation-browsing-context-flag" id="sandboxing:sandboxed-top-level-navigation-without-user-activation-browsing-context-flag">sandboxed top-level
+    navigation without user activation browsing context flag</a> and <a href="#sandboxed-top-level-navigation-with-user-activation-browsing-context-flag" id="sandboxing:sandboxed-top-level-navigation-with-user-activation-browsing-context-flag">sandboxed top-level
+    navigation with user activation browsing context flag</a> defined below).</p>
+
+    <p>If the <a href="#sandboxed-auxiliary-navigation-browsing-context-flag" id="sandboxing:sandboxed-auxiliary-navigation-browsing-context-flag-2">sandboxed auxiliary navigation browsing context flag</a> is not set, then in
+    certain cases the restrictions nonetheless allow popups (new <a href="#top-level-browsing-context" id="sandboxing:top-level-browsing-context-2">top-level browsing contexts</a>) to be opened. These <a href="#browsing-context" id="sandboxing:browsing-context">browsing contexts</a> always have <dfn id="one-permitted-sandboxed-navigator">one permitted sandboxed navigator</dfn>, set
+    when the browsing context is created, which allows the <a href="#browsing-context" id="sandboxing:browsing-context-2">browsing context</a> that
+    created them to actually navigate them. (Otherwise, the <a href="#sandboxed-navigation-browsing-context-flag" id="sandboxing:sandboxed-navigation-browsing-context-flag">sandboxed navigation browsing
+    context flag</a> would prevent them from being navigated even if they were opened.)</p>
+   </dd><dt>The <dfn id="sandboxed-auxiliary-navigation-browsing-context-flag" data-export="">sandboxed auxiliary navigation browsing context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxWindowOpen">prevents content from creating new auxiliary browsing
+    contexts</a>, e.g. using the <code id="sandboxing:attr-hyperlink-target"><a href="#attr-hyperlink-target">target</a></code> attribute or
+    the <code id="sandboxing:dom-open"><a href="#dom-open">window.open()</a></code> method.</p>
+   </dd><dt>The <dfn id="sandboxed-top-level-navigation-without-user-activation-browsing-context-flag" data-export="">sandboxed top-level navigation without user activation browsing
+   context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxLinks">prevents content from navigating their <span>top-level
+    browsing context</span></a> and <a href="#sandboxClose">prevents content from closing their
+    <span>top-level browsing context</span></a>. It is consulted only when the sandboxed browsing
+    context's <a href="#active-window" id="sandboxing:active-window">active window</a> does not have <a href="#transient-activation" id="sandboxing:transient-activation">transient activation</a>.</p>
+
+    <p>When the <a href="#sandboxed-top-level-navigation-without-user-activation-browsing-context-flag" id="sandboxing:sandboxed-top-level-navigation-without-user-activation-browsing-context-flag-2">sandboxed top-level navigation without user activation browsing context
+    flag</a> is <em>not</em> set, content can navigate its <a href="#top-level-browsing-context" id="sandboxing:top-level-browsing-context-3">top-level browsing
+    context</a>, but other <a href="#browsing-context" id="sandboxing:browsing-context-3">browsing contexts</a> are still
+    protected by the <a href="#sandboxed-navigation-browsing-context-flag" id="sandboxing:sandboxed-navigation-browsing-context-flag-2">sandboxed navigation browsing context flag</a> and possibly
+    the <a href="#sandboxed-auxiliary-navigation-browsing-context-flag" id="sandboxing:sandboxed-auxiliary-navigation-browsing-context-flag-3">sandboxed auxiliary navigation browsing context flag</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-top-level-navigation-with-user-activation-browsing-context-flag" data-export="">sandboxed top-level navigation with user activation browsing context
+   flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxLinks">prevents content from navigating their <span>top-level
+    browsing context</span></a> and <a href="#sandboxClose">prevents content from closing their
+    <span>top-level browsing context</span></a>. It is consulted only when the sandboxed browsing
+    context's <a href="#active-window" id="sandboxing:active-window-2">active window</a> has <a href="#transient-activation" id="sandboxing:transient-activation-2">transient activation</a>.</p>
+
+    <p>As with the <a href="#sandboxed-top-level-navigation-without-user-activation-browsing-context-flag" id="sandboxing:sandboxed-top-level-navigation-without-user-activation-browsing-context-flag-3">sandboxed top-level navigation without user activation browsing context
+    flag</a>, this flag only affects the <a href="#top-level-browsing-context" id="sandboxing:top-level-browsing-context-4">top-level browsing context</a>; if it is not
+    set, other <a href="#browsing-context" id="sandboxing:browsing-context-4">browsing contexts</a> might still be protected by
+    other flags.</p>
+   </dd><dt>The <dfn id="sandboxed-origin-browsing-context-flag" data-export="">sandboxed origin browsing context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxOrigin">forces content into an opaque origin</a>, thus preventing
+    it from accessing other content from the same <a href="#concept-origin" id="sandboxing:concept-origin">origin</a>.</p>
+
+    <p>This flag also <a href="#sandboxCookies">prevents script from reading from or writing to the
+    <code>document.cookie</code> IDL attribute</a>, and blocks access
+    to <code id="sandboxing:dom-localstorage"><a href="#dom-localstorage">localStorage</a></code>.</p>
+   </dd><dt>The <dfn id="sandboxed-forms-browsing-context-flag" data-export="">sandboxed forms browsing context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxSubmitBlocked">blocks form submission</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-pointer-lock-browsing-context-flag" data-export="">sandboxed pointer lock browsing context flag</dfn></dt><dd>
+    <p>This flag disables the Pointer Lock API. <a href="#refsPOINTERLOCK">[POINTERLOCK]</a></p>
+   </dd><dt>The <dfn id="sandboxed-scripts-browsing-context-flag" data-export="">sandboxed scripts browsing context flag</dfn></dt><dd>
+    <p>This flag <a href="#sandboxScriptBlocked">blocks script execution</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-automatic-features-browsing-context-flag" data-export="">sandboxed automatic features browsing context flag</dfn></dt><dd>
+    <p>This flag blocks features that trigger automatically, such as <a href="#attr-media-autoplay" id="sandboxing:attr-media-autoplay">automatically playing a video</a> or <a href="#attr-fe-autofocus" id="sandboxing:attr-fe-autofocus">automatically focusing a form control</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-document.domain-browsing-context-flag" data-export="">sandboxed <code>document.domain</code>
+   browsing context flag</dfn></dt><dd>
+    <p>This flag prevents content from using the
+    <code id="sandboxing:dom-document-domain"><a href="#dom-document-domain">document.domain</a></code> setter.</p>
+   </dd><dt>The <dfn id="sandbox-propagates-to-auxiliary-browsing-contexts-flag" data-export="">sandbox propagates to auxiliary browsing contexts flag</dfn></dt><dd>
+    <p>This flag prevents content from escaping the sandbox by ensuring that any
+    <a href="#auxiliary-browsing-context" id="sandboxing:auxiliary-browsing-context-2">auxiliary browsing context</a> it creates inherits the content's
+    <a href="#active-sandboxing-flag-set" id="sandboxing:active-sandboxing-flag-set">active sandboxing flag set</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-modals-flag" data-export="">sandboxed modals flag</dfn></dt><dd>
+    <p>This flag prevents content from using any of the following features to produce modal
+    dialogs:</p>
+
+    <ul><li><code id="sandboxing:dom-alert"><a href="#dom-alert">window.alert()</a></code></li><li><code id="sandboxing:dom-confirm"><a href="#dom-confirm">window.confirm()</a></code></li><li><code id="sandboxing:dom-print"><a href="#dom-print">window.print()</a></code></li><li><code id="sandboxing:dom-prompt"><a href="#dom-prompt">window.prompt()</a></code></li><li>the <code id="sandboxing:event-beforeunload"><a href="#event-beforeunload">beforeunload</a></code> event</li></ul>
+   </dd><dt>The <dfn id="sandboxed-orientation-lock-browsing-context-flag" data-export="">sandboxed orientation lock browsing context flag</dfn></dt><dd>
+    <p>This flag disables the ability to lock the screen orientation.
+    <a href="#refsSCREENORIENTATION">[SCREENORIENTATION]</a></p>
+   </dd><dt>The <dfn id="sandboxed-presentation-browsing-context-flag" data-export="">sandboxed presentation browsing context flag</dfn></dt><dd>
+    <p>This flag disables the Presentation API. <a href="#refsPRESENTATION">[PRESENTATION]</a></p>
+   </dd><dt>The <dfn id="sandboxed-downloads-browsing-context-flag" data-export="">sandboxed downloads browsing context flag</dfn></dt><dd>
+    <p>This flag prevents content from initiating or instantiating downloads, whether through <a href="#downloading-hyperlinks" id="sandboxing:downloading-hyperlinks">downloading hyperlinks</a> or through <a href="#navigation-as-a-download">navigation</a> that gets <a href="#handle-as-a-download" id="sandboxing:handle-as-a-download">handled as a download</a>.</p>
+   </dd><dt>The <dfn id="sandboxed-custom-protocols-navigation-browsing-context-flag" data-export="">sandboxed custom protocols navigation browsing context flag</dfn></dt><dd>
+    <p>This flag prevents navigations toward non <a href="https://fetch.spec.whatwg.org/#fetch-scheme" id="sandboxing:fetch-scheme" data-x-internal="fetch-scheme">fetch schemes</a>
+    from being <a href="#hand-off-to-external-software" id="sandboxing:hand-off-to-external-software">handed off to external
+    software</a>.</p>
+   </dd></dl>
+<p>Every <code id="sandboxing:document"><a href="#document">Document</a></code> has an <dfn data-dfn-for="Document" id="active-sandboxing-flag-set" data-export="">active sandboxing flag set</dfn>,
+  which is a <a href="#sandboxing-flag-set" id="sandboxing:sandboxing-flag-set-4">sandboxing flag set</a>. When the <code id="sandboxing:document-2"><a href="#document">Document</a></code> is created, its
+  <a href="#active-sandboxing-flag-set" id="sandboxing:active-sandboxing-flag-set-2">active sandboxing flag set</a> must be empty. It is populated by the <a href="#navigate" id="sandboxing:navigate">navigation algorithm</a>.</p>
+<p>A <dfn id="navigable" data-export="">navigable</dfn> presents a <code id="navigables:document"><a href="#document">Document</a></code> to the user via its <a href="#nav-active-history-entry" id="navigables:nav-active-history-entry">active session history entry</a>. Each navigable has:</p>
+<ul><li><p>An <dfn id="nav-id">id</dfn>, a <a href="#new-unique-internal-value" id="navigables:new-unique-internal-value">new unique internal value</a>.</p></li><li><p id="parent-browsing-context">A <dfn data-dfn-for="navigable" id="nav-parent" data-export="">parent</dfn>,
+   a <a href="#navigable" id="navigables:navigable">navigable</a> or null.</p></li><li>
+    <p id="current-entry">A <dfn id="nav-current-history-entry">current session history
+    entry</dfn>, a <a href="#session-history-entry" id="navigables:session-history-entry">session history entry</a>.</p>
+
+    <p>This can only be modified within the <a href="#tn-session-history-traversal-queue" id="navigables:tn-session-history-traversal-queue">session history traversal queue</a> of the
+    parent <a href="#traversable-navigable" id="navigables:traversable-navigable">traversable navigable</a>.</p>
+   </li><li>
+    <p>An <dfn id="nav-active-history-entry">active session history entry</dfn>, a
+    <a href="#session-history-entry" id="navigables:session-history-entry-2">session history entry</a>.</p>
+
+    <p>This can only be modified from the event loop of the <a href="#nav-active-history-entry" id="navigables:nav-active-history-entry-2">active session history entry</a>'s <a href="#she-document" id="navigables:she-document">document</a>.</p>
+   </li><li>
+    <p>An <dfn id="is-closing">is closing</dfn> boolean, initially false.</p>
+
+    <p class="note">This is only ever set to true for <a href="#top-level-traversable" id="navigables:top-level-traversable">top-level traversable navigables</a>.</p>
+   </li><li>
+    <p>An <dfn id="delaying-load-events-mode">is delaying <code>load</code>
+    events</dfn> boolean, initially false.</p>
+
+    <p class="note">This is only ever set to true in cases where the navigable's <a href="#nav-parent" id="navigables:nav-parent">parent</a> is non-null.</p>
+   </li><li>
+    <p>An <dfn id="allowed-to-perform-a-navigation-or-history-update">allowed to perform a navigation or history update</dfn> algorithm, which is
+    <a id="navigables:implementation-defined" href="https://infra.spec.whatwg.org/#implementation-defined" data-x-internal="implementation-defined">implementation-defined</a> and returns either <a id="navigables:allowed" href="https://infra.spec.whatwg.org/#allowed" data-x-internal="allowed">allowed</a> or
+    <a id="navigables:blocked" href="https://infra.spec.whatwg.org/#blocked" data-x-internal="blocked">blocked</a>.</p>
+
+    <p class="note">For example, this can return <a id="navigables:blocked-2" href="https://infra.spec.whatwg.org/#blocked" data-x-internal="blocked">blocked</a> if invoked too many times
+    times within a certain timespan.</p>
+   </li></ul>
+<div data-algorithm="">
+  <p>To <dfn id="initialize-the-navigable">initialize the navigable</dfn> <a href="#navigable" id="navigables:navigable-11">navigable</a> <var>navigable</var>, given a
+  <a href="#document-state-2" id="navigables:document-state-2">document state</a> <var>documentState</var> and an optional
+  <a href="#navigable" id="navigables:navigable-12">navigable</a>-or-null <var>parent</var> (default null):</p>
+
+  <ol><li><p><a id="navigables:assert" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document">document</a> is non-null.</p></li><li>
+    <p>Let <var>entry</var> be a new <a href="#session-history-entry" id="navigables:session-history-entry-3">session history entry</a>, with</p>
+
+    <dl class="props"><dt><a href="#she-url" id="navigables:she-url">URL</a></dt><dd><var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document-2">document</a>'s <a href="https://dom.spec.whatwg.org/#concept-document-url" id="navigables:the-document's-address" data-x-internal="the-document's-address">URL</a></dd><dt><a href="#she-document-state" id="navigables:she-document-state-2">document state</a></dt><dd><var>documentState</var></dd></dl>
+
+    <p class="note">The caller of this algorithm is responsible for initializing <var>entry</var>'s
+    <a href="#she-step" id="navigables:she-step">step</a>; it will be left as "<code>pending</code>" until
+    that is complete.</p>
+   </li><li><p>Set <var>navigable</var>'s <a href="#nav-current-history-entry" id="navigables:nav-current-history-entry-4">current session
+   history entry</a> to <var>entry</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="navigables:nav-active-history-entry-9">active session history
+   entry</a> to <var>entry</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-parent" id="navigables:nav-parent-2">parent</a> to
+   <var>parent</var>.</p></li><li><p><a href="#set-the-initial-visibility-state" id="navigables:set-the-initial-visibility-state">Set the initial visibility state</a> of <var>documentState</var>'s <a href="#document-state-document" id="navigables:document-state-document-3">document</a> to
+   <var>navigable</var>'s <a href="#nav-traversable" id="navigables:nav-traversable">traversable navigable</a>'s <a href="#system-visibility-state" id="navigables:system-visibility-state">system visibility state</a>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="creating-a-new-browsing-context">create a new browsing context and document</dfn>, given null or a <code id="creating-browsing-contexts:document"><a href="#document">Document</a></code>
+  object <var>creator</var>, null or an element <var>embedder</var>, and a <a href="#browsing-context-group" id="creating-browsing-contexts:browsing-context-group">browsing context
+  group</a> <var>group</var>:</p>
+
+  
+
+  <ol><li><p>Let <var>browsingContext</var> be a new <a href="#browsing-context" id="creating-browsing-contexts:browsing-context">browsing context</a>.</p></li><li><p>Let <var>unsafeContextCreationTime</var> be the
+   <a id="creating-browsing-contexts:unsafe-shared-current-time" href="https://w3c.github.io/hr-time/#dfn-unsafe-shared-current-time" data-x-internal="unsafe-shared-current-time">unsafe shared current time</a>.</p></li><li><p>Let <var>creatorOrigin</var> be null.</p>
+
+   </li><li><p>Let <var>creatorBaseURL</var> be null.</p></li><li id="creator-browsing-context">
+    <p>If <var>creator</var> is non-null:</p>
+
+    <ol><li><p>Set <var>creatorOrigin</var> to <var>creator</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="creating-browsing-contexts:concept-document-origin" data-x-internal="concept-document-origin">origin</a>.</p></li><li><p>Set <var>creatorBaseURL</var> to <var>creator</var>'s <a href="#document-base-url" id="creating-browsing-contexts:document-base-url">document base
+     URL</a>.</p></li><li><p>Set <var>browsingContext</var>'s <a href="#virtual-browsing-context-group-id" id="creating-browsing-contexts:virtual-browsing-context-group-id">virtual browsing context group ID</a> to
+     <var>creator</var>'s <a href="#concept-document-bc" id="creating-browsing-contexts:concept-document-bc">browsing context</a>'s <a href="#bc-tlbc" id="creating-browsing-contexts:bc-tlbc">top-level browsing context</a>'s <a href="#virtual-browsing-context-group-id" id="creating-browsing-contexts:virtual-browsing-context-group-id-2">virtual browsing context group ID</a>.</p></li></ol>
+   </li><li><p>Let <var>sandboxFlags</var> be the result of <a href="#determining-the-creation-sandboxing-flags" id="creating-browsing-contexts:determining-the-creation-sandboxing-flags">determining the creation sandboxing
+   flags</a> given <var>browsingContext</var> and <var>embedder</var>.</p></li><li id="about-blank-origin"><p>Let <var>origin</var> be the result of <a href="#determining-the-origin" id="creating-browsing-contexts:determining-the-origin">determining the
+   origin</a> given <code id="creating-browsing-contexts:about:blank"><a href="#about:blank">about:blank</a></code>, <var>sandboxFlags</var>, and
+   <var>creatorOrigin</var>.</p></li><li>
+    <p>Let <var>permissionsPolicy</var> be the result of <a id="creating-browsing-contexts:creating-a-permissions-policy" href="https://w3c.github.io/webappsec-feature-policy/#create-for-navigable" data-x-internal="creating-a-permissions-policy">creating a permissions policy</a>
+    given <var>embedder</var> and <var>origin</var>. <a href="#refsPERMISSIONSPOLICY">[PERMISSIONSPOLICY]</a></p>
+   </li><li><p>Let <var>agent</var> be the result of <a href="#obtain-similar-origin-window-agent" id="creating-browsing-contexts:obtain-similar-origin-window-agent">obtaining a similar-origin window agent</a> given
+   <var>origin</var>, <var>group</var>, and false.</p></li><li>
+    <p>Let <var>realm execution context</var> be the result of <a href="#creating-a-new-javascript-realm" id="creating-browsing-contexts:creating-a-new-javascript-realm">creating a new realm</a>
+    given <var>agent</var> and the following customizations:</p>
+
+    <ul><li><p>For the global object, create a new <code id="creating-browsing-contexts:window"><a href="#window">Window</a></code> object.</p></li><li><p>For the global <b>this</b> binding, use <var>browsingContext</var>'s
+     <code id="creating-browsing-contexts:windowproxy"><a href="#windowproxy">WindowProxy</a></code> object.</p></li></ul>
+   </li><li><p>Let <var>topLevelCreationURL</var> be <code id="creating-browsing-contexts:about:blank-2"><a href="#about:blank">about:blank</a></code> if <var>embedder</var> is
+   null; otherwise <var>embedder</var>'s <a href="#relevant-settings-object" id="creating-browsing-contexts:relevant-settings-object">relevant settings object</a>'s <a href="#concept-environment-top-level-creation-url" id="creating-browsing-contexts:concept-environment-top-level-creation-url">top-level
+   creation URL</a>.</p></li><li><p>Let <var>topLevelOrigin</var> be <var>origin</var> if <var>embedder</var> is null;
+   otherwise <var>embedder</var>'s <a href="#relevant-settings-object" id="creating-browsing-contexts:relevant-settings-object-2">relevant settings object</a>'s <a href="#concept-environment-top-level-origin" id="creating-browsing-contexts:concept-environment-top-level-origin">top-level
+   origin</a>.</p></li><li><p><a href="#set-up-a-window-environment-settings-object" id="creating-browsing-contexts:set-up-a-window-environment-settings-object">Set up a window environment settings object</a> with <code id="creating-browsing-contexts:about:blank-3"><a href="#about:blank">about:blank</a></code>,
+   <var>realm execution context</var>, null, <var>topLevelCreationURL</var>, and
+   <var>topLevelOrigin</var>.</p></li><li><p>Let <var>loadTimingInfo</var> be a new <a href="#document-load-timing-info" id="creating-browsing-contexts:document-load-timing-info">document load timing info</a> with
+   its <a href="#navigation-start-time" id="creating-browsing-contexts:navigation-start-time">navigation start time</a> set to the result of calling <a id="creating-browsing-contexts:coarsen-time" href="https://w3c.github.io/hr-time/#dfn-coarsen-time" data-x-internal="coarsen-time">coarsen time</a>
+   with <var>unsafeContextCreationTime</var> and the new <a href="#environment-settings-object" id="creating-browsing-contexts:environment-settings-object">environment settings object</a>'s
+   <a href="#concept-settings-object-cross-origin-isolated-capability" id="creating-browsing-contexts:concept-settings-object-cross-origin-isolated-capability">cross-origin isolated
+   capability</a>.</p></li><li>
+    <p>Let <var>document</var> be a new <code id="creating-browsing-contexts:document-2"><a href="#document">Document</a></code>, with:</p>
+
+    <dl class="props"><dt><a href="https://dom.spec.whatwg.org/#concept-document-type" id="creating-browsing-contexts:concept-document-type" data-x-internal="concept-document-type">type</a></dt><dd>"<code>html</code>"</dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-content-type" id="creating-browsing-contexts:concept-document-content-type" data-x-internal="concept-document-content-type">content type</a></dt><dd>"<code id="creating-browsing-contexts:text/html"><a href="#text/html">text/html</a></code>"</dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-mode" id="creating-browsing-contexts:concept-document-mode" data-x-internal="concept-document-mode">mode</a></dt><dd>"<code>quirks</code>"</dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-origin" id="creating-browsing-contexts:concept-document-origin-2" data-x-internal="concept-document-origin">origin</a></dt><dd><var>origin</var></dd><dt><a href="#concept-document-bc" id="creating-browsing-contexts:concept-document-bc-2">browsing context</a></dt><dd><var>browsingContext</var>
+
+     </dd><dt><a href="#concept-document-permissions-policy" id="creating-browsing-contexts:concept-document-permissions-policy">permissions policy</a></dt><dd><var>permissionsPolicy</var></dd><dt><a href="#active-sandboxing-flag-set" id="creating-browsing-contexts:active-sandboxing-flag-set">active sandboxing flag set</a></dt><dd><var>sandboxFlags</var></dd><dt><a href="#load-timing-info" id="creating-browsing-contexts:load-timing-info">load timing info</a></dt><dd><var>loadTimingInfo</var></dd><dt><a href="#is-initial-about:blank" id="creating-browsing-contexts:is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd><dt><a href="#concept-document-about-base-url" id="creating-browsing-contexts:concept-document-about-base-url">about base URL</a></dt><dd><var>creatorBaseURL</var></dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-allow-declarative-shadow-roots" id="creating-browsing-contexts:concept-document-allow-declarative-shadow-roots" data-x-internal="concept-document-allow-declarative-shadow-roots">allow declarative shadow
+     roots</a></dt><dd>true</dd><dt><a href="https://dom.spec.whatwg.org/#document-custom-element-registry" id="creating-browsing-contexts:document-custom-element-registry" data-x-internal="document-custom-element-registry">custom element registry</a></dt><dd>a new <code id="creating-browsing-contexts:customelementregistry"><a href="#customelementregistry">CustomElementRegistry</a></code> object</dd></dl>
+   </li><li><p>Let <var>iframeReferrerPolicy</var> be the result of <a href="#determining-the-iframe-element-referrer-policy" id="creating-browsing-contexts:determining-the-iframe-element-referrer-policy">determining the
+   <code>iframe</code> element referrer policy</a> given <var>embedder</var>.</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-internal-ancestor-origin-objects-list" id="creating-browsing-contexts:concept-document-internal-ancestor-origin-objects-list">internal ancestor origin objects
+   list</a> to the result of running the <a href="#internal-ancestor-origin-objects-list-creation-steps" id="creating-browsing-contexts:internal-ancestor-origin-objects-list-creation-steps">internal ancestor origin objects list creation
+   steps</a> given <var>document</var> and <var>iframeReferrerPolicy</var>.</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-ancestor-origins-list" id="creating-browsing-contexts:concept-document-ancestor-origins-list">ancestor
+   origins list</a> to the result of running the <a href="#ancestor-origins-list-creation-steps" id="creating-browsing-contexts:ancestor-origins-list-creation-steps">ancestor origins list creation
+   steps</a> given <var>document</var>.</p></li><li>
+    <p>If <var>creator</var> is non-null:</p>
+
+    <ol><li><p>Set <var>document</var>'s <a href="#the-document's-referrer" id="creating-browsing-contexts:the-document's-referrer">referrer</a> to the
+     <a href="https://url.spec.whatwg.org/#concept-url-serializer" id="creating-browsing-contexts:concept-url-serializer" data-x-internal="concept-url-serializer">serialization</a> of <var>creator</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-url" id="creating-browsing-contexts:the-document's-address" data-x-internal="the-document's-address">URL</a>.</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-policy-container" id="creating-browsing-contexts:concept-document-policy-container">policy
+     container</a> to a <a href="#clone-a-policy-container" id="creating-browsing-contexts:clone-a-policy-container">clone</a> of
+     <var>creator</var>'s <a href="#concept-document-policy-container" id="creating-browsing-contexts:concept-document-policy-container-2">policy
+     container</a>.</p></li><li><p>If <var>creator</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="creating-browsing-contexts:concept-document-origin-3" data-x-internal="concept-document-origin">origin</a> is
+     <a href="#same-origin" id="creating-browsing-contexts:same-origin">same origin</a> with <var>creator</var>'s <a href="#relevant-settings-object" id="creating-browsing-contexts:relevant-settings-object-3">relevant settings object</a>'s
+     <a href="#concept-environment-top-level-origin" id="creating-browsing-contexts:concept-environment-top-level-origin-2">top-level origin</a>, then set <var>document</var>'s <a href="#concept-document-coop" id="creating-browsing-contexts:concept-document-coop">opener policy</a> to <var>creator</var>'s <a href="#concept-document-bc" id="creating-browsing-contexts:concept-document-bc-3">browsing context</a>'s <a href="#bc-tlbc" id="creating-browsing-contexts:bc-tlbc-2">top-level
+     browsing context</a>'s <a href="#active-document" id="creating-browsing-contexts:active-document">active document</a>'s <a href="#concept-document-coop" id="creating-browsing-contexts:concept-document-coop-2">opener policy</a>.</p></li></ol>
+   </li><li><p><a id="creating-browsing-contexts:assert" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>document</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-url" id="creating-browsing-contexts:the-document's-address-2" data-x-internal="the-document's-address">URL</a>
+   and <var>document</var>'s <a href="#relevant-settings-object" id="creating-browsing-contexts:relevant-settings-object-4">relevant settings object</a>'s <a href="#concept-environment-creation-url" id="creating-browsing-contexts:concept-environment-creation-url">creation URL</a> are
+   <code id="creating-browsing-contexts:about:blank-4"><a href="#about:blank">about:blank</a></code>.</p></li><li><p>Mark <var>document</var> as <a href="#ready-for-post-load-tasks" id="creating-browsing-contexts:ready-for-post-load-tasks">ready for post-load tasks</a>.</p></li><li><p><a href="#populate-with-html/head/body" id="creating-browsing-contexts:populate-with-html/head/body">Populate with <code>html</code>/<code>head</code>/<code>body</code></a> given
+   <var>document</var>.</p></li><li><p><a href="#make-active" id="creating-browsing-contexts:make-active">Make active</a> <var>document</var>.</p></li><li><p><a href="#completely-finish-loading" id="creating-browsing-contexts:completely-finish-loading">Completely finish loading</a> <var>document</var>.</p></li><li><p>Return <var>browsingContext</var> and <var>document</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="navigate-fragid">navigate to a fragment</dfn> given a <a href="#navigable" id="scroll-to-fragid:navigable">navigable</a>
+  <var>navigable</var>, a <a id="scroll-to-fragid:url" href="https://url.spec.whatwg.org/#concept-url" data-x-internal="url">URL</a> <var>url</var>, a <a href="#history-handling-behavior" id="scroll-to-fragid:history-handling-behavior">history handling behavior</a>
+  <var>historyHandling</var>, a <a href="#user-navigation-involvement" id="scroll-to-fragid:user-navigation-involvement">user navigation involvement</a> <var>userInvolvement</var>,
+  an <code id="scroll-to-fragid:element"><a data-x-internal="element" href="https://dom.spec.whatwg.org/#interface-element">Element</a></code>-or-null <var>sourceElement</var>, a <a href="#serialized-state" id="scroll-to-fragid:serialized-state">serialized state</a>-or-null
+  <var>navigationAPIState</var>, and a <a href="#navigation-id" id="scroll-to-fragid:navigation-id">navigation ID</a> <var>navigationId</var>:</p>
+
+  <ol><li><p>Let <var>navigation</var> be <var>navigable</var>'s <a href="#nav-window" id="scroll-to-fragid:nav-window">active
+   window</a>'s <a href="#window-navigation-api" id="scroll-to-fragid:window-navigation-api">navigation API</a>.</p></li><li><p>Let <var>destinationNavigationAPIState</var> be <var>navigable</var>'s <a href="#nav-active-history-entry" id="scroll-to-fragid:nav-active-history-entry">active session history entry</a>'s <a href="#she-navigation-api-state" id="scroll-to-fragid:she-navigation-api-state">navigation API state</a>.</p></li><li><p>If <var>navigationAPIState</var> is not null, then set
+   <var>destinationNavigationAPIState</var> to <var>navigationAPIState</var>.</p></li><li><p>Let <var>continue</var> be the result of <a href="#fire-a-push/replace/reload-navigate-event" id="scroll-to-fragid:fire-a-push/replace/reload-navigate-event">firing a push/replace/reload <code>navigate</code> event</a> at
+   <var>navigation</var> with <i id="scroll-to-fragid:fire-navigate-prr-navigationtype"><a href="#fire-navigate-prr-navigationtype">navigationType</a></i> set to
+   <var>historyHandling</var>, <i id="scroll-to-fragid:fire-navigate-prr-issamedocument"><a href="#fire-navigate-prr-issamedocument">isSameDocument</a></i> set
+   to true, <i id="scroll-to-fragid:fire-navigate-prr-userinvolvement"><a href="#fire-navigate-prr-userinvolvement">userInvolvement</a></i> set to
+   <var>userInvolvement</var>, <i id="scroll-to-fragid:fire-navigate-prr-sourceelement"><a href="#fire-navigate-prr-sourceelement">sourceElement</a></i> set
+   to <var>sourceElement</var>, <i id="scroll-to-fragid:fire-navigate-prr-destinationurl"><a href="#fire-navigate-prr-destinationurl">destinationURL</a></i>
+   set to <var>url</var>, and <i id="scroll-to-fragid:fire-navigate-prr-navigationapistate"><a href="#fire-navigate-prr-navigationapistate">navigationAPIState</a></i> set to
+   <var>destinationNavigationAPIState</var>.</p></li><li>
+    <p>If <var>continue</var> is false:</p>
+
+    <ol><li>
+      <p>If <var>navigation</var>'s <a href="#ongoing-navigate-event" id="scroll-to-fragid:ongoing-navigate-event">ongoing <code>navigate</code>
+      event</a> is not null, then <a href="#set-the-ongoing-navigation" id="scroll-to-fragid:set-the-ongoing-navigation">set the ongoing navigation</a> of <var>navigable</var>
+      to <var>navigationId</var>.</p>
+
+      <p class="note">This makes intercepted hash navigations cancelable by browser UI or <code id="scroll-to-fragid:dom-window-stop"><a href="#dom-window-stop">window.stop()</a></code>.</p>
+     </li><li><p>Return.</p></li></ol>
+   </li><li>
+    <p>Let <var>historyEntry</var> be a new <a href="#session-history-entry" id="scroll-to-fragid:session-history-entry">session history entry</a>, with</p>
+
+    <dl class="props"><dt><a href="#she-url" id="scroll-to-fragid:she-url">URL</a></dt><dd><var>url</var></dd><dt><a href="#she-document-state" id="scroll-to-fragid:she-document-state">document state</a></dt><dd><var>navigable</var>'s <a href="#nav-active-history-entry" id="scroll-to-fragid:nav-active-history-entry-2">active session history
+     entry</a>'s <a href="#she-document-state" id="scroll-to-fragid:she-document-state-2">document state</a></dd><dt><a href="#she-navigation-api-state" id="scroll-to-fragid:she-navigation-api-state-2">navigation API state</a></dt><dd><var>destinationNavigationAPIState</var></dd><dt><a href="#she-scroll-restoration-mode" id="scroll-to-fragid:she-scroll-restoration-mode">scroll restoration mode</a></dt><dd><var>navigable</var>'s <a href="#nav-active-history-entry" id="scroll-to-fragid:nav-active-history-entry-3">active session history
+     entry</a>'s <a href="#she-scroll-restoration-mode" id="scroll-to-fragid:she-scroll-restoration-mode-2">scroll restoration mode</a></dd></dl>
+
+    <div class="note">
+     <p>For navigations performed with <code id="scroll-to-fragid:dom-navigation-navigate"><a href="#dom-navigation-navigate">navigation.navigate()</a></code>, the value provided by the <code id="scroll-to-fragid:dom-navigationnavigateoptions-state"><a href="#dom-navigationnavigateoptions-state">state</a></code> option is used for the new <a href="#she-navigation-api-state" id="scroll-to-fragid:she-navigation-api-state-3">navigation API state</a>. (This will set it to the
+     serialization of undefined, if no value is provided for that option.) For other fragment
+     navigations, including user-initiated ones, the <a href="#she-navigation-api-state" id="scroll-to-fragid:she-navigation-api-state-4">navigation API state</a> is carried over from the previous
+     entry.</p>
+
+     <p>The <a href="#she-classic-history-api-state" id="scroll-to-fragid:she-classic-history-api-state">classic history API state</a> is never
+     carried over.</p>
+    </div>
+   </li><li><p>Let <var>entryToReplace</var> be <var>navigable</var>'s <a href="#nav-active-history-entry" id="scroll-to-fragid:nav-active-history-entry-4">active session history entry</a> if
+   <var>historyHandling</var> is "<code id="scroll-to-fragid:navigationhistorybehavior-replace"><a href="#navigationhistorybehavior-replace">replace</a></code>",
+   otherwise null.</p></li><li><p>If <var>entryToReplace</var> is non-null, then set <var>historyEntry</var>'s <a href="#she-navigation-api-key" id="scroll-to-fragid:she-navigation-api-key">navigation API key</a> to <var>entryToReplace</var>'s <a href="#she-navigation-api-key" id="scroll-to-fragid:she-navigation-api-key-2">navigation API key</a>.</p></li><li><p>Let <var>history</var> be <var>navigable</var>'s <a href="#nav-document" id="scroll-to-fragid:nav-document">active
+   document</a>'s <a href="#doc-history" id="scroll-to-fragid:doc-history">history object</a>.</p></li><li><p>Let <var>scriptHistoryIndex</var> be <var>history</var>'s <a href="#concept-history-index" id="scroll-to-fragid:concept-history-index">index</a>.</p></li><li><p>Let <var>scriptHistoryLength</var> be <var>history</var>'s <a href="#concept-history-length" id="scroll-to-fragid:concept-history-length">length</a>.</p></li><li>
+    <p>If <var>historyHandling</var> is "<code id="scroll-to-fragid:navigationhistorybehavior-push"><a href="#navigationhistorybehavior-push">push</a></code>":</p>
+
+    <ol><li><p>Set <var>history</var>'s <a href="#concept-history-state" id="scroll-to-fragid:concept-history-state">state</a> to
+     null.</p></li><li><p>Increment <var>scriptHistoryIndex</var>.</p></li><li><p>Set <var>scriptHistoryLength</var> to <var>scriptHistoryIndex</var> + 1.</p></li></ol>
+   </li><li><p>Set <var>navigable</var>'s <a href="#nav-document" id="scroll-to-fragid:nav-document-2">active document</a>'s <a href="https://dom.spec.whatwg.org/#concept-document-url" id="scroll-to-fragid:the-document's-address" data-x-internal="the-document's-address">URL</a> to <var>url</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="scroll-to-fragid:nav-active-history-entry-5">active session history
+   entry</a> to <var>historyEntry</var>.</p></li><li>
+    <p><a href="#update-document-for-history-step-application" id="scroll-to-fragid:update-document-for-history-step-application">Update document for history step application</a> given <var>navigable</var>'s
+    <a href="#nav-document" id="scroll-to-fragid:nav-document-3">active document</a>, <var>historyEntry</var>, true,
+    <var>scriptHistoryIndex</var>, <var>scriptHistoryLength</var>, and
+    <var>historyHandling</var>.</p>
+
+    <p class="note">This algorithm will be called twice as a result of a single fragment
+    navigation: once synchronously, where best-guess values <var>scriptHistoryIndex</var> and
+    <var>scriptHistoryLength</var> are set, <code id="scroll-to-fragid:dom-history-state"><a href="#dom-history-state">history.state</a></code>
+    is nulled out, and various events are fired; and once asynchronously, where the final values for
+    index and length are set, <code id="scroll-to-fragid:dom-history-state-2"><a href="#dom-history-state">history.state</a></code> remains
+    untouched, and no events are fired.</p>
+   </li><li>
+    <p><a href="#scroll-to-the-fragment-identifier" id="scroll-to-fragid:scroll-to-the-fragment-identifier">Scroll to the fragment</a> given <var>navigable</var>'s <a href="#nav-document" id="scroll-to-fragid:nav-document-4">active document</a>.</p>
+
+    <p class="note">If the scrolling fails because the <code id="scroll-to-fragid:document"><a href="#document">Document</a></code> is new and the
+    relevant <a href="https://dom.spec.whatwg.org/#concept-id" id="scroll-to-fragid:concept-id" data-x-internal="concept-id">ID</a> has not yet been parsed, then the second
+    asynchronous call to <a href="#update-document-for-history-step-application" id="scroll-to-fragid:update-document-for-history-step-application-2">update document for history step application</a> will take
+    care of scrolling.</p>
+   </li><li><p>Let <var>traversable</var> be <var>navigable</var>'s <a href="#nav-traversable" id="scroll-to-fragid:nav-traversable">traversable navigable</a>.</p></li><li>
+    <p><a href="#tn-append-session-history-sync-nav-steps" id="scroll-to-fragid:tn-append-session-history-sync-nav-steps">Append the following session history
+    synchronous navigation steps</a> involving <var>navigable</var> to
+    <var>traversable</var>:</p>
+
+    <ol><li><p><a href="#finalize-a-same-document-navigation" id="scroll-to-fragid:finalize-a-same-document-navigation">Finalize a same-document navigation</a> given <var>traversable</var>,
+     <var>navigable</var>, <var>historyEntry</var>, <var>entryToReplace</var>,
+     <var>historyHandling</var>, and <var>userInvolvement</var>.</p></li><li><p>Invoke <a id="scroll-to-fragid:webdriver-bidi-fragment-navigated" href="https://w3c.github.io/webdriver-bidi/#webdriver-bidi-fragment-navigated" data-x-internal="webdriver-bidi-fragment-navigated">WebDriver BiDi fragment navigated</a> with <var>navigable</var> and a
+     new <a id="scroll-to-fragid:webdriver-bidi-navigation-status" href="https://w3c.github.io/webdriver-bidi/#webdriver-bidi-navigation-status" data-x-internal="webdriver-bidi-navigation-status">WebDriver BiDi navigation status</a> whose <a href="https://w3c.github.io/webdriver-bidi/#navigation-status-id" id="scroll-to-fragid:navigation-status-id" data-x-internal="navigation-status-id">id</a> is <var>navigationId</var>, <a href="https://w3c.github.io/webdriver-bidi/#navigation-status-url" id="scroll-to-fragid:navigation-status-url" data-x-internal="navigation-status-url">url</a> is <var>url</var>, and <a href="https://w3c.github.io/webdriver-bidi/#navigation-status-status" id="scroll-to-fragid:navigation-status-status" data-x-internal="navigation-status-status">status</a> is "<code id="scroll-to-fragid:navigation-status-complete"><a data-x-internal="navigation-status-complete" href="https://w3c.github.io/webdriver-bidi/#navigation-status-complete">complete</a></code>".</p></li></ol>
+   </li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="reload">reload</dfn> a <a href="#navigable" id="reloading-and-traversing:navigable">navigable</a> <var>navigable</var> given an optional
+  <a href="#serialized-state" id="reloading-and-traversing:serialized-state">serialized state</a>-or-null <dfn id="reload-navigation-api-state"><var>navigationAPIState</var></dfn> (default null), an
+  optional <a href="#user-navigation-involvement" id="reloading-and-traversing:user-navigation-involvement">user navigation involvement</a> <dfn id="reload-user-involvement"><var>userInvolvement</var></dfn> (default "<code id="reloading-and-traversing:uni-none"><a href="#uni-none">none</a></code>"), and an optional <a href="#navigation-api-method-tracker" id="reloading-and-traversing:navigation-api-method-tracker">navigation API method
+  tracker</a>-or-null <dfn id="reload-api-method-tracker"><var>apiMethodTracker</var></dfn>
+  (default null):</p>
+
+  <ol><li>
+    <p>If <var>userInvolvement</var> is not "<code id="reloading-and-traversing:uni-browser-ui"><a href="#uni-browser-ui">browser UI</a></code>":</p>
+
+    <ol><li><p>Let <var>navigation</var> be <var>navigable</var>'s <a href="#nav-window" id="reloading-and-traversing:nav-window">active
+     window</a>'s <a href="#window-navigation-api" id="reloading-and-traversing:window-navigation-api">navigation API</a>.</p></li><li><p>Let <var>destinationNavigationAPIState</var> be <var>navigable</var>'s <a href="#nav-active-history-entry" id="reloading-and-traversing:nav-active-history-entry">active session history entry</a>'s <a href="#she-navigation-api-state" id="reloading-and-traversing:she-navigation-api-state">navigation API state</a>.</p></li><li><p>If <var>navigationAPIState</var> is not null, then set
+     <var>destinationNavigationAPIState</var> to <var>navigationAPIState</var>.</p></li><li><p>Let <var>continue</var> be the result of <a href="#fire-a-push/replace/reload-navigate-event" id="reloading-and-traversing:fire-a-push/replace/reload-navigate-event">firing a push/replace/reload <code>navigate</code>
+     event</a> at <var>navigation</var> with <i id="reloading-and-traversing:fire-navigate-prr-navigationtype"><a href="#fire-navigate-prr-navigationtype">navigationType</a></i> set to "<code id="reloading-and-traversing:dom-navigationtype-reload"><a href="#dom-navigationtype-reload">reload</a></code>", <i id="reloading-and-traversing:fire-navigate-prr-issamedocument"><a href="#fire-navigate-prr-issamedocument">isSameDocument</a></i> set to false, <i id="reloading-and-traversing:fire-navigate-prr-userinvolvement"><a href="#fire-navigate-prr-userinvolvement">userInvolvement</a></i> set to
+     <var>userInvolvement</var>, <i id="reloading-and-traversing:fire-navigate-prr-destinationurl"><a href="#fire-navigate-prr-destinationurl">destinationURL</a></i>
+     set to <var>navigable</var>'s <a href="#nav-active-history-entry" id="reloading-and-traversing:nav-active-history-entry-2">active session history
+     entry</a>'s <a href="#she-url" id="reloading-and-traversing:she-url">URL</a>, <i id="reloading-and-traversing:fire-navigate-prr-navigationapistate"><a href="#fire-navigate-prr-navigationapistate">navigationAPIState</a></i> set to
+     <var>destinationNavigationAPIState</var>, and <i id="reloading-and-traversing:fire-navigate-prr-api-method-tracker"><a href="#fire-navigate-prr-api-method-tracker">apiMethodTracker</a></i> set to
+     <var>apiMethodTracker</var>.</p></li><li><p>If <var>continue</var> is false, then return.</p></li></ol>
+   </li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="reloading-and-traversing:nav-active-history-entry-3">active session history
+   entry</a>'s <a href="#she-document-state" id="reloading-and-traversing:she-document-state">document state</a>'s <a href="#document-state-reload-pending" id="reloading-and-traversing:document-state-reload-pending">reload pending</a> to true.</p></li><li><p>Let <var>traversable</var> be <var>navigable</var>'s <a href="#nav-traversable" id="reloading-and-traversing:nav-traversable">traversable navigable</a>.</p></li><li>
+    <p><a href="#tn-append-session-history-traversal-steps" id="reloading-and-traversing:tn-append-session-history-traversal-steps">Append the following session
+    history traversal steps</a> to <var>traversable</var>:</p>
+
+    <ol><li><p><a href="#apply-the-reload-history-step" id="reloading-and-traversing:apply-the-reload-history-step">Apply the reload history step</a> to <var>traversable</var> given
+     <var>userInvolvement</var>.</p></li></ol>
+   </li></ol>
+  </div>
+<div data-algorithm="">
+  <p id="history-1">The <dfn id="url-and-history-update-steps">URL and history update steps</dfn>, given a <code id="navigate-non-frag-sync:document"><a href="#document">Document</a></code>
+  <var>document</var>, a <a id="navigate-non-frag-sync:url" href="https://url.spec.whatwg.org/#concept-url" data-x-internal="url">URL</a> <var>newURL</var>, an optional <a href="#serialized-state" id="navigate-non-frag-sync:serialized-state">serialized
+  state</a>-or-null <dfn id="uhus-serializeddata"><var>serializedData</var></dfn> (default
+  null), and an optional <a href="#history-handling-behavior" id="navigate-non-frag-sync:history-handling-behavior">history handling behavior</a> <dfn id="uhus-historyhandling"><var id="uhus-ispush">historyHandling</var></dfn> (default "<code id="navigate-non-frag-sync:navigationhistorybehavior-replace"><a href="#navigationhistorybehavior-replace">replace</a></code>"), are:</p>
+
+  <ol><li><p>Let <var>navigable</var> be <var>document</var>'s <a href="#node-navigable" id="navigate-non-frag-sync:node-navigable">node navigable</a>.</p></li><li><p>Let <var>activeEntry</var> be <var>navigable</var>'s <a href="#nav-active-history-entry" id="navigate-non-frag-sync:nav-active-history-entry-2">active session history entry</a>.</p></li><li>
+    <p>Let <var>newEntry</var> be a new <a href="#session-history-entry" id="navigate-non-frag-sync:session-history-entry-2">session history entry</a>, with</p>
+
+    <dl class="props"><dt><a href="#she-url" id="navigate-non-frag-sync:she-url">URL</a></dt><dd><var>newURL</var></dd><dt><a href="#she-classic-history-api-state" id="navigate-non-frag-sync:she-classic-history-api-state">serialized state</a></dt><dd>if <var>serializedData</var> is not null, <var>serializedData</var>; otherwise
+     <var>activeEntry</var>'s <a href="#she-classic-history-api-state" id="navigate-non-frag-sync:she-classic-history-api-state-2">classic history API
+     state</a></dd><dt><a href="#she-document-state" id="navigate-non-frag-sync:she-document-state">document state</a></dt><dd><var>activeEntry</var>'s <a href="#she-document-state" id="navigate-non-frag-sync:she-document-state-2">document state</a></dd><dt><a href="#she-scroll-restoration-mode" id="navigate-non-frag-sync:she-scroll-restoration-mode">scroll restoration mode</a></dt><dd><var>activeEntry</var>'s <a href="#she-scroll-restoration-mode" id="navigate-non-frag-sync:she-scroll-restoration-mode-2">scroll restoration
+     mode</a></dd><dt><a href="#she-other" id="navigate-non-frag-sync:she-other">persisted user state</a></dt><dd><var>activeEntry</var>'s <a href="#she-other" id="navigate-non-frag-sync:she-other-2">persisted user state</a></dd></dl>
+   </li><li>
+    <p>If <var>document</var>'s <a href="#is-initial-about:blank" id="navigate-non-frag-sync:is-initial-about:blank">is initial <code>about:blank</code></a> is true, then set
+    <var>historyHandling</var> to "<code id="navigate-non-frag-sync:navigationhistorybehavior-replace-2"><a href="#navigationhistorybehavior-replace">replace</a></code>".</p>
+
+    <p class="note">This means that <code id="navigate-non-frag-sync:dom-history-pushstate-2"><a href="#dom-history-pushstate">pushState()</a></code> on an
+    <a href="#is-initial-about:blank" id="navigate-non-frag-sync:is-initial-about:blank-2">initial <code>about:blank</code></a>
+    <code id="navigate-non-frag-sync:document-2"><a href="#document">Document</a></code> behaves as a <code id="navigate-non-frag-sync:dom-history-replacestate-2"><a href="#dom-history-replacestate">replaceState()</a></code> call.</p>
+   </li><li><p>Let <var>entryToReplace</var> be <var>activeEntry</var> if <var>historyHandling</var> is
+   "<code id="navigate-non-frag-sync:navigationhistorybehavior-replace-3"><a href="#navigationhistorybehavior-replace">replace</a></code>", otherwise null.</p></li><li><p>If <var>entryToReplace</var> is non-null, then set <var>newEntry</var>'s <a href="#she-navigation-api-key" id="navigate-non-frag-sync:she-navigation-api-key">navigation API key</a> to <var>entryToReplace</var>'s <a href="#she-navigation-api-key" id="navigate-non-frag-sync:she-navigation-api-key-2">navigation API key</a>.</p></li><li>
+    <p>If <var>historyHandling</var> is "<code id="navigate-non-frag-sync:navigationhistorybehavior-push"><a href="#navigationhistorybehavior-push">push</a></code>":</p>
+
+    <ol><li><p>Increment <var>document</var>'s <a href="#doc-history" id="navigate-non-frag-sync:doc-history">history object</a>'s
+     <a href="#concept-history-index" id="navigate-non-frag-sync:concept-history-index">index</a>.</p></li><li><p>Set <var>document</var>'s <a href="#doc-history" id="navigate-non-frag-sync:doc-history-2">history object</a>'s <a href="#concept-history-length" id="navigate-non-frag-sync:concept-history-length">length</a> to its <a href="#concept-history-index" id="navigate-non-frag-sync:concept-history-index-2">index</a> + 1.</p></li></ol>
+
+    <p class="note">These are temporary best-guess values for immediate synchronous access.</p>
+   </li><li><p>If <var>serializedData</var> is not null, then <a href="#restore-the-history-object-state" id="navigate-non-frag-sync:restore-the-history-object-state">restore the history object
+   state</a> given <var>document</var> and <var>newEntry</var>.</p></li><li>
+    <p><a href="#set-the-url" id="navigate-non-frag-sync:set-the-url">Set the URL</a> given <var>document</var> to <var>newURL</var>.</p>
+
+    <p class="note">Since this is neither a <a href="#navigate" id="navigate-non-frag-sync:navigate-2">navigation</a> nor a <a href="#traverse-the-history-by-a-delta" id="navigate-non-frag-sync:traverse-the-history-by-a-delta">history traversal</a>, it does not cause a <code id="navigate-non-frag-sync:event-hashchange"><a href="#event-hashchange">hashchange</a></code> event to be fired.</p>
+   </li><li><p>Set <var>document</var>'s <a href="#latest-entry" id="navigate-non-frag-sync:latest-entry">latest entry</a> to <var>newEntry</var>.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="navigate-non-frag-sync:nav-active-history-entry-3">active session history
+   entry</a> to <var>newEntry</var>.</p></li><li><p><a href="#update-the-navigation-api-entries-for-a-same-document-navigation" id="navigate-non-frag-sync:update-the-navigation-api-entries-for-a-same-document-navigation">Update the navigation API entries for a same-document navigation</a> given
+   <var>document</var>'s <a href="#concept-relevant-global" id="navigate-non-frag-sync:concept-relevant-global">relevant global object</a>'s <a href="#window-navigation-api" id="navigate-non-frag-sync:window-navigation-api">navigation API</a>, <var>newEntry</var>, and
+   <var>historyHandling</var>.</p></li><li><p>Let <var>traversable</var> be <var>navigable</var>'s <a href="#nav-traversable" id="navigate-non-frag-sync:nav-traversable">traversable navigable</a>.</p></li><li>
+    <p><a href="#tn-append-session-history-sync-nav-steps" id="navigate-non-frag-sync:tn-append-session-history-sync-nav-steps">Append the following session history
+    synchronous navigation steps</a> involving <var>navigable</var> to
+    <var>traversable</var>:</p>
+
+    <ol><li><p><a href="#finalize-a-same-document-navigation" id="navigate-non-frag-sync:finalize-a-same-document-navigation">Finalize a same-document navigation</a> given <var>traversable</var>,
+     <var>navigable</var>, <var>newEntry</var>, <var>entryToReplace</var>,
+     <var>historyHandling</var>, and "<code id="navigate-non-frag-sync:uni-none"><a href="#uni-none">none</a></code>".</p></li><li><p>Invoke <a id="navigate-non-frag-sync:webdriver-bidi-history-updated" href="https://w3c.github.io/webdriver-bidi/#webdriver-bidi-history-updated" data-x-internal="webdriver-bidi-history-updated">WebDriver BiDi history updated</a> with <var>navigable</var>.</p></li></ol>
+   </li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="activate-history-entry">activate history entry</dfn> <a href="#session-history-entry" id="updating-the-traversable:session-history-entry-4">session history entry</a> <var>entry</var> for
+  <a href="#navigable" id="updating-the-traversable:navigable-8">navigable</a> <var>navigable</var>:</p>
+
+  <ol><li><p><a href="#save-persisted-state" id="updating-the-traversable:save-persisted-state">Save persisted state</a> to the <a href="#navigable" id="updating-the-traversable:navigable-9">navigable</a>'s <a href="#nav-active-history-entry" id="updating-the-traversable:nav-active-history-entry-4">active session history entry</a>.</p></li><li><p>Let <var>newDocument</var> be <var>entry</var>'s <a href="#she-document" id="updating-the-traversable:she-document-20">document</a>.</p></li><li><p><a id="updating-the-traversable:assert-9" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: <var>newDocument</var>'s <a href="#is-initial-about:blank" id="updating-the-traversable:is-initial-about:blank">is initial
+   <code>about:blank</code></a> is false, i.e., we never traverse back to the <a href="#is-initial-about:blank" id="updating-the-traversable:is-initial-about:blank-2">initial <code>about:blank</code></a> <code id="updating-the-traversable:document-4"><a href="#document">Document</a></code> because it
+   always gets <a href="#navigate-convert-to-replace">replaced</a> when we navigate away from
+   it.</p></li><li><p>Set <var>navigable</var>'s <a href="#nav-active-history-entry" id="updating-the-traversable:nav-active-history-entry-5">active session history
+   entry</a> to <var>entry</var>.</p></li><li><p><a href="#make-active" id="updating-the-traversable:make-active">Make active</a> <var>newDocument</var>.</p></li><li><p><a href="#set-the-initial-visibility-state" id="updating-the-traversable:set-the-initial-visibility-state">Set the initial visibility state</a> of <var>newDocument</var> to
+   <var>navigable</var>'s <a href="#nav-traversable" id="updating-the-traversable:nav-traversable-2">traversable navigable</a>'s <a href="#system-visibility-state" id="updating-the-traversable:system-visibility-state">system visibility state</a>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="make-document-unsalvageable" data-export="">make document unsalvageable</dfn>, given a <code id="updating-the-document:document-6"><a href="#document">Document</a></code>
+  <var>document</var> and a string <var>reason</var>:</p>
+
+  <ol><li><p>Let <var>details</var> be a new <a href="#nrr-details-struct" id="updating-the-document:nrr-details-struct">not restored reason details</a> whose <a href="#nrr-details-reason" id="updating-the-document:nrr-details-reason">reason</a> is <var>reason</var>.</p></li><li><p><a href="https://infra.spec.whatwg.org/#set-append" id="updating-the-document:set-append" data-x-internal="set-append">Append</a> <var>details</var> to <var>document</var>'s
+   <a href="#concept-document-bfcache-blocking-details" id="updating-the-document:concept-document-bfcache-blocking-details">bfcache blocking details</a>.</p></li><li><p>Set <var>document</var>'s <i id="updating-the-document:concept-document-salvageable"><a href="#concept-document-salvageable">salvageable</a></i>
+   state to false.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>When loading a document using one of the below algorithms, we use the
+  following steps to <dfn id="initialise-the-document-object">create and initialize a <code>Document</code> object</dfn>,
+  given a <a href="https://dom.spec.whatwg.org/#concept-document-type" id="shared-document-creation-infrastructure:concept-document-type" data-x-internal="concept-document-type">type</a> <var>type</var>, <a href="https://dom.spec.whatwg.org/#concept-document-content-type" id="shared-document-creation-infrastructure:concept-document-content-type" data-x-internal="concept-document-content-type">content type</a> <var>contentType</var>, and
+  <a href="#navigation-params" id="shared-document-creation-infrastructure:navigation-params">navigation params</a> <var>navigationParams</var>:</p>
+
+  <p class="note"><code id="shared-document-creation-infrastructure:document"><a href="#document">Document</a></code> objects are also created when <a href="#creating-a-new-browsing-context" id="shared-document-creation-infrastructure:creating-a-new-browsing-context">creating a new browsing
+  context and document</a>; such <a href="#is-initial-about:blank" id="shared-document-creation-infrastructure:is-initial-about:blank">initial
+  <code>about:blank</code></a> <code id="shared-document-creation-infrastructure:document-2"><a href="#document">Document</a></code> are never created by this algorithm. Also,
+  <a href="#concept-document-bc" id="shared-document-creation-infrastructure:concept-document-bc">browsing context</a>-less <code id="shared-document-creation-infrastructure:document-3"><a href="#document">Document</a></code> objects can
+  be created via various APIs, such as <code id="shared-document-creation-infrastructure:dom-domimplementation-createhtmldocument"><a data-x-internal="dom-domimplementation-createhtmldocument" href="https://dom.spec.whatwg.org/#dom-domimplementation-createhtmldocument">document.implementation.createHTMLDocument()</a></code>.</p>
+
+  <ol><li>
+    <p>Let <var>browsingContext</var> be the result of <a href="#obtain-browsing-context-navigation" id="shared-document-creation-infrastructure:obtain-browsing-context-navigation">obtaining a browsing context to use for a
+    navigation response</a> given <var>navigationParams</var>.</p>
+
+    <p class="note">This can result in a <a href="#browsing-context-group-switches-due-to-cross-origin-opener-policy">browsing context
+    group switch</a>, in which case <var>browsingContext</var> will be a <a href="#creating-a-new-browsing-context" id="shared-document-creation-infrastructure:creating-a-new-browsing-context-2">newly-created</a> <a href="#browsing-context" id="shared-document-creation-infrastructure:browsing-context">browsing context</a> instead
+    of being <var>navigationParams</var>'s <a href="#navigation-params-navigable" id="shared-document-creation-infrastructure:navigation-params-navigable">navigable</a>'s <a href="#nav-bc" id="shared-document-creation-infrastructure:nav-bc">active browsing
+    context</a>. In such a case, the created <code id="shared-document-creation-infrastructure:window"><a href="#window">Window</a></code>, <code id="shared-document-creation-infrastructure:document-4"><a href="#document">Document</a></code>, and
+    <a id="shared-document-creation-infrastructure:agent" href="https://tc39.es/ecma262/#sec-agents" data-x-internal="agent">agent</a> will not end up being used; because the created <code id="shared-document-creation-infrastructure:document-5"><a href="#document">Document</a></code>'s
+    <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="shared-document-creation-infrastructure:concept-document-origin" data-x-internal="concept-document-origin">origin</a> is <a href="#concept-origin-opaque" id="shared-document-creation-infrastructure:concept-origin-opaque">opaque</a>, we will end up creating a new <a id="shared-document-creation-infrastructure:agent-2" href="https://tc39.es/ecma262/#sec-agents" data-x-internal="agent">agent</a>
+    and <code id="shared-document-creation-infrastructure:window-2"><a href="#window">Window</a></code> <a href="#create-new-agent-and-window">later in this algorithm</a> to
+    go along with the new <code id="shared-document-creation-infrastructure:document-6"><a href="#document">Document</a></code>.</p>
+   </li><li>
+    <p>Let <var>permissionsPolicy</var> be the result of <a id="shared-document-creation-infrastructure:creating-a-permissions-policy-from-a-response" href="https://w3c.github.io/webappsec-feature-policy/#create-from-response" data-x-internal="creating-a-permissions-policy-from-a-response">creating a permissions policy from a
+    response</a> given <var>navigationParams</var>'s <a href="#navigation-params-navigable" id="shared-document-creation-infrastructure:navigation-params-navigable-2">navigable</a>'s <a href="#nav-container" id="shared-document-creation-infrastructure:nav-container">container</a>, <var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin">origin</a>, and <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response">response</a>. <a href="#refsPERMISSIONSPOLICY">[PERMISSIONSPOLICY]</a></p>
+
+    <div class="note">
+     <p>The <a id="shared-document-creation-infrastructure:creating-a-permissions-policy-from-a-response-2" href="https://w3c.github.io/webappsec-feature-policy/#create-from-response" data-x-internal="creating-a-permissions-policy-from-a-response">creating a permissions policy from a response</a> algorithm makes use of the
+     passed <a href="#concept-origin" id="shared-document-creation-infrastructure:concept-origin">origin</a>. If <code id="shared-document-creation-infrastructure:dom-document-domain"><a href="#dom-document-domain">document.domain</a></code> has
+     been used for <var>navigationParams</var>'s <a href="#navigation-params-navigable" id="shared-document-creation-infrastructure:navigation-params-navigable-3">navigable</a>'s <a href="#nav-container-document" id="shared-document-creation-infrastructure:nav-container-document">container document</a>, then its <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="shared-document-creation-infrastructure:concept-document-origin-2" data-x-internal="concept-document-origin">origin</a> cannot be <a href="#same-origin-domain" id="shared-document-creation-infrastructure:same-origin-domain">same origin-domain</a> with
+     the passed origin, because these steps run before the <var>document</var> is created, so it
+     cannot itself yet have used <code id="shared-document-creation-infrastructure:dom-document-domain-2"><a href="#dom-document-domain">document.domain</a></code>. Note
+     that this means that Permissions Policy checks are less permissive compared to doing a
+     <a href="#same-origin" id="shared-document-creation-infrastructure:same-origin">same origin</a> check instead.</p>
+
+     <p>See below for some examples of this in action.</p>
+    </div>
+   </li><li><p>Let <var>creationURL</var> be <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-2">response</a>'s <a href="https://fetch.spec.whatwg.org/#concept-response-url" id="shared-document-creation-infrastructure:concept-response-url" data-x-internal="concept-response-url">URL</a>.</p></li><li><p>If <var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request">request</a>
+   is non-null, then set <var>creationURL</var> to <var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-2">request</a>'s <a href="https://fetch.spec.whatwg.org/#concept-request-current-url" id="shared-document-creation-infrastructure:concept-request-current-url" data-x-internal="concept-request-current-url">current URL</a>.</p></li><li><p>Let <var>window</var> be null.</p></li><li>
+    <p>If <var>browsingContext</var>'s <a href="#active-document" id="shared-document-creation-infrastructure:active-document">active document</a>'s <a href="#is-initial-about:blank" id="shared-document-creation-infrastructure:is-initial-about:blank-2">is initial
+    <code>about:blank</code></a> is true, and <var>browsingContext</var>'s <a href="#active-document" id="shared-document-creation-infrastructure:active-document-2">active
+    document</a>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="shared-document-creation-infrastructure:concept-document-origin-3" data-x-internal="concept-document-origin">origin</a> is <a href="#same-origin-domain" id="shared-document-creation-infrastructure:same-origin-domain-2">same
+    origin-domain</a> with <var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin-2">origin</a>, then set <var>window</var> to
+    <var>browsingContext</var>'s <a href="#active-window" id="shared-document-creation-infrastructure:active-window">active window</a>.</p>
+
+    <p class="note">This means that both the <a href="#is-initial-about:blank" id="shared-document-creation-infrastructure:is-initial-about:blank-3">initial
+    <code>about:blank</code></a> <code id="shared-document-creation-infrastructure:document-7"><a href="#document">Document</a></code>, and the new <code id="shared-document-creation-infrastructure:document-8"><a href="#document">Document</a></code> that
+    is about to be created, will share the same <code id="shared-document-creation-infrastructure:window-3"><a href="#window">Window</a></code> object.</p>
+   </li><li id="create-new-agent-and-window">
+    <p>Otherwise:</p>
+
+    <ol><li><p>Let <var>oacHeader</var> be the result of <a id="shared-document-creation-infrastructure:getting-a-structured-field-value" href="https://fetch.spec.whatwg.org/#concept-header-list-get-structured-header" data-x-internal="getting-a-structured-field-value">getting a structured field value</a>
+     given `<code id="shared-document-creation-infrastructure:origin-agent-cluster"><a href="#origin-agent-cluster">Origin-Agent-Cluster</a></code>` and "<code>item</code>" from
+     <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-3">response</a>'s
+     <a href="https://fetch.spec.whatwg.org/#concept-response-header-list" id="shared-document-creation-infrastructure:concept-response-header-list" data-x-internal="concept-response-header-list">header list</a>.</p></li><li><p>Let <var>requestsOAC</var> be true if <var>oacHeader</var> is not
+     null and <var>oacHeader</var>[0] is the <a href="https://httpwg.org/specs/rfc8941.html#boolean" id="shared-document-creation-infrastructure:http-structured-header-boolean" data-x-internal="http-structured-header-boolean">boolean</a> true; otherwise false.</p></li><li><p>If <var>navigationParams</var>'s <a href="#navigation-params-reserved-environment" id="shared-document-creation-infrastructure:navigation-params-reserved-environment">reserved environment</a> is a
+     <a href="#non-secure-context" id="shared-document-creation-infrastructure:non-secure-context">non-secure context</a>, then set <var>requestsOAC</var> to false.</p></li><li><p>Let <var>agent</var> be the result of <a href="#obtain-similar-origin-window-agent" id="shared-document-creation-infrastructure:obtain-similar-origin-window-agent">obtaining a similar-origin window agent</a>
+     given <var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin-3">origin</a>,
+     <var>browsingContext</var>'s <a href="#tlbc-group" id="shared-document-creation-infrastructure:tlbc-group">group</a>, and
+     <var>requestsOAC</var>.</p></li><li>
+      <p>Let <var>realmExecutionContext</var> be the result of <a href="#creating-a-new-javascript-realm" id="shared-document-creation-infrastructure:creating-a-new-javascript-realm">creating a new realm</a>
+      given <var>agent</var> and the following customizations:</p>
+
+      <ul><li><p>For the global object, create a new <code id="shared-document-creation-infrastructure:window-4"><a href="#window">Window</a></code> object.</p></li><li><p>For the global <b>this</b> binding, use <var>browsingContext</var>'s
+       <code id="shared-document-creation-infrastructure:windowproxy"><a href="#windowproxy">WindowProxy</a></code> object.</p></li></ul>
+     </li><li><p>Set <var>window</var> to the <a href="#concept-realm-global" id="shared-document-creation-infrastructure:concept-realm-global">global
+     object</a> of <var>realmExecutionContext</var>'s Realm component.</p></li><li><p>Let <var>topLevelCreationURL</var> be <var>creationURL</var>.</p></li><li><p>Let <var>topLevelOrigin</var> be <var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin-4">origin</a>.</p></li><li>
+      <p>If <var>navigable</var>'s <a href="#nav-container" id="shared-document-creation-infrastructure:nav-container-2">container</a> is not null:</p>
+
+      <ol><li><p>Let <var>parentEnvironment</var> be <var>navigable</var>'s <a href="#nav-container" id="shared-document-creation-infrastructure:nav-container-3">container</a>'s <a href="#relevant-settings-object" id="shared-document-creation-infrastructure:relevant-settings-object">relevant settings object</a>.</p></li><li><p>Set <var>topLevelCreationURL</var> to <var>parentEnvironment</var>'s <a href="#concept-environment-top-level-creation-url" id="shared-document-creation-infrastructure:concept-environment-top-level-creation-url">top-level
+       creation URL</a>.</p></li><li><p>Set <var>topLevelOrigin</var> to <var>parentEnvironment</var>'s <a href="#concept-environment-top-level-origin" id="shared-document-creation-infrastructure:concept-environment-top-level-origin">top-level
+       origin</a>.</p></li></ol>
+     </li><li><p><a href="#set-up-a-window-environment-settings-object" id="shared-document-creation-infrastructure:set-up-a-window-environment-settings-object">Set up a window environment settings object</a> with <var>creationURL</var>,
+     <var>realmExecutionContext</var>, <var>navigationParams</var>'s <a href="#navigation-params-reserved-environment" id="shared-document-creation-infrastructure:navigation-params-reserved-environment-2">reserved environment</a>,
+     <var>topLevelCreationURL</var>, and <var>topLevelOrigin</var>.</p></li></ol>
+
+    <p class="note">This is the usual case, where the new <code id="shared-document-creation-infrastructure:document-9"><a href="#document">Document</a></code> we're about to
+    create gets a new <code id="shared-document-creation-infrastructure:window-5"><a href="#window">Window</a></code> to go along with it.</p>
+   </li><li><p>Let <var>loadTimingInfo</var> be a new <a href="#document-load-timing-info" id="shared-document-creation-infrastructure:document-load-timing-info">document load timing info</a> with its
+   <a href="#navigation-start-time" id="shared-document-creation-infrastructure:navigation-start-time">navigation start time</a> set to <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-4">response</a>'s <a href="https://fetch.spec.whatwg.org/#concept-response-timing-info" id="shared-document-creation-infrastructure:concept-response-timing-info" data-x-internal="concept-response-timing-info">timing info</a>'s <a href="https://fetch.spec.whatwg.org/#fetch-timing-info-start-time" id="shared-document-creation-infrastructure:fetch-timing-info-start-time" data-x-internal="fetch-timing-info-start-time">start time</a>.</p></li><li>
+    <p>Let <var>document</var> be a new <code id="shared-document-creation-infrastructure:document-10"><a href="#document">Document</a></code>, with</p>
+
+    <dl class="props"><dt><a href="https://dom.spec.whatwg.org/#concept-document-type" id="shared-document-creation-infrastructure:concept-document-type-2" data-x-internal="concept-document-type">type</a></dt><dd><var>type</var></dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-content-type" id="shared-document-creation-infrastructure:concept-document-content-type-2" data-x-internal="concept-document-content-type">content type</a></dt><dd><var>contentType</var></dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-origin" id="shared-document-creation-infrastructure:concept-document-origin-4" data-x-internal="concept-document-origin">origin</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin-5">origin</a></dd><dt><a href="#concept-document-bc" id="shared-document-creation-infrastructure:concept-document-bc-2">browsing context</a></dt><dd><var>browsingContext</var>
+
+     </dd><dt><a href="#concept-document-policy-container" id="shared-document-creation-infrastructure:concept-document-policy-container">policy container</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-policy-container" id="shared-document-creation-infrastructure:navigation-params-policy-container">policy
+     container</a></dd><dt><a href="#concept-document-permissions-policy" id="shared-document-creation-infrastructure:concept-document-permissions-policy">permissions policy</a></dt><dd><var>permissionsPolicy</var></dd><dt><a href="#active-sandboxing-flag-set" id="shared-document-creation-infrastructure:active-sandboxing-flag-set">active sandboxing flag set</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-sandboxing" id="shared-document-creation-infrastructure:navigation-params-sandboxing">final sandboxing
+     flag set</a></dd><dt><a href="#concept-document-coop" id="shared-document-creation-infrastructure:concept-document-coop">opener policy</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-coop" id="shared-document-creation-infrastructure:navigation-params-coop">cross-origin opener
+     policy</a></dd><dt><a href="#load-timing-info" id="shared-document-creation-infrastructure:load-timing-info">load timing info</a></dt><dd><var>loadTimingInfo</var></dd><dt><a href="#was-created-via-cross-origin-redirects" id="shared-document-creation-infrastructure:was-created-via-cross-origin-redirects">was created via cross-origin redirects</a></dt><dd>true if <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-5">response</a>'s <a href="https://fetch.spec.whatwg.org/#response-redirect-taint" id="shared-document-creation-infrastructure:concept-response-redirect-taint" data-x-internal="concept-response-redirect-taint">redirect taint</a> is not "<code>same-origin</code>"; otherwise false</dd><dt><a href="#concept-document-navigation-id" id="shared-document-creation-infrastructure:concept-document-navigation-id">during-loading navigation ID for WebDriver BiDi</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-id" id="shared-document-creation-infrastructure:navigation-params-id">id</a></dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-url" id="shared-document-creation-infrastructure:the-document's-address" data-x-internal="the-document's-address">URL</a></dt><dd><var>creationURL</var></dd><dt><a href="#current-document-readiness" id="shared-document-creation-infrastructure:current-document-readiness">current document readiness</a></dt><dd>"<code>loading</code>"</dd><dt><a href="#concept-document-about-base-url" id="shared-document-creation-infrastructure:concept-document-about-base-url">about base URL</a></dt><dd><var>navigationParams</var>'s <a href="#navigation-params-about-base-url" id="shared-document-creation-infrastructure:navigation-params-about-base-url">about base URL</a></dd><dt><a href="https://dom.spec.whatwg.org/#concept-document-allow-declarative-shadow-roots" id="shared-document-creation-infrastructure:concept-document-allow-declarative-shadow-roots" data-x-internal="concept-document-allow-declarative-shadow-roots">allow declarative shadow
+     roots</a></dt><dd>true</dd><dt><a href="https://dom.spec.whatwg.org/#document-custom-element-registry" id="shared-document-creation-infrastructure:document-custom-element-registry" data-x-internal="document-custom-element-registry">custom element registry</a></dt><dd>a new <code id="shared-document-creation-infrastructure:customelementregistry"><a href="#customelementregistry">CustomElementRegistry</a></code> object</dd></dl>
+   </li><li><p>Set <var>window</var>'s <a href="#concept-document-window" id="shared-document-creation-infrastructure:concept-document-window">associated
+   <code>Document</code></a> to <var>document</var>.</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-internal-ancestor-origin-objects-list" id="shared-document-creation-infrastructure:concept-document-internal-ancestor-origin-objects-list">internal ancestor origin objects
+   list</a> to the result of running the <a href="#internal-ancestor-origin-objects-list-creation-steps" id="shared-document-creation-infrastructure:internal-ancestor-origin-objects-list-creation-steps">internal ancestor origin objects list creation
+   steps</a> given <var>document</var> and <var>navigationParams</var>'s <a href="#navigation-params-iframe-referrer-policy" id="shared-document-creation-infrastructure:navigation-params-iframe-referrer-policy"><code>iframe</code> element referrer
+   policy</a>.</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-ancestor-origins-list" id="shared-document-creation-infrastructure:concept-document-ancestor-origins-list">ancestor
+   origins list</a> to the result of running the <a href="#ancestor-origins-list-creation-steps" id="shared-document-creation-infrastructure:ancestor-origins-list-creation-steps">ancestor origins list creation
+   steps</a> given <var>document</var>.</p></li><li><p><a id="shared-document-creation-infrastructure:run-csp-initialization-for-a-document" href="https://w3c.github.io/webappsec-csp/#run-document-csp-initialization" data-x-internal="run-csp-initialization-for-a-document">Run CSP initialization for a <code>Document</code></a> given
+   <var>document</var>. <a href="#refsCSP">[CSP]</a></p>
+
+   </li><li>
+    <p>If <var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-3">request</a> is
+    non-null:</p>
+
+    <ol><li><p>Set <var>document</var>'s <a href="#the-document's-referrer" id="shared-document-creation-infrastructure:the-document's-referrer">referrer</a> to the
+     empty string.</p></li><li><p>Let <var>referrer</var> be <var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-4">request</a>'s <a href="https://fetch.spec.whatwg.org/#concept-request-referrer" id="shared-document-creation-infrastructure:concept-request-referrer" data-x-internal="concept-request-referrer">referrer</a>.</p></li><li>
+      <p>If <var>referrer</var> is a <a id="shared-document-creation-infrastructure:url-record" href="https://url.spec.whatwg.org/#concept-url" data-x-internal="url-record">URL record</a>, then set <var>document</var>'s <a href="#the-document's-referrer" id="shared-document-creation-infrastructure:the-document's-referrer-2">referrer</a> to the <a href="https://url.spec.whatwg.org/#concept-url-serializer" id="shared-document-creation-infrastructure:concept-url-serializer" data-x-internal="concept-url-serializer">serialization</a> of <var>referrer</var>.</p>
+
+      <p class="note">Per <cite>Fetch</cite>, <var>referrer</var> will be either a <a id="shared-document-creation-infrastructure:url-record-2" href="https://url.spec.whatwg.org/#concept-url" data-x-internal="url-record">URL
+      record</a> or "<code>no-referrer</code>" at this point.</p>
+     </li></ol>
+   </li><li>
+    <p>If <var>navigationParams</var>'s <a href="#navigation-params-fetch-controller" id="shared-document-creation-infrastructure:navigation-params-fetch-controller">fetch
+    controller</a> is not null:</p>
+
+    <ol><li><p>Let <var>fullTimingInfo</var> be the result of <a href="https://fetch.spec.whatwg.org/#extract-full-timing-info" id="shared-document-creation-infrastructure:extract-full-timing-info" data-x-internal="extract-full-timing-info">extracting the full timing info</a> from <var>navigationParams</var>'s <a href="#navigation-params-fetch-controller" id="shared-document-creation-infrastructure:navigation-params-fetch-controller-2">fetch controller</a>.</p></li><li><p>Let <var>redirectCount</var> be 0.</p></li><li>
+      <p>If <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-6">response</a>'s <a href="https://fetch.spec.whatwg.org/#response-redirect-taint" id="shared-document-creation-infrastructure:concept-response-redirect-taint-2" data-x-internal="concept-response-redirect-taint">redirect taint</a> is "<code>same-origin</code>", or all of the following are true:</p>
+
+      <ul><li><p><var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-5">request</a>'s <a href="https://fetch.spec.whatwg.org/#concept-request-client" id="shared-document-creation-infrastructure:concept-request-client" data-x-internal="concept-request-client">client</a> is null, or <var>navigationParams</var>'s
+       <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-6">request</a>'s <a href="https://fetch.spec.whatwg.org/#concept-request-referrer" id="shared-document-creation-infrastructure:concept-request-referrer-2" data-x-internal="concept-request-referrer">referrer</a> is not "<code>no-referrer</code>", and</p></li><li><p><a href="https://fetch.spec.whatwg.org/#navigation-tao-check" id="shared-document-creation-infrastructure:navigation-tao-check" data-x-internal="navigation-tao-check">navigation TAO check</a> given
+       <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-7">response</a>
+       and <var>navigationParams</var>'s <a href="#navigation-params-origin" id="shared-document-creation-infrastructure:navigation-params-origin-6">origin</a>
+       returns <a id="shared-document-creation-infrastructure:success" href="https://infra.spec.whatwg.org/#success" data-x-internal="success">success</a>,</p></li></ul>
+
+      <p>then set <var>redirectCount</var> to <var>navigationParams</var>'s <a href="#navigation-params-request" id="shared-document-creation-infrastructure:navigation-params-request-7">request</a>'s <a href="https://fetch.spec.whatwg.org/#concept-request-redirect-count" id="shared-document-creation-infrastructure:concept-request-redirect-count" data-x-internal="concept-request-redirect-count">redirect count</a>.</p>
+     </li><li><p><a id="shared-document-creation-infrastructure:create-the-navigation-timing-entry" href="https://w3c.github.io/navigation-timing/#dfn-create-the-navigation-timing-entry" data-x-internal="create-the-navigation-timing-entry">Create the navigation timing entry</a> for <var>document</var>, given
+     <var>fullTimingInfo</var>, <var>redirectCount</var>, <var>navigationTimingType</var>,
+     <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-8">response</a>'s
+     <a href="https://fetch.spec.whatwg.org/#response-service-worker-timing-info" id="shared-document-creation-infrastructure:concept-response-service-worker-timing-info" data-x-internal="concept-response-service-worker-timing-info">service worker timing info</a>,
+     and <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-9">response</a>'s
+     <a href="https://fetch.spec.whatwg.org/#concept-response-body-info" id="shared-document-creation-infrastructure:concept-response-body-info" data-x-internal="concept-response-body-info">body info</a>.</p></li></ol>
+   </li><li><p><a id="shared-document-creation-infrastructure:create-the-navigation-timing-entry-2" href="https://w3c.github.io/navigation-timing/#dfn-create-the-navigation-timing-entry" data-x-internal="create-the-navigation-timing-entry">Create the navigation timing entry</a> for <var>document</var>, with
+   <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-10">response</a>'s <a href="https://fetch.spec.whatwg.org/#concept-response-timing-info" id="shared-document-creation-infrastructure:concept-response-timing-info-2" data-x-internal="concept-response-timing-info">timing info</a>, <var>redirectCount</var>,
+   <var>navigationParams</var>'s <a href="#navigation-params-nav-timing-type" id="shared-document-creation-infrastructure:navigation-params-nav-timing-type">navigation timing
+   type</a>, and <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-11">response</a>'s <a href="https://fetch.spec.whatwg.org/#response-service-worker-timing-info" id="shared-document-creation-infrastructure:concept-response-service-worker-timing-info-2" data-x-internal="concept-response-service-worker-timing-info">service worker timing info</a>.</p></li><li>
+    <p>If <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-12">response</a>
+    has a `<code id="shared-document-creation-infrastructure:refresh"><a href="#refresh">Refresh</a></code>` header:</p>
+
+    <ol><li><p>Let <var>value</var> be the <a href="https://infra.spec.whatwg.org/#isomorphic-decode" id="shared-document-creation-infrastructure:isomorphic-decode" data-x-internal="isomorphic-decode">isomorphic decoding</a>
+     of the value of the header.</p></li><li><p>Run the <a href="#shared-declarative-refresh-steps" id="shared-document-creation-infrastructure:shared-declarative-refresh-steps">shared declarative refresh steps</a> with <var>document</var> and
+     <var>value</var>.</p></li></ol>
+
+    <p class="XXX">We do not currently have a spec for how to handle multiple `<code id="shared-document-creation-infrastructure:refresh-2"><a href="#refresh">Refresh</a></code>`
+    headers. This is tracked as <a href="https://github.com/whatwg/html/issues/2900">issue #2900</a>.</p>
+   </li><li><p>If <var>navigationParams</var>'s <a href="#navigation-params-commit-early-hints" id="shared-document-creation-infrastructure:navigation-params-commit-early-hints">commit early hints</a> is not null, then call
+   <var>navigationParams</var>'s <a href="#navigation-params-commit-early-hints" id="shared-document-creation-infrastructure:navigation-params-commit-early-hints-2">commit early
+   hints</a> with <var>document</var>.</p></li><li><p><a href="#process-link-headers" id="shared-document-creation-infrastructure:process-link-headers">Process link headers</a> given <var>document</var>,
+   <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-13">response</a>, and
+   "<code>pre-media</code>".</p></li><li>
+    <p>If <var>navigationParams</var>'s <a href="#navigation-params-navigable" id="shared-document-creation-infrastructure:navigation-params-navigable-4">navigable</a>
+    is a <a href="#top-level-traversable" id="shared-document-creation-infrastructure:top-level-traversable">top-level traversable</a>, then <a href="#process-the-speculation-rules-header" id="shared-document-creation-infrastructure:process-the-speculation-rules-header">process the `<code>Speculation-Rules</code>`
+    header</a> given <var>document</var> and <var>navigationParams</var>'s <a href="#navigation-params-response" id="shared-document-creation-infrastructure:navigation-params-response-14">response</a>.</p>
+
+    <p class="note">This is conditional because <a href="#step-consider-speculative-loads-top-level-only">speculative loads are only considered for
+    top-level traversables</a>, so it would be wasteful to fetch these rules otherwise.</p>
+   </li><li><p><a id="shared-document-creation-infrastructure:potentially-free-deferred-fetch-quota" href="https://fetch.spec.whatwg.org/#potentially-free-deferred-fetch-quota" data-x-internal="potentially-free-deferred-fetch-quota">Potentially free deferred fetch quota</a> for <var>document</var>.</p></li><li><p>Return <var>document</var>.</p></li></ol>
+  </div>
+<p>A <code id="unloading-documents:document"><a href="#document">Document</a></code> has a <dfn id="concept-document-salvageable"><i>salvageable</i></dfn> state, which must initially be
+  true, and a <dfn id="page-showing">page showing</dfn> boolean, which is initially false. The <a href="#page-showing" id="unloading-documents:page-showing">page
+  showing</a> boolean is used to ensure that scripts receive <code id="unloading-documents:event-pageshow"><a href="#event-pageshow">pageshow</a></code> and <code id="unloading-documents:event-pagehide"><a href="#event-pagehide">pagehide</a></code> events
+  in a consistent manner (e.g., that they never receive two <code id="unloading-documents:event-pagehide-2"><a href="#event-pagehide">pagehide</a></code> events in a row without an intervening <code id="unloading-documents:event-pageshow-2"><a href="#event-pageshow">pageshow</a></code>, or vice versa).</p>
+<div data-algorithm="">
+  <p>To <dfn id="unload-a-document">unload</dfn> a <code id="unloading-documents:document-5"><a href="#document">Document</a></code>
+  <var>oldDocument</var>, given an optional <code id="unloading-documents:document-6"><a href="#document">Document</a></code> <var>newDocument</var>:</p>
+
+  <ol><li><p><a id="unloading-documents:assert" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: this is running as part of a <a href="#concept-task" id="unloading-documents:concept-task">task</a>
+   queued on <var>oldDocument</var>'s <a href="#relevant-agent" id="unloading-documents:relevant-agent">relevant agent</a>'s <a href="#concept-agent-event-loop" id="unloading-documents:concept-agent-event-loop">event loop</a>.</p></li><li><p>Let <var>unloadTimingInfo</var> be a new <a href="#document-unload-timing-info" id="unloading-documents:document-unload-timing-info">document unload timing
+   info</a>.</p></li><li>
+    <p>If <var>newDocument</var> is not given, then set <var>unloadTimingInfo</var> to null.</p>
+
+    <p class="note">In this case there is no new document that needs to know about how long it took
+    <var>oldDocument</var> to unload.</p>
+   </li><li>
+    <p>Otherwise, if <var>newDocument</var>'s <a href="#event-loop" id="unloading-documents:event-loop-2">event loop</a> is not
+    <var>oldDocument</var>'s <a href="#event-loop" id="unloading-documents:event-loop-3">event loop</a>, then the user agent may be <a href="#unload-a-document" id="unloading-documents:unload-a-document">unloading</a> <var>oldDocument</var> <a href="#in-parallel" id="unloading-documents:in-parallel">in parallel</a>. In
+    that case, the user agent should set <var>unloadTimingInfo</var> to null.</p>
+
+    <p class="note">In this case <var>newDocument</var>'s loading is not impacted by how long it
+    takes to unload <var>oldDocument</var>, so it would be meaningless to communicate that timing
+    info.</p>
+   </li><li>
+    <p>Let <var>intendToKeepInBfcache</var> be true if the user agent intends to keep
+    <var>oldDocument</var> alive in a <a href="#session-history-entry" id="unloading-documents:session-history-entry">session history entry</a>, such that it can later be
+    <a href="#note-bfcache">used for history traversal</a>.</p>
+
+    <p>This must be false if <var>oldDocument</var> is not <i id="unloading-documents:concept-document-salvageable"><a href="#concept-document-salvageable">salvageable</a></i>, or if there are any descendants of
+    <var>oldDocument</var> which the user agent does not intend to keep alive in the same way
+    (including due to their lack of <i id="unloading-documents:concept-document-salvageable-2"><a href="#concept-document-salvageable">salvageability</a></i>).</p>
+   </li><li><p>Let <var>eventLoop</var> be <var>oldDocument</var>'s <a href="#relevant-agent" id="unloading-documents:relevant-agent-2">relevant agent</a>'s <a href="#concept-agent-event-loop" id="unloading-documents:concept-agent-event-loop-2">event loop</a>.</p></li><li><p>Increase <var>eventLoop</var>'s <a href="#termination-nesting-level" id="unloading-documents:termination-nesting-level">termination nesting level</a> by 1.</p></li><li><p>Increase <var>oldDocument</var>'s <a href="#unload-counter" id="unloading-documents:unload-counter">unload counter</a> by 1.</p></li><li><p>If <var>intendToKeepInBfcache</var> is false, then set <var>oldDocument</var>'s <i id="unloading-documents:concept-document-salvageable-3"><a href="#concept-document-salvageable">salvageable</a></i> state to false.</p></li><li>
+    <p>If <var>oldDocument</var>'s <a href="#page-showing" id="unloading-documents:page-showing-2">page showing</a> is true:</p>
+
+    <ol><li><p>Set <var>oldDocument</var>'s <a href="#page-showing" id="unloading-documents:page-showing-3">page showing</a> to false.</p></li><li><p><a href="#fire-a-page-transition-event" id="unloading-documents:fire-a-page-transition-event">Fire a page transition event</a> named <code id="unloading-documents:event-pagehide-3"><a href="#event-pagehide">pagehide</a></code> at <var>oldDocument</var>'s <a href="#concept-relevant-global" id="unloading-documents:concept-relevant-global">relevant global
+     object</a> with <var>oldDocument</var>'s <i id="unloading-documents:concept-document-salvageable-4"><a href="#concept-document-salvageable">salvageable</a></i> state.</p></li><li><p><a href="#update-the-visibility-state" id="unloading-documents:update-the-visibility-state">Update the visibility state</a> of <var>oldDocument</var> to
+     "<code>hidden</code>".</p></li></ol>
+   </li><li><p>If <var>unloadTimingInfo</var> is not null, then set <var>unloadTimingInfo</var>'s
+   <a href="#unload-event-start-time" id="unloading-documents:unload-event-start-time">unload event start time</a> to the <a id="unloading-documents:current-high-resolution-time" href="https://w3c.github.io/hr-time/#dfn-current-high-resolution-time" data-x-internal="current-high-resolution-time">current high resolution time</a> given
+   <var>newDocument</var>'s <a href="#concept-relevant-global" id="unloading-documents:concept-relevant-global-2">relevant global object</a>, <a href="https://w3c.github.io/hr-time/#dfn-coarsen-time" id="unloading-documents:coarsen-time" data-x-internal="coarsen-time">coarsened</a> given <var>oldDocument</var>'s <a href="#relevant-settings-object" id="unloading-documents:relevant-settings-object">relevant settings object</a>'s
+   <a href="#concept-settings-object-cross-origin-isolated-capability" id="unloading-documents:concept-settings-object-cross-origin-isolated-capability">cross-origin isolated
+   capability</a>.</p></li><li><p>If <var>oldDocument</var>'s <i id="unloading-documents:concept-document-salvageable-5"><a href="#concept-document-salvageable">salvageable</a></i>
+   state is false, then <a href="https://dom.spec.whatwg.org/#concept-event-fire" id="unloading-documents:concept-event-fire" data-x-internal="concept-event-fire">fire an event</a> named <code id="unloading-documents:event-unload"><a href="#event-unload">unload</a></code> at <var>oldDocument</var>'s <a href="#concept-relevant-global" id="unloading-documents:concept-relevant-global-3">relevant global
+   object</a>, with <i>legacy target override flag</i> set.</p></li><li><p>If <var>unloadTimingInfo</var> is not null, then set <var>unloadTimingInfo</var>'s
+   <a href="#unload-event-end-time" id="unloading-documents:unload-event-end-time">unload event end time</a> to the <a id="unloading-documents:current-high-resolution-time-2" href="https://w3c.github.io/hr-time/#dfn-current-high-resolution-time" data-x-internal="current-high-resolution-time">current high resolution time</a> given
+   <var>newDocument</var>'s <a href="#concept-relevant-global" id="unloading-documents:concept-relevant-global-4">relevant global object</a>, <a href="https://w3c.github.io/hr-time/#dfn-coarsen-time" id="unloading-documents:coarsen-time-2" data-x-internal="coarsen-time">coarsened</a> given <var>oldDocument</var>'s <a href="#relevant-settings-object" id="unloading-documents:relevant-settings-object-2">relevant settings object</a>'s
+   <a href="#concept-settings-object-cross-origin-isolated-capability" id="unloading-documents:concept-settings-object-cross-origin-isolated-capability-2">cross-origin isolated
+   capability</a>.</p></li><li><p>Decrease <var>eventLoop</var>'s <a href="#termination-nesting-level" id="unloading-documents:termination-nesting-level-2">termination nesting level</a> by 1.</p></li><li><p>Set <var>oldDocument</var>'s <a href="#suspension-time" id="unloading-documents:suspension-time">suspension time</a> to the <a id="unloading-documents:current-high-resolution-time-3" href="https://w3c.github.io/hr-time/#dfn-current-high-resolution-time" data-x-internal="current-high-resolution-time">current high
+   resolution time</a> given <var>document</var>'s <a href="#concept-relevant-global" id="unloading-documents:concept-relevant-global-5">relevant global object</a>.</p></li><li><p>Set <var>oldDocument</var>'s <a href="#suspended-timer-handles" id="unloading-documents:suspended-timer-handles">suspended timer handles</a> to the result of
+   <a href="https://infra.spec.whatwg.org/#map-getting-the-keys" id="unloading-documents:map-get-the-keys" data-x-internal="map-get-the-keys">getting the keys</a> for the
+   <a href="#map-of-active-timers" id="unloading-documents:map-of-active-timers">map of active timers</a>.</p></li><li><p>Set <var>oldDocument</var>'s <a href="#has-been-scrolled-by-the-user" id="unloading-documents:has-been-scrolled-by-the-user">has been scrolled by the user</a> to false.</p></li><li><p>Run any <a href="#unloading-document-cleanup-steps" id="unloading-documents:unloading-document-cleanup-steps">unloading document cleanup steps</a> for <var>oldDocument</var> that are
+   defined by this specification and <a href="#other-applicable-specifications" id="unloading-documents:other-applicable-specifications">other applicable specifications</a>.</p></li><li><p>If <var>oldDocument</var>'s <a href="#node-navigable" id="unloading-documents:node-navigable">node navigable</a> is a <a href="#top-level-traversable" id="unloading-documents:top-level-traversable">top-level
+   traversable</a>, <a href="#build-not-restored-reasons-for-a-top-level-traversable-and-its-descendants" id="unloading-documents:build-not-restored-reasons-for-a-top-level-traversable-and-its-descendants">build not restored reasons for a top-level traversable and its
+   descendants</a> given <var>oldDocument</var>'s <a href="#node-navigable" id="unloading-documents:node-navigable-2">node navigable</a>.</p></li><li><p>If <var>oldDocument</var>'s <i id="unloading-documents:concept-document-salvageable-6"><a href="#concept-document-salvageable">salvageable</a></i> state
+   is false, then <a href="#destroy-a-document" id="unloading-documents:destroy-a-document">destroy</a> <var>oldDocument</var>.</p></li><li><p>Decrease <var>oldDocument</var>'s <a href="#unload-counter" id="unloading-documents:unload-counter-2">unload counter</a> by 1.</p></li><li><p>If <var>newDocument</var> is given, <var>newDocument</var>'s <a href="#was-created-via-cross-origin-redirects" id="unloading-documents:was-created-via-cross-origin-redirects">was created via
+   cross-origin redirects</a> is false, and <var>newDocument</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="unloading-documents:concept-document-origin" data-x-internal="concept-document-origin">origin</a> is the <a href="#same-origin" id="unloading-documents:same-origin">same</a> as
+   <var>oldDocument</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="unloading-documents:concept-document-origin-2" data-x-internal="concept-document-origin">origin</a>, then set
+   <var>newDocument</var>'s <a href="#previous-document-unload-timing" id="unloading-documents:previous-document-unload-timing">previous document unload timing</a> to
+   <var>unloadTimingInfo</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p id="discard-a-document">To <dfn id="destroy-a-document">destroy</dfn> a
+  <code id="destroying-documents:document"><a href="#document">Document</a></code> <var>document</var>:</p>
+
+  <ol><li><p><a id="destroying-documents:assert" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: this is running as part of a <a href="#concept-task" id="destroying-documents:concept-task">task</a>
+   queued on <var>document</var>'s <a href="#relevant-agent" id="destroying-documents:relevant-agent">relevant agent</a>'s <a href="#concept-agent-event-loop" id="destroying-documents:concept-agent-event-loop">event loop</a>.</p></li><li><p><a href="#abort-a-document" id="destroying-documents:abort-a-document">Abort</a> <var>document</var>.</p></li><li><p>Set <var>document</var>'s <i id="destroying-documents:concept-document-salvageable"><a href="#concept-document-salvageable">salvageable</a></i> state
+   to false.</p></li><li><p>Let <var>ports</var> be the list of <code id="destroying-documents:messageport"><a href="#messageport">MessagePort</a></code>s whose <a href="#concept-relevant-global" id="destroying-documents:concept-relevant-global">relevant global
+   object</a>'s <a href="#concept-document-window" id="destroying-documents:concept-document-window">associated <code>Document</code></a> is
+   <var>document</var>.</p></li><li><p>For each <var>port</var> in <var>ports</var>, <a href="#disentangle" id="destroying-documents:disentangle">disentangle</a>
+   <var>port</var>.</p></li><li><p>Run any <a href="#unloading-document-cleanup-steps" id="destroying-documents:unloading-document-cleanup-steps">unloading document cleanup steps</a> for <var>document</var> that
+   are defined by this specification and <a href="#other-applicable-specifications" id="destroying-documents:other-applicable-specifications">other applicable specifications</a>.</p></li><li><p>Remove any <a href="#concept-task" id="destroying-documents:concept-task-2">tasks</a> whose <a href="#concept-task-document" id="destroying-documents:concept-task-document">document</a> is <var>document</var> from any <a href="#task-queue" id="destroying-documents:task-queue">task
+   queue</a> (without running those tasks).</p></li><li><p>Set <var>document</var>'s <a href="#concept-document-bc" id="destroying-documents:concept-document-bc">browsing context</a> to
+   null.</p></li><li><p>Set <var>document</var>'s <a href="#node-navigable" id="destroying-documents:node-navigable">node navigable</a>'s <a href="#nav-active-history-entry" id="destroying-documents:nav-active-history-entry">active session history entry</a>'s <a href="#she-document-state" id="destroying-documents:she-document-state">document state</a>'s <a href="#document-state-document" id="destroying-documents:document-state-document">document</a> to null.</p></li><li><p><a href="https://infra.spec.whatwg.org/#list-remove" id="destroying-documents:list-remove" data-x-internal="list-remove">Remove</a> <var>document</var> from the
+   <a href="#concept-WorkerGlobalScope-owner-set" id="destroying-documents:concept-WorkerGlobalScope-owner-set">owner set</a> of each <code id="destroying-documents:workerglobalscope"><a href="#workerglobalscope">WorkerGlobalScope</a></code> object whose set <a href="https://infra.spec.whatwg.org/#list-contain" id="destroying-documents:list-contains" data-x-internal="list-contains">contains</a> <var>document</var>.</p></li><li><p><a href="https://infra.spec.whatwg.org/#list-iterate" id="destroying-documents:list-iterate" data-x-internal="list-iterate">For each</a> <var>workletGlobalScope</var> in
+   <var>document</var>'s <a href="#concept-document-worklet-global-scopes" id="destroying-documents:concept-document-worklet-global-scopes">worklet global
+   scopes</a>, <a href="#terminate-a-worklet-global-scope" id="destroying-documents:terminate-a-worklet-global-scope">terminate</a>
+   <var>workletGlobalScope</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>To <dfn id="abort-a-document-and-its-descendants">abort a document and its descendants</dfn> given a <code id="aborting-a-document-load:document-2"><a href="#document">Document</a></code>
+  <var>document</var>:</p>
+
+  <ol><li><p><a id="aborting-a-document-load:assert-2" href="https://infra.spec.whatwg.org/#assert" data-x-internal="assert">Assert</a>: this is running as part of a <a href="#concept-task" id="aborting-a-document-load:concept-task-4">task</a>
+   queued on <var>document</var>'s <a href="#relevant-agent" id="aborting-a-document-load:relevant-agent-2">relevant agent</a>'s <a href="#concept-agent-event-loop" id="aborting-a-document-load:concept-agent-event-loop-2">event loop</a>.</p></li><li><p>Let <var>descendantNavigables</var> be <var>document</var>'s <a href="#descendant-navigables" id="aborting-a-document-load:descendant-navigables">descendant
+   navigables</a>.</p></li><li>
+    <p><a href="https://infra.spec.whatwg.org/#list-iterate" id="aborting-a-document-load:list-iterate" data-x-internal="list-iterate">For each</a> <var>descendantNavigable</var> of
+    <var>descendantNavigables</var> <span class="XXX">in what order?</span>, <a href="#queue-a-global-task" id="aborting-a-document-load:queue-a-global-task">queue
+    a global task</a> on the <a href="#navigation-and-traversal-task-source" id="aborting-a-document-load:navigation-and-traversal-task-source">navigation and traversal task source</a> given
+    <var>descendantNavigable</var>'s <a href="#nav-window" id="aborting-a-document-load:nav-window">active window</a> to perform the
+    following steps:</p>
+
+    <ol><li><p><a href="#abort-a-document" id="aborting-a-document-load:abort-a-document">Abort</a> <var>descendantNavigable</var>'s <a href="#nav-document" id="aborting-a-document-load:nav-document">active document</a>.</p></li><li><p>If <var>descendantNavigable</var>'s <a href="#nav-document" id="aborting-a-document-load:nav-document-2">active
+     document</a>'s <i id="aborting-a-document-load:concept-document-salvageable"><a href="#concept-document-salvageable">salvageable</a></i> is false, then set
+     <var>document</var>'s <i id="aborting-a-document-load:concept-document-salvageable-2"><a href="#concept-document-salvageable">salvageable</a></i> to
+     false.</p></li></ol>
+   </li><li><p><a href="#abort-a-document" id="aborting-a-document-load:abort-a-document-2">Abort</a> <var>document</var>.</p></li></ol>
+  </div>
+<div data-algorithm="">
+  <p>The <dfn id="document-open-steps">document open steps</dfn>, given a <var>document</var>, are as follows:</p>
+
+  <ol><li><p>If <var>document</var> is an <a href="https://dom.spec.whatwg.org/#xml-document" id="opening-the-input-stream:xml-documents-2" data-x-internal="xml-documents">XML document</a>, then throw
+   an <a id="opening-the-input-stream:invalidstateerror-3" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a> <code id="opening-the-input-stream:domexception-3"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>If <var>document</var>'s <a href="#throw-on-dynamic-markup-insertion-counter" id="opening-the-input-stream:throw-on-dynamic-markup-insertion-counter">throw-on-dynamic-markup-insertion counter</a> is greater
+   than 0, then throw an <a id="opening-the-input-stream:invalidstateerror-4" href="https://webidl.spec.whatwg.org/#invalidstateerror" data-x-internal="invalidstateerror">"<code>InvalidStateError</code>"</a>
+   <code id="opening-the-input-stream:domexception-4"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li><p>Let <var>entryDocument</var> be the <a href="#entry-global-object" id="opening-the-input-stream:entry-global-object">entry global object</a>'s <a href="#concept-document-window" id="opening-the-input-stream:concept-document-window">associated <code>Document</code></a>.</p></li><li><p>If <var>document</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="opening-the-input-stream:concept-document-origin" data-x-internal="concept-document-origin">origin</a> is not
+   <a href="#same-origin" id="opening-the-input-stream:same-origin">same origin</a> to <var>entryDocument</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-origin" id="opening-the-input-stream:concept-document-origin-2" data-x-internal="concept-document-origin">origin</a>, then throw a
+   <a id="opening-the-input-stream:securityerror" href="https://webidl.spec.whatwg.org/#securityerror" data-x-internal="securityerror">"<code>SecurityError</code>"</a> <code id="opening-the-input-stream:domexception-5"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.</p></li><li>
+    <p>If <var>document</var> has an <a href="#active-parser" id="opening-the-input-stream:active-parser-2">active parser</a> whose <a href="#script-nesting-level" id="opening-the-input-stream:script-nesting-level">script nesting
+    level</a> is greater than 0, then return <var>document</var>.</p>
+
+    <p class="note">This basically causes <code id="opening-the-input-stream:dom-document-open-2"><a href="#dom-document-open">document.open()</a></code> to
+    be ignored when it's called in an inline script found during parsing, while still letting it
+    have an effect when called from a non-parser task such as a timer callback or event handler.</p>
+   </li><li>
+    <p>Similarly, if <var>document</var>'s <a href="#unload-counter" id="opening-the-input-stream:unload-counter">unload counter</a> is greater than 0, then
+    return <var>document</var>.</p>
+
+    <p class="note">This basically causes <code id="opening-the-input-stream:dom-document-open-3"><a href="#dom-document-open">document.open()</a></code> to
+    be ignored when it's called from a <code id="opening-the-input-stream:event-beforeunload"><a href="#event-beforeunload">beforeunload</a></code>, <code id="opening-the-input-stream:event-pagehide"><a href="#event-pagehide">pagehide</a></code>, or <code id="opening-the-input-stream:event-unload"><a href="#event-unload">unload</a></code> event
+    handler while the <code id="opening-the-input-stream:document-7"><a href="#document">Document</a></code> is being unloaded.</p>
+   </li><li>
+    <p>If <var>document</var>'s <a href="#active-parser-was-aborted" id="opening-the-input-stream:active-parser-was-aborted">active parser was aborted</a> is true, then return
+    <var>document</var>.</p>
+
+    <p class="note">This notably causes <code id="opening-the-input-stream:dom-document-open-4"><a href="#dom-document-open">document.open()</a></code> to
+    be ignored if it is called after a <a href="#navigate" id="opening-the-input-stream:navigate">navigation</a> has started, but
+    only during the initial parse. See <a href="https://github.com/whatwg/html/issues/4723">issue
+    #4723</a> for more background.</p>
+   </li><li><p>If <var>document</var>'s <a href="#node-navigable" id="opening-the-input-stream:node-navigable">node navigable</a> is non-null and
+   <var>document</var>'s <a href="#node-navigable" id="opening-the-input-stream:node-navigable-2">node navigable</a>'s <a href="#ongoing-navigation" id="opening-the-input-stream:ongoing-navigation">ongoing navigation</a> is a
+   <a href="#navigation-id" id="opening-the-input-stream:navigation-id">navigation ID</a>, then <a href="#nav-stop" id="opening-the-input-stream:nav-stop">stop loading</a>
+   <var>document</var>'s <a href="#node-navigable" id="opening-the-input-stream:node-navigable-3">node navigable</a>.</p></li><li><p>For each <a id="opening-the-input-stream:shadow-including-inclusive-descendant" href="https://dom.spec.whatwg.org/#concept-shadow-including-inclusive-descendant" data-x-internal="shadow-including-inclusive-descendant">shadow-including inclusive descendant</a> <var>node</var> of
+   <var>document</var>, <a href="#erase-all-event-listeners-and-handlers" id="opening-the-input-stream:erase-all-event-listeners-and-handlers">erase all event listeners and handlers</a> given
+   <var>node</var>.</p></li><li><p>If <var>document</var> is the <a href="#concept-document-window" id="opening-the-input-stream:concept-document-window-2">associated
+   <code>Document</code></a> of <var>document</var>'s <a href="#concept-relevant-global" id="opening-the-input-stream:concept-relevant-global">relevant global object</a>, then
+   <a href="#erase-all-event-listeners-and-handlers" id="opening-the-input-stream:erase-all-event-listeners-and-handlers-2">erase all event listeners and handlers</a> given <var>document</var>'s <a href="#concept-relevant-global" id="opening-the-input-stream:concept-relevant-global-2">relevant
+   global object</a>.</p></li><li><p><a href="https://dom.spec.whatwg.org/#concept-node-replace-all" id="opening-the-input-stream:concept-node-replace-all" data-x-internal="concept-node-replace-all">Replace all</a> with null within
+   <var>document</var>.</p></li><li>
+    <p>If <var>document</var> is <a href="#fully-active" id="opening-the-input-stream:fully-active">fully active</a>:</p>
+
+    <ol><li><p>Let <var>newURL</var> be a copy of <var>entryDocument</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-url" id="opening-the-input-stream:the-document's-address" data-x-internal="the-document's-address">URL</a>.</p></li><li><p>If <var>entryDocument</var> is not <var>document</var>, then set <var>newURL</var>'s
+     <a href="https://url.spec.whatwg.org/#concept-url-fragment" id="opening-the-input-stream:concept-url-fragment" data-x-internal="concept-url-fragment">fragment</a> to null.</p></li><li><p>Run the <a href="#url-and-history-update-steps" id="opening-the-input-stream:url-and-history-update-steps">URL and history update steps</a> with <var>document</var> and
+     <var>newURL</var>.</p></li></ol>
+   </li><li><p>Set <var>document</var>'s <a href="#is-initial-about:blank" id="opening-the-input-stream:is-initial-about:blank">is initial <code>about:blank</code></a> to
+   false.</p></li><li><p>If <var>document</var>'s <a href="#iframe-load-in-progress" id="opening-the-input-stream:iframe-load-in-progress">iframe load in progress</a> flag is set, then set
+   <var>document</var>'s <a href="#mute-iframe-load" id="opening-the-input-stream:mute-iframe-load">mute iframe load</a> flag.</p></li><li><p>Set <var>document</var> to <a id="opening-the-input-stream:no-quirks-mode" href="https://dom.spec.whatwg.org/#concept-document-no-quirks" data-x-internal="no-quirks-mode">no-quirks mode</a>.</p></li><li><p>Create an <a href="#html-parser" id="opening-the-input-stream:html-parser">HTML parser</a> whose <a href="#allow-declarative-shadow-roots" id="opening-the-input-stream:allow-declarative-shadow-roots">allow declarative shadow roots</a> is
+   <var>document</var>'s <a href="https://dom.spec.whatwg.org/#concept-document-allow-declarative-shadow-roots" id="opening-the-input-stream:concept-document-allow-declarative-shadow-roots" data-x-internal="concept-document-allow-declarative-shadow-roots">allow
+   declarative shadow roots</a>, and associate it with <var>document</var>. This is a
+   <dfn id="script-created-parser">script-created parser</dfn> (meaning that it can be closed by the <code id="opening-the-input-stream:dom-document-open-5"><a href="#dom-document-open">document.open()</a></code> and <code id="opening-the-input-stream:dom-document-close"><a href="#dom-document-close">document.close()</a></code> methods, and that the tokenizer will wait for
+   an explicit call to <code id="opening-the-input-stream:dom-document-close-2"><a href="#dom-document-close">document.close()</a></code> before emitting an
+   end-of-file token). The encoding <a href="#concept-encoding-confidence" id="opening-the-input-stream:concept-encoding-confidence">confidence</a> is
+   <i>irrelevant</i>.</p></li><li><p>Set the <a href="#insertion-point" id="opening-the-input-stream:insertion-point">insertion point</a> to point at just before the end of the <a href="#input-stream" id="opening-the-input-stream:input-stream">input
+   stream</a> (which at this point will be empty).</p></li><li>
+    <p><a href="#update-the-current-document-readiness" id="opening-the-input-stream:update-the-current-document-readiness">Update the current document readiness</a> of <var>document</var> to "<code>loading</code>".</p>
+
+    <p class="note">This causes a <code id="opening-the-input-stream:event-readystatechange"><a href="#event-readystatechange">readystatechange</a></code>
+    event to fire, but the event is actually unobservable to author code, because of the previous
+    step which <a href="#erase-all-event-listeners-and-handlers" id="opening-the-input-stream:erase-all-event-listeners-and-handlers-3">erased all event listeners and
+    handlers</a> that could observe it.</p>
+   </li><li><p>Return <var>document</var>.</p></li></ol>
+  </div>
+</body></html>

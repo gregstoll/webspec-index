@@ -3,7 +3,6 @@ use crate::state::model::{AnchorTarget, SuperBasis, SuperEdge, TypeKey};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 /// A node in the type hierarchy: a single type with its supertype edges.
-#[allow(dead_code)]
 pub struct TypeNode {
     pub key: TypeKey,
     pub name: String,
@@ -11,7 +10,6 @@ pub struct TypeNode {
 }
 
 /// A field in the flat field table, suitable for `lookup_field`.
-#[allow(dead_code)]
 pub struct FieldEntry {
     pub anchor: AnchorTarget,
     pub names: Vec<String>,

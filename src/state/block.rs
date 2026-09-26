@@ -1,5 +1,4 @@
 //! Declaration blocks as token sequences, for the owner and type grammars.
-#![allow(dead_code)]
 use crate::parse::steps::{resolve_href, AnchorTarget};
 use scraper::{ElementRef, Node};
 use std::ops::Range;

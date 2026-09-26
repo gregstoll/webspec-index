@@ -159,7 +159,7 @@ fn reason_name(reason: OpaqueReason) -> &'static str {
     }
 }
 
-fn class_name(class: OccurrenceClass) -> &'static str {
+pub(crate) fn class_name(class: OccurrenceClass) -> &'static str {
     match class {
         OccurrenceClass::Write => "write",
         OccurrenceClass::Init => "init",
@@ -169,7 +169,7 @@ fn class_name(class: OccurrenceClass) -> &'static str {
     }
 }
 
-fn role_name(role: ProseRole) -> &'static str {
+pub(crate) fn role_name(role: ProseRole) -> &'static str {
     match role {
         ProseRole::Steps => "steps",
         ProseRole::Getter => "getter",

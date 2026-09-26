@@ -1,0 +1,23 @@
+{
+  "fields": [
+    {"field": "HTML#is-initial-about:blank",
+     "writes": ["HTML#document-open-steps:13"], "inits": [],
+     "negatives": {"HTML#url-and-history-update-steps:4": "read", "HTML#initialise-the-document-object:6": "read", "HTML#activate-history-entry:3": "read"}},
+    {"field": "DOM#concept-node-document",
+     "writes": ["DOM#clone-a-single-node:8", "DOM#concept-node-adopt:3.1", "DOM#concept-node-adopt:3.3.1",
+                "DOM#concept-element-attributes-append:3", "DOM#concept-element-attributes-replace:4",
+                "DOM#dom-processinginstruction-processinginstruction:1"],
+     "inits": ["DOM#create-a-node:2", "HTML#rendered-text-fragment:4.2"],
+     "unclassified": ["HTML#dialog-setup-steps:4"],
+     "negatives": {"HTML#show-a-modal-dialog:14": "read_path", "HTML#update-the-image-data:20": "read"}},
+    {"field": "HTML#nav-active-history-entry",
+     "writes": ["HTML#initialize-the-navigable:4", "HTML#navigate-fragid:14", "HTML#url-and-history-update-steps:11", "HTML#activate-history-entry:4"],
+     "inits": [], "negatives": {"HTML#reload:2": "read_path", "HTML#destroy-a-document:9": "read_path"}},
+    {"field": "HTML#concept-document-salvageable",
+     "writes": ["HTML#make-document-unsalvageable:3", "HTML#unload-a-document:9", "HTML#destroy-a-document:3", "HTML#abort-a-document-and-its-descendants:3.2"],
+     "inits": [], "negatives": {"HTML#abort-a-document-and-its-descendants:3.2": "read", "HTML#unload-a-document:12": "read", "HTML#unload-a-document:20": "read"}},
+    {"field": "DOM#stop-propagation-flag",
+     "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10"],
+     "inits": [], "negatives": {}}
+  ]
+}

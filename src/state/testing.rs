@@ -125,3 +125,62 @@ pub fn index_offline(
         crate::state::extract::bundled_catalog(),
     )
 }
+
+/// Golden-set site key: `SPEC#subject:step` when there is a step path,
+/// `SPEC#subject (role)` for a prose role other than `normative`, else `SPEC#subject`.
+pub fn site_key(spec: &str, subject: &str, step_path: Option<&str>, role: Option<&str>) -> String {
+    match (step_path, role) {
+        (Some(step), _) => format!("{spec}#{subject}:{step}"),
+        (None, Some(role)) if role != "normative" => format!("{spec}#{subject} ({role})"),
+        _ => format!("{spec}#{subject}"),
+    }
+}
+
+/// Classes (snake_case) of the occurrences of `field_selector` (`SPEC#anchor`) in the
+/// sources whose [`site_key`] is `site`, across every current snapshot's state model.
+pub fn occurrence_classes(
+    conn: &rusqlite::Connection,
+    field_selector: &str,
+    site: &str,
+) -> std::collections::BTreeSet<String> {
+    use crate::state::extract::{class_name, role_name};
+    use crate::state::ir::SourceContext;
+    let (field_spec, field_anchor) = field_selector
+        .split_once('#')
+        .expect("field selector is SPEC#anchor");
+    let mut classes = std::collections::BTreeSet::new();
+    for snapshot in crate::db::state::state_snapshots(conn).expect("state snapshots") {
+        let Some(state) =
+            crate::db::state::load_state_model(conn, snapshot.id).expect("state model")
+        else {
+            continue;
+        };
+        let sources: std::collections::HashSet<&str> = state
+            .sources
+            .iter()
+            .filter(|source| {
+                let (step_path, role) = match &source.context {
+                    SourceContext::Algorithm { step_path, .. } => (step_path.as_deref(), None),
+                    SourceContext::BranchLabel { step_path, .. } => {
+                        (Some(step_path.as_str()), None)
+                    }
+                    SourceContext::Prose {
+                        step_path, role, ..
+                    } => (step_path.as_deref(), Some(role_name(*role))),
+                };
+                site_key(&state.spec, &source.subject.anchor, step_path, role) == site
+            })
+            .map(|source| source.id.as_str())
+            .collect();
+        for occurrence in &state.occurrences {
+            let targets_field = occurrence
+                .target
+                .as_ref()
+                .is_some_and(|t| t.spec == field_spec && t.anchor == field_anchor);
+            if targets_field && sources.contains(occurrence.source_id.as_str()) {
+                classes.insert(class_name(occurrence.class).to_owned());
+            }
+        }
+    }
+    classes
+}

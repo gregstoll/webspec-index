@@ -2,7 +2,6 @@
 //!
 //! `parse_type_phrase` is the core type parser used by `declared_type` and
 //! stage C YAML processing.
-#![allow(dead_code)]
 
 use crate::parse::steps::AnchorTarget;
 use crate::state::block::{sentences, BlockToken, Pattern};
