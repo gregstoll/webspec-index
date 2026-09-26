@@ -63,6 +63,167 @@
   boolean, initially false.</p>
 <p>Each <code id="the-document-object:document-18"><a href="#document">Document</a></code> has an <dfn id="open-dialogs-list">open dialogs list</dfn>, which is a <a id="the-document-object:list" href="https://infra.spec.whatwg.org/#list" data-x-internal="list">list</a> of
   <code id="the-document-object:the-dialog-element"><a href="#the-dialog-element">dialog</a></code> elements, initially empty.</p>
+<h4 id="html-element-constructors"><span class="secno">3.2.3</span> HTML element constructors<a href="#html-element-constructors" class="self-link"></a></h4>
+<div data-algorithm="">
+  <p>Interfaces declared with constructor operations that are annotated with the <code id="html-element-constructors:htmlconstructor-2"><a href="#htmlconstructor">[HTMLConstructor]</a></code> extended attribute have the following
+  <a id="html-element-constructors:overridden-constructor-steps" href="https://webidl.spec.whatwg.org/#overridden-constructor-steps" data-x-internal="overridden-constructor-steps">overridden constructor steps</a>:</p>
+
+  <ol><li>
+    <p>If <a id="html-element-constructors:newtarget" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a> is equal to the <a id="html-element-constructors:active-function-object" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function
+    object</a>, then throw a <code id="html-element-constructors:typeerror"><a data-x-internal="typeerror" href="https://tc39.es/ecma262/#sec-native-error-types-used-in-this-standard-typeerror">TypeError</a></code>.</p>
+
+    <div class="example">
+     <p>This can occur when a custom element is defined using an <a id="html-element-constructors:element-interface" href="https://dom.spec.whatwg.org/#concept-element-interface" data-x-internal="element-interface">element interface</a> as
+     its constructor:</p>
+
+     <pre><code class="js">customElements<c- p="">.</c->define<c- p="">(</c-><c- u="">"bad-1"</c-><c- p="">,</c-> HTMLButtonElement<c- p="">);</c->
+<c- k="">new</c-> HTMLButtonElement<c- p="">();</c->          <c- c1="">// (1)</c->
+document<c- p="">.</c->createElement<c- p="">(</c-><c- u="">"bad-1"</c-><c- p="">);</c->  <c- c1="">// (2)</c-></code></pre>
+
+     <p>In this case, during the execution of <code id="html-element-constructors:htmlbuttonelement"><a href="#htmlbuttonelement">HTMLButtonElement</a></code> (either explicitly, as
+     in (1), or implicitly, as in (2)), both the <a id="html-element-constructors:active-function-object-2" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function object</a> and
+     <a id="html-element-constructors:newtarget-2" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a> are <code id="html-element-constructors:htmlbuttonelement-2"><a href="#htmlbuttonelement">HTMLButtonElement</a></code>. If this check was not present, it
+     would be possible to create an instance of <code id="html-element-constructors:htmlbuttonelement-3"><a href="#htmlbuttonelement">HTMLButtonElement</a></code> whose local name was
+     <code>bad-1</code>.</p>
+    </div>
+   </li><li><p>Let <var>registry</var> be null.</p></li><li>
+    <p>If the <a id="html-element-constructors:surrounding-agent" href="https://tc39.es/ecma262/#surrounding-agent" data-x-internal="surrounding-agent">surrounding agent</a>'s <a href="#active-custom-element-constructor-map" id="html-element-constructors:active-custom-element-constructor-map">active custom element constructor
+    map</a>[<a id="html-element-constructors:newtarget-3" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>] <a href="https://infra.spec.whatwg.org/#map-exists" id="html-element-constructors:map-exists" data-x-internal="map-exists">exists</a>, then set
+    <var>registry</var> to the <a id="html-element-constructors:surrounding-agent-2" href="https://tc39.es/ecma262/#surrounding-agent" data-x-internal="surrounding-agent">surrounding agent</a>'s <a href="#active-custom-element-constructor-map" id="html-element-constructors:active-custom-element-constructor-map-2">active custom element
+    constructor map</a>[<a id="html-element-constructors:newtarget-4" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>].</p>
+   </li><li><p>Otherwise, set <var>registry</var> to the <a href="#current-global-object" id="html-element-constructors:current-global-object">current global object</a>'s <a href="#concept-document-window" id="html-element-constructors:concept-document-window">associated <code>Document</code></a>'s <a href="https://dom.spec.whatwg.org/#document-custom-element-registry" id="html-element-constructors:document-custom-element-registry" data-x-internal="document-custom-element-registry">custom element registry</a>.</p></li><li>
+    <p>Let <var>definition</var> be the item in <var>registry</var>'s <a href="#custom-element-definition-set" id="html-element-constructors:custom-element-definition-set">custom element
+    definition set</a> with <a href="#concept-custom-element-definition-constructor" id="html-element-constructors:concept-custom-element-definition-constructor">constructor</a> equal to
+    <a id="html-element-constructors:newtarget-5" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>. If there is no such item, then throw a <code id="html-element-constructors:typeerror-2"><a data-x-internal="typeerror" href="https://tc39.es/ecma262/#sec-native-error-types-used-in-this-standard-typeerror">TypeError</a></code>.</p>
+
+    <p class="note">Since there can be no item in <var>registry</var>'s <a href="#custom-element-definition-set" id="html-element-constructors:custom-element-definition-set-2">custom element
+    definition set</a> with a <a href="#concept-custom-element-definition-constructor" id="html-element-constructors:concept-custom-element-definition-constructor-2">constructor</a> of undefined, this
+    step also prevents HTML element constructors from being called as functions (since in that case
+    <a id="html-element-constructors:newtarget-6" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a> will be undefined).</p>
+   </li><li><p>Let <var>isValue</var> be null.</p></li><li>
+    <p>If <var>definition</var>'s <a href="#concept-custom-element-definition-local-name" id="html-element-constructors:concept-custom-element-definition-local-name">local
+    name</a> is equal to <var>definition</var>'s <a href="#concept-custom-element-definition-name" id="html-element-constructors:concept-custom-element-definition-name">name</a> (i.e., <var>definition</var> is for
+    an <a href="#autonomous-custom-element" id="html-element-constructors:autonomous-custom-element">autonomous custom element</a>):</p>
+
+    <ol><li>
+      <p>If the <a id="html-element-constructors:active-function-object-3" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function object</a> is not <code id="html-element-constructors:htmlelement"><a href="#htmlelement">HTMLElement</a></code>, then throw a
+      <code id="html-element-constructors:typeerror-3"><a data-x-internal="typeerror" href="https://tc39.es/ecma262/#sec-native-error-types-used-in-this-standard-typeerror">TypeError</a></code>.</p>
+
+      <div class="example">
+       <p>This can occur when a custom element is defined to not extend any local names, but
+       inherits from a non-<code id="html-element-constructors:htmlelement-2"><a href="#htmlelement">HTMLElement</a></code> class:</p>
+
+       <pre><code class="js">customElements<c- p="">.</c->define<c- p="">(</c-><c- u="">"bad-2"</c-><c- p="">,</c-> <c- a="">class</c-> Bad2 <c- k="">extends</c-> HTMLParagraphElement <c- p="">{});</c-></code></pre>
+
+       <p>In this case, during the (implicit) <code>super()</code> call that occurs when
+       constructing an instance of <code>Bad2</code>, the <a id="html-element-constructors:active-function-object-4" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function
+       object</a> is <code id="html-element-constructors:htmlparagraphelement"><a href="#htmlparagraphelement">HTMLParagraphElement</a></code>, not <code id="html-element-constructors:htmlelement-3"><a href="#htmlelement">HTMLElement</a></code>.</p>
+      </div>
+     </li></ol>
+   </li><li>
+    <p>Otherwise (i.e., if <var>definition</var> is for a <a href="#customized-built-in-element" id="html-element-constructors:customized-built-in-element">customized built-in
+    element</a>):</p>
+
+    <ol><li><p>Let <var>valid local names</var> be the list of local names for elements defined in this
+     specification or in <a href="#other-applicable-specifications" id="html-element-constructors:other-applicable-specifications">other applicable specifications</a> that use the <a id="html-element-constructors:active-function-object-5" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active
+     function object</a> as their <a id="html-element-constructors:element-interface-2" href="https://dom.spec.whatwg.org/#concept-element-interface" data-x-internal="element-interface">element interface</a>.</p></li><li>
+      <p>If <var>valid local names</var> does not contain <var>definition</var>'s <a href="#concept-custom-element-definition-local-name" id="html-element-constructors:concept-custom-element-definition-local-name-2">local name</a>, then throw a
+      <code id="html-element-constructors:typeerror-4"><a data-x-internal="typeerror" href="https://tc39.es/ecma262/#sec-native-error-types-used-in-this-standard-typeerror">TypeError</a></code>.</p>
+
+      <div class="example">
+       <p>This can occur when a custom element is defined to extend a given local name but inherits
+       from the wrong class:</p>
+
+       <pre><code class="js">customElements<c- p="">.</c->define<c- p="">(</c-><c- u="">"bad-3"</c-><c- p="">,</c-> <c- a="">class</c-> Bad3 <c- k="">extends</c-> HTMLQuoteElement <c- p="">{},</c-> <c- p="">{</c-> <c- k="">extends</c-><c- o="">:</c-> <c- u="">"p"</c-> <c- p="">});</c-></code></pre>
+
+       <p>In this case, during the (implicit) <code>super()</code> call that occurs when
+       constructing an instance of <code>Bad3</code>, <var>valid local names</var> is the
+       list containing <code id="html-element-constructors:the-q-element"><a href="#the-q-element">q</a></code> and <code id="html-element-constructors:the-blockquote-element"><a href="#the-blockquote-element">blockquote</a></code>, but <var>definition</var>'s <a href="#concept-custom-element-definition-local-name" id="html-element-constructors:concept-custom-element-definition-local-name-3">local name</a> is <code id="html-element-constructors:the-p-element"><a href="#the-p-element">p</a></code>,
+       which is not in that list.</p>
+      </div>
+     </li><li><p>Set <var>isValue</var> to <var>definition</var>'s <a href="#concept-custom-element-definition-name" id="html-element-constructors:concept-custom-element-definition-name-2">name</a>.</p></li></ol>
+   </li><li>
+    <p>If <var>definition</var>'s <a href="#concept-custom-element-definition-construction-stack" id="html-element-constructors:concept-custom-element-definition-construction-stack">construction stack</a> is
+    empty:</p>
+
+    <ol><li><p>Let <var>element</var> be the result of <a href="https://webidl.spec.whatwg.org/#internally-create-a-new-object-implementing-the-interface" id="html-element-constructors:internally-create-a-new-object-implementing-the-interface" data-x-internal="internally-create-a-new-object-implementing-the-interface">internally creating a new object implementing the interface</a>
+     to which the <a id="html-element-constructors:active-function-object-6" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function object</a> corresponds, given the <a id="html-element-constructors:current-realm" href="https://tc39.es/ecma262/#current-realm" data-x-internal="current-realm">current
+     realm</a> and <a id="html-element-constructors:newtarget-7" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>.</p></li><li><p>Set <var>element</var>'s <a id="html-element-constructors:node-document" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> to the <a href="#current-global-object" id="html-element-constructors:current-global-object-2">current global
+     object</a>'s <a href="#concept-document-window" id="html-element-constructors:concept-document-window-2">associated
+     <code>Document</code></a>.</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#concept-element-namespace" id="html-element-constructors:concept-element-namespace" data-x-internal="concept-element-namespace">namespace</a> to
+     the <a id="html-element-constructors:html-namespace-2" href="https://infra.spec.whatwg.org/#html-namespace" data-x-internal="html-namespace-2">HTML namespace</a>.</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#concept-element-namespace-prefix" id="html-element-constructors:concept-element-namespace-prefix" data-x-internal="concept-element-namespace-prefix">namespace
+     prefix</a> to null.</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#concept-element-local-name" id="html-element-constructors:concept-element-local-name" data-x-internal="concept-element-local-name">local name</a> to
+     <var>definition</var>'s <a href="#concept-custom-element-definition-local-name" id="html-element-constructors:concept-custom-element-definition-local-name-4">local
+     name</a>.</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#element-custom-element-registry" id="html-element-constructors:element-custom-element-registry" data-x-internal="element-custom-element-registry">custom element
+     registry</a> to <var>registry</var>.</p></li><li><p>Set <var>element</var>'s <a id="html-element-constructors:custom-element-state" href="https://dom.spec.whatwg.org/#concept-element-custom-element-state" data-x-internal="custom-element-state">custom element state</a> to "<code>custom</code>".</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#concept-element-custom-element-definition" id="html-element-constructors:concept-element-custom-element-definition" data-x-internal="concept-element-custom-element-definition">custom
+     element definition</a> to <var>definition</var>.</p></li><li><p>Set <var>element</var>'s <a href="https://dom.spec.whatwg.org/#concept-element-is-value" id="html-element-constructors:concept-element-is-value" data-x-internal="concept-element-is-value"><code>is</code> value</a> to <var>isValue</var>.</p></li><li><p>Return <var>element</var>.</p></li></ol>
+
+    <p class="note">This occurs when author script constructs a new custom element directly, e.g.,
+    via <code>new MyCustomElement()</code>.</p>
+   </li><li><p>Let <var>prototype</var> be ? <a href="https://tc39.es/ecma262/#sec-get-o-p" id="html-element-constructors:js-get" data-x-internal="js-get">Get</a>(<a id="html-element-constructors:newtarget-8" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>,
+   "prototype").</p></li><li>
+    <p>If <var>prototype</var> <a href="https://tc39.es/ecma262/#sec-object-type" id="html-element-constructors:js-object" data-x-internal="js-object">is not an Object</a>:</p>
+
+    <ol><li><p>Let <var>realm</var> be ? <a id="html-element-constructors:getfunctionrealm" href="https://tc39.es/ecma262/#sec-getfunctionrealm" data-x-internal="getfunctionrealm">GetFunctionRealm</a>(<a id="html-element-constructors:newtarget-9" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a>).</p></li><li><p>Set <var>prototype</var> to the <a id="html-element-constructors:interface-prototype-object" href="https://webidl.spec.whatwg.org/#dfn-interface-prototype-object" data-x-internal="interface-prototype-object">interface prototype object</a> of
+     <var>realm</var> whose interface is the same as the interface of the <a id="html-element-constructors:active-function-object-7" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function
+     object</a>.</p></li></ol>
+
+    <p class="note">The realm of the <a id="html-element-constructors:active-function-object-8" href="https://tc39.es/ecma262/#active-function-object" data-x-internal="active-function-object">active function object</a> might not be
+    <var>realm</var>, so we are using the more general concept of "the same interface" across
+    realms; we are not looking for equality of <a href="https://webidl.spec.whatwg.org/#dfn-interface-object" id="html-element-constructors:interface-object" data-x-internal="interface-object">interface
+    objects</a>. This fallback behavior, including using the realm of <a id="html-element-constructors:newtarget-10" href="https://tc39.es/ecma262/#sec-built-in-function-objects" data-x-internal="newtarget">NewTarget</a> and
+    looking up the appropriate prototype there, is designed to match analogous behavior for the
+    JavaScript built-ins and Web IDL's <a id="html-element-constructors:internally-create-a-new-object-implementing-the-interface-2" href="https://webidl.spec.whatwg.org/#internally-create-a-new-object-implementing-the-interface" data-x-internal="internally-create-a-new-object-implementing-the-interface">internally create a new object implementing the
+    interface</a> algorithm.</p>
+   </li><li><p>Let <var>element</var> be the last entry in <var>definition</var>'s <a href="#concept-custom-element-definition-construction-stack" id="html-element-constructors:concept-custom-element-definition-construction-stack-2">construction stack</a>.</p></li><li>
+    <p>If <var>element</var> is an <a href="#concept-already-constructed-marker" id="html-element-constructors:concept-already-constructed-marker"><i>already
+    constructed</i> marker</a>, then throw a <code id="html-element-constructors:typeerror-5"><a data-x-internal="typeerror" href="https://tc39.es/ecma262/#sec-native-error-types-used-in-this-standard-typeerror">TypeError</a></code>.</p>
+
+    <div class="example">
+     <p>This can occur when the author code inside the <a href="#custom-element-constructor" id="html-element-constructors:custom-element-constructor">custom element
+     constructor</a> <a href="#custom-element-conformance">non-conformantly</a> creates another
+     instance of the class being constructed, before calling <code>super()</code>:</p>
+
+     <pre><code class="js"><c- a="">let</c-> doSillyThing <c- o="">=</c-> <c- kc="">true</c-><c- p="">;</c->
+
+<c- a="">class</c-> DontDoThis <c- k="">extends</c-> HTMLElement <c- p="">{</c->
+  constructor<c- p="">()</c-> <c- p="">{</c->
+    <c- k="">if</c-> <c- p="">(</c->doSillyThing<c- p="">)</c-> <c- p="">{</c->
+      doSillyThing <c- o="">=</c-> <c- kc="">false</c-><c- p="">;</c->
+      <c- k="">new</c-> DontDoThis<c- p="">();</c->
+      <c- c1="">// Now the construction stack will contain an </c-><i><c- c1="">already constructed</c-></i><c- c1=""> marker.</c->
+    <c- p="">}</c->
+
+    <c- c1="">// This will then fail with a TypeError:</c->
+    <c- k="">super</c-><c- p="">();</c->
+  <c- p="">}</c->
+<c- p="">}</c-></code></pre>
+    </div>
+
+    <div class="example">
+     <p>This can also occur when author code inside the <a href="#custom-element-constructor" id="html-element-constructors:custom-element-constructor-2">custom element constructor</a> <a href="#custom-element-conformance">non-conformantly</a> calls <code>super()</code>
+     twice, since per the JavaScript specification, this actually executes the superclass
+     constructor (i.e. this algorithm) twice, before throwing an error:
+
+     </p><pre><code class="js"><c- a="">class</c-> DontDoThisEither <c- k="">extends</c-> HTMLElement <c- p="">{</c->
+  constructor<c- p="">()</c-> <c- p="">{</c->
+    <c- k="">super</c-><c- p="">();</c->
+
+    <c- c1="">// This will throw, but not until it has already called into the HTMLElement constructor</c->
+    <c- k="">super</c-><c- p="">();</c->
+  <c- p="">}</c->
+<c- p="">}</c-></code></pre>
+    </div>
+   </li><li><p>Perform ? <var>element</var>.[[SetPrototypeOf]](<var>prototype</var>).</p></li><li><p>Replace the last entry in <var>definition</var>'s <a href="#concept-custom-element-definition-construction-stack" id="html-element-constructors:concept-custom-element-definition-construction-stack-3">construction stack</a> with an
+   <a href="#concept-already-constructed-marker" id="html-element-constructors:concept-already-constructed-marker-2"><i>already constructed</i>
+   marker</a>.</p></li><li>
+    <p>Return <var>element</var>.</p>
+
+    <p class="note">This step is normally reached when <a href="#upgrades" id="html-element-constructors:upgrades">upgrading</a> a custom element; the existing element is
+    returned, so that the <code>super()</code> call inside the <a href="#custom-element-constructor" id="html-element-constructors:custom-element-constructor-3">custom element
+    constructor</a> assigns that existing element to <b>this</b>.</p>
+   </li></ol>
+  </div>
 <div data-algorithm="">
   <p>The <dfn id="rendered-text-fragment">rendered text fragment</dfn> for a string <var>input</var> given a
   <code id="the-innertext-idl-attribute:document"><a href="#document">Document</a></code> <var>document</var> is the result of running the following steps:</p>
@@ -1053,5 +1214,11 @@
     step which <a href="#erase-all-event-listeners-and-handlers" id="opening-the-input-stream:erase-all-event-listeners-and-handlers-3">erased all event listeners and
     handlers</a> that could observe it.</p>
    </li><li><p>Return <var>document</var>.</p></li></ol>
+  </div>
+<h3 id="parsing-xhtml-documents"><span class="secno">14.2</span> Parsing XML documents<a href="#parsing-xhtml-documents" class="self-link"></a></h3>
+<div data-algorithm="">
+  <p>When an <a href="#xml-parser" id="parsing-xhtml-documents:xml-parser-9">XML parser</a> creates a <code id="parsing-xhtml-documents:node"><a data-x-internal="node" href="https://dom.spec.whatwg.org/#interface-node">Node</a></code> object, its <a id="parsing-xhtml-documents:node-document" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>
+  must be set to the <a id="parsing-xhtml-documents:node-document-2" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> of
+  the node into which the newly created node is to be inserted.</p>
   </div>
 </body></html>

@@ -4,7 +4,7 @@ use std::fmt;
 
 pub use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
 
-pub const STATE_VERSION: &str = "2";
+pub const STATE_VERSION: &str = "3";
 
 /// Canonical type identity. IDL types are keyed by IDL name, globally, so that
 /// `partial interface Document` in HTML and `interface Document` in DOM are one

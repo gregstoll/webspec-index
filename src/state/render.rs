@@ -311,9 +311,6 @@ fn site_line(out: &mut String, site: &SiteInfo) {
         (None, false) => {}
     }
     out.push_str(" — ");
-    if prose {
-        out.push_str("… ");
-    }
     out.push_str(&site.text);
     if site.receiver == "opaque" {
         out.push_str(" (receiver: opaque)");
@@ -674,6 +671,36 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
                 rule_id: "html/x".into()
             }),
             "override html/x"
+        );
+    }
+
+    #[test]
+    fn prose_and_branch_label_lines() {
+        use crate::state::testing::{db_with, DL_HTML, PROSE_DOM};
+        let conn = db_with(&[("DOM", PROSE_DOM), ("HTML", DL_HTML)]);
+        let md = response(
+            &query(
+                &conn,
+                "DOM#stop-propagation-flag",
+                &StateQueryOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert!(
+            md.contains("- DOM#dom-event-stoppropagation (method steps, prose) — … set this’s stop propagation flag.\n"),
+            "{md}"
+        );
+        let md = response(
+            &query(
+                &conn,
+                "HTML#is-initial-about:blank",
+                &StateQueryOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert!(
+            md.contains("- HTML#creating-a-new-browsing-context:1 — Let *document* be a new `Document`, with:\n  is initial `about:blank` → true\n"),
+            "{md}"
         );
     }
 }

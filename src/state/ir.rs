@@ -1301,6 +1301,18 @@ impl Parser<'_> {
                 if first.path.root == Root::Implicit {
                     next = self.keyword(next, &["the "]).unwrap_or(next);
                 }
+                // `this's ⟦A⟧ and this's ⟦B⟧`: a full path repeating the root.
+                if matches!(first.path.root, Root::This | Root::Var(_)) {
+                    if let Some(path) = self.path(next, to_terminated).filter(|p| {
+                        p.path.root == first.path.root
+                            && !p.path.hops.is_empty()
+                            && p.path.subscript.is_none()
+                    }) {
+                        end = path.end;
+                        more.push(path);
+                        continue;
+                    }
+                }
                 let Some((hop, Some(link), after)) = self.hop(next) else {
                     break;
                 };
@@ -1960,6 +1972,27 @@ mod tests {
             role_of(&s, &p, "stop immediate propagation flag"),
             Some(OccurrenceClass::Write)
         );
+    }
+
+    #[test]
+    fn flag_target_list_repeating_the_root() {
+        let (s, p) = one(
+            r##"Set <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#spf">stop propagation flag</a> and <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#sipf">stop immediate propagation flag</a>."##,
+        );
+        assert!(
+            matches!(&p.statements[0].kind, StatementKind::Set { targets, form: SetForm::Flag, .. } if targets.len() == 2)
+        );
+        assert_eq!(
+            role_of(&s, &p, "stop immediate propagation flag"),
+            Some(OccurrenceClass::Write)
+        );
+        let (_, p) = one(
+            r##"Set <var>e</var>’s <a href="#spf">stop propagation flag</a> and <var>x</var>’s <a href="#sipf">stop immediate propagation flag</a>."##,
+        );
+        assert!(!matches!(
+            &p.statements[0].kind,
+            StatementKind::Set { targets, .. } if targets.len() == 2
+        ));
     }
 
     #[test]

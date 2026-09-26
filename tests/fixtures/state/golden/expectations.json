@@ -8,7 +8,8 @@
                 "DOM#concept-element-attributes-append:3", "DOM#concept-element-attributes-replace:4",
                 "DOM#dom-processinginstruction-processinginstruction:1",
                 "DOM#dom-documentfragment-documentfragment (constructor)", "DOM#dom-text-text (constructor)",
-                "DOM#dom-comment-comment (constructor)"],
+                "DOM#dom-comment-comment (constructor)", "HTML#html-element-constructors:9.2",
+                "HTML#parsing-xhtml-documents"],
      "inits": ["DOM#create-a-node:2", "HTML#rendered-text-fragment:4.2"],
      "unclassified": ["HTML#dialog-setup-steps:4"],
      "negatives": {"HTML#show-a-modal-dialog:14": "read_path", "HTML#update-the-image-data:20": "read"}},
@@ -19,7 +20,10 @@
      "writes": ["HTML#make-document-unsalvageable:3", "HTML#unload-a-document:9", "HTML#destroy-a-document:3", "HTML#abort-a-document-and-its-descendants:3.2"],
      "inits": [], "negatives": {"HTML#abort-a-document-and-its-descendants:3.2": "read", "HTML#unload-a-document:12": "read", "HTML#unload-a-document:20": "read"}},
     {"field": "DOM#stop-propagation-flag",
-     "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10", "DOM#dom-event-stoppropagation (method)"],
-     "inits": [], "unclassified": ["DOM#dom-event-stopimmediatepropagation (method)"], "negatives": {}}
+     "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10", "DOM#dom-event-stoppropagation (method)",
+                "DOM#dom-event-stopimmediatepropagation (method)", "DOM#dom-event-cancelbubble (setter)"],
+     "inits": [], "negatives": {"DOM#dom-event-cancelbubble (getter)": "absent"}},
+    {"field": "HTML#active-sandboxing-flag-set", "writes": [],
+     "inits": ["HTML#creating-a-new-browsing-context:15", "HTML#initialise-the-document-object:9"], "negatives": {}}
   ]
 }
