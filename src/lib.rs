@@ -416,6 +416,7 @@ pub fn find_anchors_sql(
              JOIN snapshots sn ON s.snapshot_id = sn.id
              JOIN specs sp ON sn.spec_id = sp.id
              WHERE s.anchor LIKE ?1 AND sn.id IN (?2, ?3)
+             ORDER BY sp.name, s.ord
              LIMIT ?4",
         )?;
         let rows = stmt
@@ -430,6 +431,7 @@ pub fn find_anchors_sql(
              JOIN snapshots sn ON s.snapshot_id = sn.id
              JOIN specs sp ON sn.spec_id = sp.id
              WHERE s.anchor LIKE ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+             ORDER BY s.ord
              LIMIT ?3",
         )?;
         let rows = stmt
@@ -444,6 +446,7 @@ pub fn find_anchors_sql(
              JOIN snapshots sn ON s.snapshot_id = sn.id
              JOIN specs sp ON sn.spec_id = sp.id
              WHERE s.anchor LIKE ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+             ORDER BY sp.name, s.ord
              LIMIT ?2",
         )?;
         let rows = stmt
@@ -463,7 +466,7 @@ const SEARCH_SQL_PR: &str = "SELECT s.anchor, sp.name, s.title, s.section_type,
      JOIN snapshots sn ON s.snapshot_id = sn.id
      JOIN specs sp ON sn.spec_id = sp.id
      WHERE sections_fts MATCH ?1 AND sn.id IN (?2, ?3)
-     LIMIT ?4";
+     ORDER BY sections_fts.rank, sp.name, s.ord LIMIT ?4";
 
 #[cfg(feature = "native")]
 fn search_sections_pr(
@@ -626,7 +629,7 @@ const SEARCH_SQL_IN_SPEC: &str = "SELECT s.anchor, sp.name, s.title, s.section_t
      JOIN snapshots sn ON s.snapshot_id = sn.id
      JOIN specs sp ON sn.spec_id = sp.id
      WHERE sections_fts MATCH ?1 AND sp.name = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-     ORDER BY sections_fts.rank LIMIT ?3";
+     ORDER BY sections_fts.rank, sp.name, s.ord LIMIT ?3";
 
 const SEARCH_SQL_ALL: &str = "SELECT s.anchor, sp.name, s.title, s.section_type, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
      FROM sections_fts
@@ -634,7 +637,7 @@ const SEARCH_SQL_ALL: &str = "SELECT s.anchor, sp.name, s.title, s.section_type,
      JOIN snapshots sn ON s.snapshot_id = sn.id
      JOIN specs sp ON sn.spec_id = sp.id
      WHERE sections_fts MATCH ?1 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-     ORDER BY sections_fts.rank LIMIT ?2";
+     ORDER BY sections_fts.rank, sp.name, s.ord LIMIT ?2";
 
 pub fn search_sections_fts(
     conn: &Connection,
@@ -1120,6 +1123,7 @@ fn resolve_find_references_candidates(
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
          WHERE (LOWER(s.anchor) LIKE ?1 OR LOWER(COALESCE(s.title, '')) LIKE ?2) AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
+         ORDER BY sp.name, s.ord
          LIMIT 1000",
     )?;
 
@@ -1620,7 +1624,7 @@ pub fn query_idl_from_conn(
              JOIN specs sp ON sn.spec_id = sp.id
              LEFT JOIN sections s ON s.snapshot_id = d.snapshot_id AND s.anchor = d.anchor
              WHERE sp.name = ?1 AND d.anchor = ?2 AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-             ORDER BY d.kind
+             ORDER BY d.kind, d.ord
              LIMIT ?3",
         )?;
 
@@ -1670,7 +1674,7 @@ pub fn query_idl_from_conn(
                AND (d.anchor = ?1 COLLATE NOCASE
                     OR d.canonical_name LIKE ?2 OR d.name LIKE ?2)
                AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-             ORDER BY score DESC, sp.name, d.canonical_name
+             ORDER BY score DESC, sp.name, d.canonical_name, d.ord
              LIMIT ?4";
 
         let sql_without_spec = "SELECT sp.name, d.anchor, d.kind, d.name, d.owner, d.canonical_name, d.idl_text, s.title,
@@ -1689,7 +1693,7 @@ pub fn query_idl_from_conn(
              WHERE (d.anchor = ?1 COLLATE NOCASE
                     OR d.canonical_name LIKE ?2 OR d.name LIKE ?2)
                AND sn.pr_number IS NULL AND sn.sha LIKE 'hash:%'
-             ORDER BY score DESC, sp.name, d.canonical_name
+             ORDER BY score DESC, sp.name, d.canonical_name, d.ord
              LIMIT ?3";
 
         let mut stmt = conn.prepare(if spec_filter.is_some() {

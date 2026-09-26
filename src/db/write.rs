@@ -2,6 +2,7 @@
 use crate::model::{ParsedIdlDefinition, ParsedReference, ParsedSection};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
+use std::collections::HashMap;
 
 /// Join the caller's publication transaction, or own one for standalone writes.
 /// Errors propagate to the owner, which rolls the whole publication back.
@@ -108,11 +109,11 @@ pub fn insert_sections_bulk(
         {
             let mut stmt = tx.prepare(
             "INSERT OR IGNORE INTO sections
-             (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number, ord)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )?;
 
-            for section in sections {
+            for (ord, section) in sections.iter().enumerate() {
                 stmt.execute((
                     snapshot_id,
                     &section.anchor,
@@ -124,6 +125,7 @@ pub fn insert_sections_bulk(
                     &section.next_anchor,
                     section.depth,
                     &section.number,
+                    ord as i64,
                 ))?;
             }
         }
@@ -143,11 +145,13 @@ pub fn insert_refs_bulk(
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
-                               step_path, step_text, guard_path, call_site_id, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                               step_path, step_text, guard_path, call_site_id, kind, ord)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
 
+            let mut next_ord: HashMap<&str, i64> = HashMap::new();
             for reference in refs {
+                let ord = next_ord.entry(reference.from_anchor.as_str()).or_insert(0);
                 stmt.execute((
                     snapshot_id,
                     &reference.from_anchor,
@@ -158,7 +162,9 @@ pub fn insert_refs_bulk(
                     super::encode_guard_path(&reference.guard_path),
                     &reference.call_site_id,
                     reference.kind.as_str(),
+                    *ord,
                 ))?;
+                *ord += 1;
             }
         }
 
@@ -176,11 +182,11 @@ pub fn insert_idl_defs_bulk(
     atomic_write(conn, |tx| {
         {
             let mut stmt = tx.prepare(
-            "INSERT INTO idl_defs (snapshot_id, anchor, name, owner, kind, canonical_name, idl_text)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO idl_defs (snapshot_id, anchor, name, owner, kind, canonical_name, idl_text, ord)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
 
-            for def in defs {
+            for (ord, def) in defs.iter().enumerate() {
                 stmt.execute((
                     snapshot_id,
                     &def.anchor,
@@ -189,6 +195,7 @@ pub fn insert_idl_defs_bulk(
                     &def.kind,
                     &def.canonical_name,
                     &def.idl_text,
+                    ord as i64,
                 ))?;
             }
         }

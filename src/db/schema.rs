@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 pub fn initialize_schema(conn: &Connection) -> Result<()> {
     // Check if already initialized
@@ -48,6 +48,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             next_anchor   TEXT,
             depth         INTEGER,
             number        TEXT,
+            ord           INTEGER,
             UNIQUE(snapshot_id, anchor)
         );
 
@@ -63,7 +64,8 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             step_text    TEXT,
             guard_path   TEXT,
             call_site_id TEXT,
-            kind         TEXT
+            kind         TEXT,
+            ord          INTEGER
         );
 
         CREATE INDEX idx_refs_outgoing ON refs(snapshot_id, from_anchor);
@@ -79,6 +81,7 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             kind           TEXT NOT NULL,
             canonical_name TEXT NOT NULL,
             idl_text       TEXT,
+            ord            INTEGER,
             UNIQUE(snapshot_id, anchor, kind)
         );
 
@@ -90,7 +93,10 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             last_checked   TEXT NOT NULL,
             last_indexed   TEXT,
             content_hash   TEXT,
-            index_version TEXT
+            index_version TEXT,
+            etag           TEXT,
+            last_modified  TEXT,
+            source_hash    TEXT
         );
 
         CREATE TABLE meta (
@@ -116,14 +122,9 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
             VALUES ('delete', old.id, old.anchor, old.title, old.content_text);
         END;
 
-        CREATE TRIGGER sections_au AFTER UPDATE ON sections BEGIN
-            INSERT INTO sections_fts(sections_fts, rowid, anchor, title, content_text)
-            VALUES ('delete', old.id, old.anchor, old.title, old.content_text);
-            INSERT INTO sections_fts(rowid, anchor, title, content_text)
-            VALUES (new.id, new.anchor, new.title, new.content_text);
-        END;
         "#,
     )?;
+    conn.execute_batch(SECTIONS_AU_TRIGGER)?;
 
     Ok(())
 }
@@ -182,10 +183,41 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "refs", "call_site_id", "TEXT")?;
     ensure_column(conn, "refs", "kind", "TEXT")?;
     ensure_column(conn, "sections", "number", "TEXT")?;
+    ensure_column(conn, "sections", "ord", "INTEGER")?;
+    ensure_column(conn, "refs", "ord", "INTEGER")?;
+    ensure_column(conn, "idl_defs", "ord", "INTEGER")?;
+    ensure_column(conn, "update_checks", "etag", "TEXT")?;
+    ensure_column(conn, "update_checks", "last_modified", "TEXT")?;
+    ensure_column(conn, "update_checks", "source_hash", "TEXT")?;
+    let au_trigger: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='sections_au'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if has_table(conn, "sections")?
+        && au_trigger.as_deref() != Some(SECTIONS_AU_TRIGGER.trim().trim_end_matches(';'))
+    {
+        conn.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS sections_au;\n{SECTIONS_AU_TRIGGER}"
+        ))?;
+    }
     super::effects::initialize(conn)?;
+    ensure_column(conn, "effect_structures", "structure_bytes", "INTEGER")?;
     super::state::initialize(conn)?;
     Ok(())
 }
+
+/// Navigation and `ord` columns are not indexed, so rewriting them leaves the
+/// FTS index alone.
+const SECTIONS_AU_TRIGGER: &str = "
+CREATE TRIGGER sections_au AFTER UPDATE OF anchor, title, content_text ON sections BEGIN
+    INSERT INTO sections_fts(sections_fts, rowid, anchor, title, content_text)
+    VALUES ('delete', old.id, old.anchor, old.title, old.content_text);
+    INSERT INTO sections_fts(rowid, anchor, title, content_text)
+    VALUES (new.id, new.anchor, new.title, new.content_text);
+END;";
 
 /// Indexed data is derived from the parser, so a build that parses differently
 /// invalidates all of it. Rather than let specs drift to different parser
@@ -802,6 +834,59 @@ mod tests {
                 columns.contains(&expected.to_string()),
                 "fresh schema is missing refs.{expected}"
             );
+        }
+    }
+
+    #[test]
+    fn fts_update_trigger_ignores_navigation_and_ord_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='sections_au'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            sql.contains("UPDATE OF anchor, title, content_text"),
+            "{sql}"
+        );
+        let schema_version = |conn: &Connection| -> i64 {
+            conn.query_row("PRAGMA schema_version", [], |r| r.get(0))
+                .unwrap()
+        };
+        let before = schema_version(&conn);
+        run_migrations(&conn).unwrap();
+        assert_eq!(schema_version(&conn), before, "a current trigger is kept");
+        conn.execute_batch(
+            "DROP TRIGGER sections_au;
+             CREATE TRIGGER sections_au AFTER UPDATE ON sections BEGIN SELECT 1; END;",
+        )
+        .unwrap();
+        run_migrations(&conn).unwrap();
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='sections_au'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            sql.contains("UPDATE OF anchor, title, content_text"),
+            "{sql}"
+        );
+        for column in [
+            ("sections", "ord"),
+            ("refs", "ord"),
+            ("idl_defs", "ord"),
+            ("update_checks", "etag"),
+            ("update_checks", "last_modified"),
+            ("update_checks", "source_hash"),
+            ("effect_structures", "structure_bytes"),
+        ] {
+            assert!(has_column(&conn, column.0, column.1).unwrap(), "{column:?}");
         }
     }
 

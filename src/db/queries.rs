@@ -284,7 +284,7 @@ pub fn get_children(
     let mut stmt = conn.prepare(
         "SELECT anchor, title, number FROM sections
          WHERE snapshot_id = ?1 AND parent_anchor = ?2
-         ORDER BY rowid",
+         ORDER BY ord, rowid",
     )?;
 
     let children = stmt
@@ -351,7 +351,7 @@ pub fn get_outgoing_algorithm_calls(
            AND r.step_path IS NOT NULL
          GROUP BY r.to_spec, r.to_anchor,
                   r.step_path, r.step_text, r.guard_path, r.call_site_id, r.kind
-         ORDER BY MIN(r.id)",
+         ORDER BY MIN(r.ord), MIN(r.id)",
     )?;
 
     let edges = stmt
@@ -374,7 +374,8 @@ pub fn get_outgoing_edges(
         "SELECT to_spec, to_anchor, step_path, step_text, guard_path, call_site_id, kind
          FROM refs
          WHERE snapshot_id = ?1 AND from_anchor = ?2
-           AND (?3 IS NULL OR kind = ?3)",
+           AND (?3 IS NULL OR kind = ?3)
+         ORDER BY ord, id",
     )?;
 
     let edges = stmt
@@ -403,7 +404,8 @@ pub fn get_incoming_edges(
          JOIN specs sp ON sn.spec_id = sp.id
          WHERE r.to_spec = ?1 AND r.to_anchor = ?2 AND sn.pr_number IS NULL
            AND sn.sha LIKE 'hash:%'
-           AND (?3 IS NULL OR r.kind = ?3)",
+           AND (?3 IS NULL OR r.kind = ?3)
+         ORDER BY sp.name, r.from_anchor, r.ord, r.id",
     )?;
 
     let edges = stmt
@@ -464,14 +466,16 @@ pub fn search_sections(
          JOIN sections s ON sections_fts.rowid = s.id
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1 AND sp.name = ?2          LIMIT ?3"
+         WHERE sections_fts MATCH ?1 AND sp.name = ?2
+         ORDER BY rank, sp.name, s.ord LIMIT ?3"
     } else {
         "SELECT s.anchor, sp.name, snippet(sections_fts, 2, '<mark>', '</mark>', '...', 64)
          FROM sections_fts
          JOIN sections s ON sections_fts.rowid = s.id
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE sections_fts MATCH ?1          LIMIT ?2"
+         WHERE sections_fts MATCH ?1
+         ORDER BY rank, sp.name, s.ord LIMIT ?2"
     };
 
     let mut stmt = conn.prepare(sql)?;
@@ -503,12 +507,14 @@ pub fn find_anchors(
         "SELECT s.anchor, sp.name FROM sections s
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE s.anchor LIKE ?1 AND sp.name = ?2          LIMIT ?3"
+         WHERE s.anchor LIKE ?1 AND sp.name = ?2
+         ORDER BY sp.name, s.ord LIMIT ?3"
     } else {
         "SELECT s.anchor, sp.name FROM sections s
          JOIN snapshots sn ON s.snapshot_id = sn.id
          JOIN specs sp ON sn.spec_id = sp.id
-         WHERE s.anchor LIKE ?1          LIMIT ?2"
+         WHERE s.anchor LIKE ?1
+         ORDER BY sp.name, s.ord LIMIT ?2"
     };
 
     let mut stmt = conn.prepare(sql)?;
@@ -530,7 +536,7 @@ pub fn list_headings(conn: &Connection, snapshot_id: i64) -> Result<Vec<ListEntr
         "SELECT anchor, title, depth, parent_anchor, number
          FROM sections
          WHERE snapshot_id = ?1 AND section_type = 'heading'
-         ORDER BY rowid",
+         ORDER BY ord, rowid",
     )?;
 
     let headings = stmt
@@ -650,6 +656,68 @@ pub fn compute_pr_diff(
 mod tests {
     use super::*;
     use crate::db::{self, write};
+
+    #[test]
+    fn readers_order_by_ord_not_rowid() {
+        let conn = crate::db::open_test_db().unwrap();
+        let spec_id =
+            crate::db::write::insert_or_get_spec(&conn, "T", "https://t.test/", "w3c").unwrap();
+        let snapshot =
+            crate::db::write::insert_snapshot(&conn, spec_id, "hash:t", "2026-09-25").unwrap();
+        let child = |anchor: &str| ParsedSection {
+            anchor: anchor.into(),
+            title: Some(anchor.into()),
+            content_text: None,
+            section_type: SectionType::Heading,
+            parent_anchor: Some("p".into()),
+            prev_anchor: None,
+            next_anchor: None,
+            depth: Some(3),
+            number: None,
+        };
+        crate::db::write::insert_sections_bulk(
+            &conn,
+            snapshot,
+            &[child("x"), child("y"), child("z")],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sections SET ord = 10 - ord WHERE snapshot_id = ?1",
+            [snapshot],
+        )
+        .unwrap();
+        let order: Vec<String> = get_children(&conn, snapshot, "p")
+            .unwrap()
+            .into_iter()
+            .map(|c| c.0)
+            .collect();
+        assert_eq!(order, ["z", "y", "x"]);
+    }
+
+    #[test]
+    fn ref_ord_counts_within_each_from_anchor_group() {
+        use crate::model::ParsedReference;
+        let conn = crate::db::open_test_db().unwrap();
+        let spec_id =
+            crate::db::write::insert_or_get_spec(&conn, "T", "https://t.test/", "w3c").unwrap();
+        let snapshot =
+            crate::db::write::insert_snapshot(&conn, spec_id, "hash:t", "2026-09-25").unwrap();
+        let r = |from: &str, to: &str| ParsedReference::prose(from, "T", to);
+        crate::db::write::insert_refs_bulk(
+            &conn,
+            snapshot,
+            &[r("a", "1"), r("b", "2"), r("a", "3")],
+        )
+        .unwrap();
+        let ords: Vec<(String, i64)> = conn
+            .prepare("SELECT from_anchor, ord FROM refs ORDER BY from_anchor, ord")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ords, [("a".into(), 0), ("a".into(), 1), ("b".into(), 0)]);
+    }
 
     fn setup_test_data(conn: &Connection) -> Result<i64> {
         let spec_id =

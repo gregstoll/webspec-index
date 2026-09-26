@@ -20,7 +20,8 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS effect_structures (
             snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
             representation_version TEXT NOT NULL,
-            structure_json TEXT NOT NULL
+            structure_json TEXT NOT NULL,
+            structure_bytes INTEGER
         );
         CREATE TABLE IF NOT EXISTS effect_anchors (
             snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
@@ -92,11 +93,17 @@ pub fn store_structure(
     // Joining it also keeps the fragment inventory atomic with the structure.
     super::write::atomic_write(conn, |conn| {
         conn.execute(
-        "INSERT INTO effect_structures(snapshot_id, representation_version, structure_json)
-         VALUES (?1, ?2, ?3) ON CONFLICT(snapshot_id) DO UPDATE SET
-         representation_version=excluded.representation_version, structure_json=excluded.structure_json",
-        (snapshot_id, version, structure_json),
-    )?;
+            "INSERT INTO effect_structures(snapshot_id, representation_version, structure_json, structure_bytes)
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT(snapshot_id) DO UPDATE SET
+             representation_version=excluded.representation_version,
+             structure_json=excluded.structure_json, structure_bytes=excluded.structure_bytes",
+            (
+                snapshot_id,
+                version,
+                encode_payload_level(structure_json, 1),
+                structure_json.len() as i64,
+            ),
+        )?;
         conn.execute(
             "DELETE FROM effect_anchors WHERE snapshot_id=?1",
             [snapshot_id],
@@ -116,10 +123,25 @@ pub fn load_structure(
     snapshot_id: i64,
     version: &str,
 ) -> Result<Option<String>> {
-    Ok(conn.query_row(
+    conn.query_row(
         "SELECT structure_json FROM effect_structures WHERE snapshot_id=?1 AND representation_version=?2",
-        (snapshot_id, version), |row| row.get(0),
-    ).optional()?)
+        (snapshot_id, version),
+        |row| Ok(decode_payload(row.get_ref(0)?)),
+    )
+    .optional()?
+    .transpose()
+}
+
+/// Raw JSON length of the snapshot's stored structure.
+pub fn structure_bytes(conn: &Connection, snapshot_id: i64) -> Result<Option<u64>> {
+    let bytes: Option<Option<i64>> = conn
+        .query_row(
+            "SELECT structure_bytes FROM effect_structures WHERE snapshot_id=?1",
+            [snapshot_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(bytes.flatten().map(|bytes| bytes as u64))
 }
 
 pub fn has_structure(conn: &Connection, snapshot_id: i64, version: &str) -> Result<bool> {
@@ -148,7 +170,11 @@ pub fn store_local_matches(conn: &Connection, key: &str, payload: &str) -> Resul
 }
 
 pub(crate) fn encode_payload(text: &str) -> Vec<u8> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encode_payload_level(text, Compression::default().level())
+}
+
+pub(crate) fn encode_payload_level(text: &str, level: u32) -> Vec<u8> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::new(level));
     encoder
         .write_all(text.as_bytes())
         .and_then(|_| encoder.finish())
@@ -618,6 +644,40 @@ pub fn load_graph(conn: &Connection) -> Result<Option<Graph>> {
 mod tests {
     use super::*;
     use crate::effects::graph::SiteStore as _;
+
+    #[test]
+    fn structures_are_stored_deflated_with_their_raw_size() {
+        let conn = crate::db::open_test_db().unwrap();
+        let spec_id =
+            crate::db::write::insert_or_get_spec(&conn, "T", "https://t.test/", "w3c").unwrap();
+        let snapshot =
+            crate::db::write::insert_snapshot(&conn, spec_id, "hash:t", "2026-09-25").unwrap();
+        let json = r#"{"anchors":["a","b"],"algorithms":[]}"#;
+        store_structure(&conn, snapshot, "9", json).unwrap();
+        let kind: String = conn
+            .query_row(
+                "SELECT typeof(structure_json) FROM effect_structures",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kind, "blob");
+        assert_eq!(
+            load_structure(&conn, snapshot, "9").unwrap().as_deref(),
+            Some(json)
+        );
+        assert_eq!(
+            structure_bytes(&conn, snapshot).unwrap(),
+            Some(json.len() as u64)
+        );
+        conn.execute("UPDATE effect_structures SET structure_json = ?1", [json])
+            .unwrap();
+        assert_eq!(
+            load_structure(&conn, snapshot, "9").unwrap().as_deref(),
+            Some(json),
+            "legacy TEXT rows still load"
+        );
+    }
 
     #[test]
     fn payload_round_trips_through_deflate() {
