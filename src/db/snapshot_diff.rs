@@ -283,7 +283,7 @@ fn diff_refs(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::model::{RefKind, SectionType};
 
@@ -455,7 +455,7 @@ mod tests {
         snapshot
     }
 
-    fn logical_rows(conn: &Connection, snapshot: i64) -> Vec<String> {
+    pub(crate) fn logical_rows(conn: &Connection, snapshot: i64) -> Vec<String> {
         let mut out = Vec::new();
         for sql in [
             "SELECT anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number, ord FROM sections WHERE snapshot_id=?1 ORDER BY anchor",

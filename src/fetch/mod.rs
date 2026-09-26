@@ -1,6 +1,7 @@
 // Fetch orchestration: coordinate HTML fetching, parsing, and database writes
 pub mod github;
 pub mod itu;
+mod pipeline;
 pub mod pr;
 pub mod snapshot;
 pub mod tc39_pr;
@@ -9,15 +10,17 @@ pub mod whatpr;
 use crate::db::snapshot_diff::{self, SnapshotRows};
 use crate::db::{queries, write};
 use crate::parse;
-use crate::parse::markdown::{decode_memo, encode_memo, MarkdownMemo};
+use crate::parse::markdown::{decode_memo, MarkdownMemo};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use pipeline::{ParseJob, ParsedHtml};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 #[cfg(feature = "native")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const CHECK_INTERVAL_HOURS: i64 = 24;
 #[cfg(feature = "native")]
@@ -141,10 +144,7 @@ pub(crate) fn cache_is_current(state: &queries::UpdateCheckState, now: &DateTime
 }
 
 pub(crate) fn hash_bytes(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 fn hash_html(html: &str) -> String {
@@ -205,8 +205,13 @@ fn sync_from_html(
         }
     }
 
-    let memo = previous_memo(conn, previous_snapshot_id)?;
-    let prepared = parse_html(html, spec_name, base_url, content_hash, memo)?;
+    let prepared = pipeline::parse_one(ParseJob {
+        spec_name: spec_name.to_string(),
+        base_url: base_url.to_string(),
+        html: Arc::new(html),
+        content_hash,
+        previous_memo: previous_memo(conn, previous_snapshot_id)?,
+    })?;
     write_parsed_html(
         conn,
         spec_id,
@@ -216,14 +221,6 @@ fn sync_from_html(
         prepared,
         now,
     )
-}
-
-struct ParsedHtml {
-    content_hash: String,
-    parsed: crate::model::ParsedSpec,
-    structure_json: String,
-    state: crate::state::StateSpec,
-    memo: Vec<u8>,
 }
 
 /// The markdown memo of `snapshot_id`'s last parse. A missing or undecodable
@@ -239,43 +236,6 @@ fn decode_stored_memo(payload: Option<Vec<u8>>) -> MarkdownMemo {
     payload
         .and_then(|payload| decode_memo(&payload).ok())
         .unwrap_or_default()
-}
-
-fn parse_html(
-    html: String,
-    spec_name: &str,
-    base_url: &str,
-    content_hash: String,
-    previous_memo: MarkdownMemo,
-) -> Result<ParsedHtml> {
-    let synthetic_sha = format!("hash:{content_hash}");
-    let document = scraper::Html::parse_document(&html);
-    let (parsed, memo, _) =
-        parse::parse_spec_document_memo(&document, spec_name, base_url, previous_memo)?;
-    let structure = parse::steps::extract_step_structure_from_document(
-        &document,
-        spec_name,
-        base_url,
-        &synthetic_sha,
-    );
-    let catalog = crate::state::extract::bundled_catalog();
-    let state = crate::state::extract_state(&crate::state::StateInputs {
-        document: &document,
-        spec: spec_name,
-        base_url,
-        snapshot_sha: &synthetic_sha,
-        structure: &structure,
-        sections: &parsed.sections,
-        idl_definitions: &parsed.idl_definitions,
-        catalog,
-    });
-    Ok(ParsedHtml {
-        content_hash,
-        parsed,
-        structure_json: serde_json::to_string(&structure)?,
-        state,
-        memo: encode_memo(&memo),
-    })
 }
 
 /// Whether `snapshot_id` can be served without re-parsing: it must have both a
@@ -302,9 +262,13 @@ pub fn index_html(
     provider: &str,
     html: String,
 ) -> anyhow::Result<i64> {
-    let content_hash = hash_html(&html);
-    let memo = previous_memo(conn, queries::get_snapshot(conn, spec_name)?)?;
-    let prepared = parse_html(html, spec_name, base_url, content_hash, memo)?;
+    let prepared = pipeline::parse_one(ParseJob {
+        spec_name: spec_name.to_string(),
+        base_url: base_url.to_string(),
+        content_hash: hash_html(&html),
+        html: Arc::new(html),
+        previous_memo: previous_memo(conn, queries::get_snapshot(conn, spec_name)?)?,
+    })?;
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
     let now = Utc::now();
     let (snapshot_id, _) =
@@ -671,6 +635,7 @@ pub async fn update_all_specs(
     force: bool,
     refetch: bool,
 ) -> Vec<(String, Result<Option<i64>>)> {
+    let threads = pipeline::parse_threads();
     let mut results = Vec::with_capacity(specs.len());
     let mut cursor = 0;
     while cursor < specs.len() {
@@ -687,7 +652,7 @@ pub async fn update_all_specs(
         let end = (cursor + UPDATE_PARALLELISM).min(specs.len());
         let end = (cursor..end).find(|&i| specs[i].2 == "itu").unwrap_or(end);
         let batch = &specs[cursor..end];
-        let mut jobs = Vec::new();
+        let mut fetches = Vec::new();
         let mut prepared = BTreeMap::new();
 
         for (index, (name, base_url, provider)) in batch.iter().enumerate() {
@@ -698,10 +663,10 @@ pub async fn update_all_specs(
                 Ok(HtmlUpdatePlan::NeedsWork(plan)) => {
                     let handle = tokio::spawn(async move {
                         let mut plan = plan;
-                        let result = prepare_html_update(&mut plan).await;
+                        let result = fetch_html_update(&mut plan).await;
                         (plan, result)
                     });
-                    jobs.push((index, handle));
+                    fetches.push((index, handle));
                 }
                 Err(e) => {
                     prepared.insert(index, Err(e));
@@ -709,14 +674,45 @@ pub async fn update_all_specs(
             }
         }
 
-        for (index, handle) in jobs {
-            let result = match handle.await {
-                Ok((plan, result)) => {
-                    result.and_then(|update| commit_html_update(conn, *plan, update))
+        let mut fetched = Vec::with_capacity(fetches.len());
+        for (index, handle) in fetches {
+            match handle.await {
+                Ok((plan, result)) => fetched.push((index, plan, result)),
+                Err(e) => {
+                    prepared.insert(index, Err(anyhow::anyhow!("update worker failed: {e}")));
                 }
-                Err(e) => Err(anyhow::anyhow!("update worker failed: {e}")),
-            };
-            prepared.insert(index, result);
+            }
+        }
+        let mut fetched = fetched.into_iter().peekable();
+        while fetched.peek().is_some() {
+            let mut jobs = Vec::new();
+            let mut pending = Vec::new();
+            for (index, plan, result) in fetched.by_ref().take(pipeline::chunk_len(threads)) {
+                let ready = match result {
+                    Ok(FetchedHtml::Changed(job)) => {
+                        jobs.push(job);
+                        None
+                    }
+                    Ok(FetchedHtml::Unchanged(hash)) => {
+                        Some(Ok(PreparedHtmlUpdate::Unchanged(hash)))
+                    }
+                    Err(e) => Some(Err(e)),
+                };
+                pending.push((index, plan, ready));
+            }
+            let mut parsed = parse_chunk(jobs, threads).await.into_iter();
+            for (index, plan, ready) in pending {
+                let update = ready.unwrap_or_else(|| {
+                    parsed
+                        .next()
+                        .expect("one parse result per job")
+                        .map(|parsed| PreparedHtmlUpdate::Parsed(Box::new(parsed)))
+                });
+                prepared.insert(
+                    index,
+                    update.and_then(|update| commit_html_update(conn, *plan, update)),
+                );
+            }
         }
         for (index, (name, _, _)) in batch.iter().enumerate() {
             let result = prepared
@@ -748,9 +744,31 @@ enum HtmlUpdatePlan {
     NeedsWork(Box<HtmlUpdateWork>),
 }
 
+enum FetchedHtml {
+    Unchanged(String),
+    Changed(ParseJob),
+}
+
 enum PreparedHtmlUpdate {
     Unchanged(String),
     Parsed(Box<ParsedHtml>),
+}
+
+/// Parse `jobs` off the async runtime. Results are in job order.
+async fn parse_chunk(jobs: Vec<ParseJob>, threads: usize) -> Vec<Result<ParsedHtml>> {
+    if jobs.is_empty() {
+        return Vec::new();
+    }
+    let len = jobs.len();
+    match tokio::task::spawn_blocking(move || pipeline::parse_jobs(jobs, threads)).await {
+        Ok(results) => results,
+        Err(e) => {
+            let message = format!("parse worker failed: {e}");
+            (0..len)
+                .map(|_| Err(anyhow::anyhow!("{message}")))
+                .collect()
+        }
+    }
 }
 
 fn plan_html_update(
@@ -816,9 +834,9 @@ fn plan_html_update(
     })))
 }
 
-async fn prepare_html_update(plan: &mut HtmlUpdateWork) -> Result<PreparedHtmlUpdate> {
-    let html = if let Some(html) = plan.cached_html.as_ref() {
-        html.clone()
+async fn fetch_html_update(plan: &mut HtmlUpdateWork) -> Result<FetchedHtml> {
+    let html = if let Some(html) = plan.cached_html.take() {
+        html
     } else {
         let html = fetch_live_html(&plan.base_url).await?;
         let hash = hash_html(&html);
@@ -838,18 +856,15 @@ async fn prepare_html_update(plan: &mut HtmlUpdateWork) -> Result<PreparedHtmlUp
             state.content_hash.as_deref() == Some(content_hash.as_str()) && index_is_current(state)
         })
     {
-        return Ok(PreparedHtmlUpdate::Unchanged(content_hash));
+        return Ok(FetchedHtml::Unchanged(content_hash));
     }
-    let spec_name = plan.spec_name.clone();
-    let base_url = plan.base_url.clone();
-    let previous_memo = plan.previous_memo.take();
-    Ok(PreparedHtmlUpdate::Parsed(Box::new(
-        tokio::task::spawn_blocking(move || {
-            let memo = decode_stored_memo(previous_memo);
-            parse_html(html, &spec_name, &base_url, content_hash, memo)
-        })
-        .await??,
-    )))
+    Ok(FetchedHtml::Changed(ParseJob {
+        spec_name: plan.spec_name.clone(),
+        base_url: plan.base_url.clone(),
+        html: Arc::new(html),
+        content_hash,
+        previous_memo: decode_stored_memo(plan.previous_memo.take()),
+    }))
 }
 
 fn commit_html_update(
@@ -907,49 +922,80 @@ pub async fn reparse_specs(
             spec_ok && prov_ok
         })
         .collect();
+    reparse_cached(conn, &db_dir(), &filtered).await
+}
 
-    let d = db_dir();
+/// Re-parse `specs` from the HTML cache under `cache_dir`, parsing each chunk
+/// in parallel and writing its results in spec order before reading the next.
+#[cfg(feature = "native")]
+async fn reparse_cached(
+    conn: &Connection,
+    cache_dir: &Path,
+    specs: &[(String, String, String)],
+) -> Result<Vec<(String, Option<i64>)>> {
     let now = Utc::now();
-    let mut results = Vec::new();
+    let threads = pipeline::parse_threads();
+    let mut results = Vec::with_capacity(specs.len());
 
-    for (name, base_url, provider) in filtered {
-        let spec_id = write::insert_or_get_spec(conn, &name, &base_url, &provider)?;
-        let state = queries::get_update_check(conn, spec_id)?;
-        let previous_snapshot_id = queries::get_snapshot(conn, &name)?;
-
-        let cached_hash = state.as_ref().and_then(|s| s.content_hash.clone());
-        let html = match cached_hash.as_deref() {
-            Some(hash) => match read_html_cache(&d, &name, hash) {
-                Some(html) => html,
+    for chunk in specs.chunks(pipeline::chunk_len(threads)) {
+        let mut jobs = Vec::new();
+        let mut pending = Vec::with_capacity(chunk.len());
+        for (name, base_url, provider) in chunk {
+            let spec_id = write::insert_or_get_spec(conn, name, base_url, provider)?;
+            let state = queries::get_update_check(conn, spec_id)?;
+            let html = match state.as_ref().and_then(|s| s.content_hash.as_deref()) {
+                Some(hash) => match read_html_cache(cache_dir, name, hash) {
+                    Some(html) => html,
+                    None => {
+                        eprintln!("reparse: {name}: no cache file found, skipping");
+                        pending.push(None);
+                        continue;
+                    }
+                },
                 None => {
-                    eprintln!("reparse: {name}: no cache file found, skipping");
-                    results.push((name, None));
+                    eprintln!("reparse: {name}: no stored content hash, skipping");
+                    pending.push(None);
                     continue;
                 }
-            },
-            None => {
-                eprintln!("reparse: {name}: no stored content hash, skipping");
-                results.push((name, None));
-                continue;
-            }
-        };
+            };
+            let memo = match queries::get_snapshot(conn, name)
+                .and_then(|snapshot_id| previous_memo(conn, snapshot_id))
+            {
+                Ok(memo) => memo,
+                Err(e) => {
+                    eprintln!("reparse: {name}: failed: {e}");
+                    pending.push(None);
+                    continue;
+                }
+            };
+            jobs.push(ParseJob {
+                spec_name: name.clone(),
+                base_url: base_url.clone(),
+                content_hash: hash_html(&html),
+                html: Arc::new(html),
+                previous_memo: memo,
+            });
+            pending.push(Some(spec_id));
+        }
 
-        match sync_from_html(
-            conn,
-            spec_id,
-            &name,
-            &base_url,
-            &provider,
-            html,
-            previous_snapshot_id,
-            state,
-            &now,
-            true,
-        ) {
-            Ok((snapshot_id, _)) => results.push((name, Some(snapshot_id))),
-            Err(e) => {
-                eprintln!("reparse: {name}: failed: {e}");
-                results.push((name, None));
+        let mut parsed = parse_chunk(jobs, threads).await.into_iter();
+        for ((name, base_url, provider), spec_id) in chunk.iter().zip(pending) {
+            let Some(spec_id) = spec_id else {
+                results.push((name.clone(), None));
+                continue;
+            };
+            let written = parsed
+                .next()
+                .expect("one parse result per job")
+                .and_then(|prepared| {
+                    write_parsed_html(conn, spec_id, name, base_url, provider, prepared, &now)
+                });
+            match written {
+                Ok((snapshot_id, _)) => results.push((name.clone(), Some(snapshot_id))),
+                Err(e) => {
+                    eprintln!("reparse: {name}: failed: {e}");
+                    results.push((name.clone(), None));
+                }
             }
         }
     }
@@ -1042,8 +1088,12 @@ mod tests {
             can_reuse_unchanged: false,
             previous_memo: None,
         };
-        let parsed = prepare_html_update(&mut plan).await.unwrap();
-        let snapshot_id = commit_html_update(&conn, plan, parsed).unwrap().unwrap();
+        let FetchedHtml::Changed(job) = fetch_html_update(&mut plan).await.unwrap() else {
+            panic!("a forced update parses");
+        };
+        let parsed = parse_chunk(vec![job], 1).await.pop().unwrap().unwrap();
+        let update = PreparedHtmlUpdate::Parsed(Box::new(parsed));
+        let snapshot_id = commit_html_update(&conn, plan, update).unwrap().unwrap();
         assert_eq!(
             queries::get_snapshot(&conn, "PREPARED").unwrap(),
             Some(snapshot_id)
@@ -1563,5 +1613,68 @@ mod tests {
             )
             .unwrap();
         assert_eq!(section_count, 1, "section from cached HTML must be present");
+    }
+
+    #[cfg(feature = "native")]
+    #[tokio::test]
+    async fn parallel_reparse_equals_indexing_one_by_one() {
+        use crate::db::snapshot_diff::tests::logical_rows;
+        let specs = [
+            (
+                "HTML",
+                "https://html.spec.whatwg.org/",
+                "whatwg",
+                include_str!("../../tests/fixtures/effects/structure/wattsi.html"),
+            ),
+            (
+                "DOM",
+                "https://dom.spec.whatwg.org/",
+                "whatwg",
+                include_str!("../../tests/fixtures/effects/structure/bikeshed.html"),
+            ),
+            (
+                "ECMA-262",
+                "https://tc39.es/ecma262/",
+                "tc39",
+                include_str!("../../tests/fixtures/effects/structure/ecmarkup.html"),
+            ),
+        ];
+        let cache = tempfile::tempdir().unwrap();
+        let reparsed = db::open_test_db().unwrap();
+        let expected = db::open_test_db().unwrap();
+        for (name, base_url, provider, html) in specs {
+            // Seed a stub so the reparse replaces rows in place, then cache the
+            // real document under the stub's content hash.
+            let stub = format!("<h2 id=\"stub-{name}\">Stub</h2>");
+            index_html(&reparsed, name, base_url, provider, stub.clone()).unwrap();
+            write_html_cache(cache.path(), name, &hash_html(&stub), html).unwrap();
+            index_html(&expected, name, base_url, provider, html.to_string()).unwrap();
+        }
+        let listed: Vec<_> = specs
+            .iter()
+            .map(|(name, base_url, provider, _)| {
+                (name.to_string(), base_url.to_string(), provider.to_string())
+            })
+            .collect();
+
+        let results = reparse_cached(&reparsed, cache.path(), &listed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            results
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["HTML", "DOM", "ECMA-262"]
+        );
+        for ((name, snapshot), (spec, ..)) in results.iter().zip(specs) {
+            assert_eq!(name, spec);
+            let snapshot = snapshot.expect("every spec has cached HTML");
+            let want = queries::get_snapshot(&expected, spec).unwrap().unwrap();
+            let rows = logical_rows(&reparsed, snapshot);
+            assert!(!rows.is_empty());
+            assert_eq!(rows, logical_rows(&expected, want), "{spec}");
+        }
     }
 }
