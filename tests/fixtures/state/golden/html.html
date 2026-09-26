@@ -1221,4 +1221,17 @@ document<c- p="">.</c->createElement<c- p="">(</c-><c- u="">"bad-1"</c-><c- p=""
   must be set to the <a id="parsing-xhtml-documents:node-document-2" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a> of
   the node into which the newly created node is to be inserted.</p>
   </div>
+<div data-algorithm="">
+  <p>The <dfn id="dialog-cleanup-steps">dialog cleanup steps</dfn>, given a <code id="the-dialog-element:the-dialog-element-39"><a href="#the-dialog-element">dialog</a></code> element <var>subject</var>,
+  are as follows:</p>
+
+  <ol><li><p><a href="https://infra.spec.whatwg.org/#list-remove" id="the-dialog-element:list-remove" data-x-internal="list-remove">Remove</a> <var>subject</var> from <var>subject</var>'s
+   <a id="the-dialog-element:node-document-16" href="https://dom.spec.whatwg.org/#concept-node-document" data-x-internal="node-document">node document</a>'s <a href="#open-dialogs-list" id="the-dialog-element:open-dialogs-list-3">open dialogs list</a>.</p></li><li>
+    <p>If <var>subject</var>'s <a href="#dialog-close-watcher" id="the-dialog-element:dialog-close-watcher-8">close watcher</a> is not
+    null:</p>
+
+    <ol><li><p><a href="#close-watcher-destroy" id="the-dialog-element:close-watcher-destroy">Destroy</a> <var>subject</var>'s <a href="#dialog-close-watcher" id="the-dialog-element:dialog-close-watcher-9">close watcher</a>.</p></li><li><p>Set <var>subject</var>'s <a href="#dialog-close-watcher" id="the-dialog-element:dialog-close-watcher-10">close watcher</a> to
+     null.</p></li></ol>
+   </li></ol>
+  </div>
 </body></html>

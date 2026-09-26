@@ -11,7 +11,7 @@
                 "DOM#dom-comment-comment (constructor)", "HTML#html-element-constructors:9.2",
                 "HTML#parsing-xhtml-documents"],
      "inits": ["DOM#create-a-node:2", "HTML#rendered-text-fragment:4.2"],
-     "unclassified": ["HTML#dialog-setup-steps:4"],
+     "unclassified": [],
      "negatives": {"HTML#show-a-modal-dialog:14": "read_path", "HTML#update-the-image-data:20": "read"}},
     {"field": "HTML#nav-active-history-entry",
      "writes": ["HTML#initialize-the-navigable:4", "HTML#navigate-fragid:14", "HTML#url-and-history-update-steps:11", "HTML#activate-history-entry:4"],
@@ -24,6 +24,7 @@
                 "DOM#dom-event-stopimmediatepropagation (method)", "DOM#dom-event-cancelbubble (setter)"],
      "inits": [], "negatives": {"DOM#dom-event-cancelbubble (getter)": "absent"}},
     {"field": "HTML#active-sandboxing-flag-set", "writes": [],
-     "inits": ["HTML#creating-a-new-browsing-context:15", "HTML#initialise-the-document-object:9"], "negatives": {}}
+     "inits": ["HTML#creating-a-new-browsing-context:15", "HTML#initialise-the-document-object:9"], "negatives": {}},
+    {"field": "HTML#open-dialogs-list", "writes": ["HTML#dialog-setup-steps:4", "HTML#dialog-cleanup-steps:1"], "inits": [], "negatives": {}}
   ]
 }

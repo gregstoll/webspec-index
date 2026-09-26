@@ -1,0 +1,396 @@
+schema: 1
+package: webspec-semantics
+fields:
+  - id: html-option-selectedness
+    field: HTML#concept-option-selectedness
+    owner: [HTML#the-option-element]
+    type: boolean
+    initial: false
+    expect_text: '(?i)selectedness'
+    reason: 'Declared in element-level prose that R2 does not match.'
+  - id: html-timeline-offset
+    field: HTML#timeline-offset
+    owner: [HTML#media-resource]
+    type: {opaque: "a date and time"}
+    expect_text: '(?i)known as the timeline offset'
+    reason: 'Owner phrase "Some video files" is not a type.'
+  - id: html-option-dirtiness
+    field: HTML#concept-option-dirtiness
+    owner: [HTML#the-option-element]
+    type: boolean
+    initial: false
+    expect_text: '(?i)The dirtiness of an option element is a boolean state'
+    reason: 'Element-level prose that R2 does not match.'
+  - id: html-active-speculative-html-parser
+    field: HTML#active-speculative-html-parser
+    owner: [HTML#html-parser]
+    initial: null
+    expect_text: '(?i)Each HTML parser can have an active speculative HTML parser'
+    reason: '"can have" is not a declaration sentence for R2.'
+  - id: html-autofill-hint-set
+    field: HTML#autofill-hint-set
+    owner: [HTML#the-input-element, HTML#the-select-element, HTML#the-textarea-element]
+    expect_text: '(?i)has an autofill hint set, an autofill scope, an autofill field name'
+    reason: 'The owner phrase lists input (where autocomplete applies), select and textarea.'
+  - id: html-autofill-scope
+    field: HTML#autofill-scope
+    owner: [HTML#the-input-element, HTML#the-select-element, HTML#the-textarea-element]
+    expect_text: '(?i)has an autofill hint set, an autofill scope, an autofill field name'
+    reason: 'The owner phrase lists input (where autocomplete applies), select and textarea.'
+  - id: html-autofill-field-name
+    field: HTML#autofill-field-name
+    owner: [HTML#the-input-element, HTML#the-select-element, HTML#the-textarea-element]
+    expect_text: '(?i)has an autofill hint set, an autofill scope, an autofill field name'
+    reason: 'The owner phrase lists input (where autocomplete applies), select and textarea.'
+  - id: html-non-autofill-credential-type
+    field: HTML#non-autofill-credential-type
+    owner: [HTML#the-input-element, HTML#the-select-element, HTML#the-textarea-element]
+    expect_text: '(?i)has an autofill hint set, an autofill scope, an autofill field name'
+    reason: 'The owner phrase lists input (where autocomplete applies), select and textarea.'
+  - id: html-idl-exposed-autofill-value
+    field: HTML#idl-exposed-autofill-value
+    owner: [HTML#the-input-element, HTML#the-select-element, HTML#the-textarea-element]
+    expect_text: '(?i)has an autofill hint set, an autofill scope, an autofill field name'
+    reason: 'The owner phrase lists input (where autocomplete applies), select and textarea.'
+  - id: html-browsing-context-set
+    field: HTML#browsing-context-set
+    owner: [HTML#browsing-context-group]
+    expect_text: '(?i)A browsing context group holds a browsing context set'
+    reason: '"holds" is not a declaration verb for R2.'
+  - id: html-canvas-context-lost
+    field: HTML#concept-canvas-context-lost
+    owner: [idl:CanvasState]
+    type: boolean
+    initial: false
+    expect_text: '(?i)implement the CanvasState mixin have a context lost boolean'
+    reason: 'Owner phrase names the CanvasState mixin.'
+  - id: html-canvas-context-mode
+    field: HTML#concept-canvas-context-mode
+    owner: [HTML#the-canvas-element]
+    expect_text: '(?i)a canvas also has a canvas context mode'
+    reason: 'The declaration follows a clause, so R2 does not see it.'
+  - id: html-canvas-current-filter
+    field: HTML#concept-canvas-current-filter
+    owner: [idl:CanvasFilters]
+    type: string
+    expect_text: '(?i)Such objects have an associated current filter'
+    reason: '"Such objects" are the objects implementing CanvasFilters, named in the preceding paragraph.'
+  - id: html-canvas-fill-style
+    field: HTML#concept-canvasfillstrokestyles-fill-style
+    owner: [idl:CanvasFillStrokeStyles]
+    expect_text: '(?i)Such objects have associated fill style and stroke style values'
+    reason: '"Such objects" implement CanvasFillStrokeStyles (preceding paragraph).'
+  - id: html-canvas-stroke-style
+    field: HTML#concept-canvasfillstrokestyles-stroke-style
+    owner: [idl:CanvasFillStrokeStyles]
+    expect_text: '(?i)Such objects have associated fill style and stroke style values'
+    reason: '"Such objects" implement CanvasFillStrokeStyles (preceding paragraph).'
+  - id: html-canvas-global-alpha
+    field: HTML#concept-canvas-global-alpha
+    owner: [idl:CanvasCompositing]
+    expect_text: '(?i)The global alpha value gives an alpha value'
+    reason: 'The preceding paragraph states that objects implementing CanvasCompositing have a global alpha value.'
+  - id: html-canvas-compositing-operator
+    field: HTML#current-compositing-and-blending-operator
+    owner: [idl:CanvasCompositing]
+    expect_text: '(?i)The current compositing and blending operator value controls'
+    reason: 'The CanvasCompositing paragraph declares it with the global alpha value.'
+  - id: html-canvas-shadow-color
+    field: HTML#concept-canvasshadowstyles-shadow-color
+    owner: [idl:CanvasShadowStyles]
+    expect_text: '(?i)implement the CanvasShadowStyles interface have an associated shadow color'
+    reason: 'Owner phrase names the CanvasShadowStyles interface.'
+  - id: html-canvas-letter-spacing
+    field: HTML#concept-canvastextdrawingstyles-letter-spacing
+    owner: [idl:CanvasTextDrawingStyles]
+    expect_text: '(?i)Such objects have associated letter spacing and word spacing values'
+    reason: '"Such objects" implement CanvasTextDrawingStyles (same block).'
+  - id: html-canvas-word-spacing
+    field: HTML#concept-canvastextdrawingstyles-word-spacing
+    owner: [idl:CanvasTextDrawingStyles]
+    expect_text: '(?i)Such objects have associated letter spacing and word spacing values'
+    reason: '"Such objects" implement CanvasTextDrawingStyles (same block).'
+  - id: html-encoding-confidence
+    field: HTML#concept-encoding-confidence
+    owner: [HTML#html-parser]
+    expect_text: '(?i)the HTML parser is decoding an input byte stream, it uses a character encoding and a confidence'
+    reason: '"uses" is not a declaration verb for R2.'
+  - id: html-imagebitmap-bitmap-data
+    field: HTML#concept-imagebitmap-bitmap-data
+    owner: [idl:ImageBitmap]
+    expect_text: '(?i)always has associated bitmap data'
+    reason: 'A condition clause separates the owner from the declaration.'
+  - id: html-input-image-coordinate
+    field: HTML#concept-input-type-image-coordinate
+    owner: [HTML#the-input-element]
+    expect_text: '(?i)selected coordinate consists of an x-component and a y-component'
+    reason: '"The element" is the input element in the Image Button state.'
+  - id: html-textarea-raw-value
+    field: HTML#concept-textarea-raw-value
+    owner: [HTML#the-textarea-element]
+    expect_text: '(?i)plain text edit control for the element.s raw value'
+    reason: 'Declared in the element''s represents sentence.'
+  - id: html-text-control-cursor
+    field: HTML#concept-textarea/input-cursor
+    owner: [HTML#the-input-element, HTML#the-textarea-element]
+    expect_text: '(?i)have either a selection or a text entry cursor position'
+    reason: 'Owner phrase lists input and textarea elements.'
+  - id: html-text-control-selection
+    field: HTML#concept-textarea/input-selection
+    owner: [HTML#the-input-element, HTML#the-textarea-element]
+    expect_text: '(?i)have either a selection or a text entry cursor position'
+    reason: 'Owner phrase lists input and textarea elements.'
+  - id: html-coop-report-endpoint
+    field: HTML#coop-struct-report-endpoint
+    owner: [HTML#cross-origin-opener-policy]
+    initial: null
+    expect_text: '(?i)A reporting endpoint, which is string or null'
+    reason: '"An opener policy consists of:" introduces the item list.'
+  - id: html-coop-report-only-endpoint
+    field: HTML#coop-struct-report-only-endpoint
+    owner: [HTML#cross-origin-opener-policy]
+    initial: null
+    expect_text: '(?i)A report-only reporting endpoint, which is a string or null'
+    reason: '"An opener policy consists of:" introduces the item list.'
+  - id: html-coop-report-only-value
+    field: HTML#coop-struct-report-only-value
+    owner: [HTML#cross-origin-opener-policy]
+    expect_text: '(?i)A report-only value, which is an opener policy value'
+    reason: '"An opener policy consists of:" introduces the item list.'
+  - id: html-coop-value
+    field: HTML#coop-struct-value
+    owner: [HTML#cross-origin-opener-policy]
+    expect_text: '(?i)A value, which is an opener policy value'
+    reason: '"An opener policy consists of:" introduces the item list.'
+  - id: html-drag-data-store-allowed-effects-state
+    field: HTML#drag-data-store-allowed-effects-state
+    owner: [HTML#drag-data-store]
+    type: string
+    expect_text: '(?i)A drag data store allowed effects state, which is a string'
+    reason: 'The drag data store consists of the following information (list intro).'
+  - id: html-drag-data-store-bitmap
+    field: HTML#drag-data-store-bitmap
+    owner: [HTML#drag-data-store]
+    expect_text: '(?i)known as the drag data store bitmap and drag data store hot spot coordinate'
+    reason: 'The drag data store consists of the following information (list intro).'
+  - id: html-drag-data-store-hot-spot-coordinate
+    field: HTML#drag-data-store-hot-spot-coordinate
+    owner: [HTML#drag-data-store]
+    expect_text: '(?i)known as the drag data store bitmap and drag data store hot spot coordinate'
+    reason: 'The drag data store consists of the following information (list intro).'
+  - id: html-drag-data-store-item-list
+    field: HTML#drag-data-store-item-list
+    owner: [HTML#drag-data-store]
+    expect_text: '(?i)A drag data store item list, which is a list of items'
+    reason: 'The drag data store consists of the following information (list intro).'
+  - id: html-drag-data-store-mode
+    field: HTML#drag-data-store-mode
+    owner: [HTML#drag-data-store]
+    expect_text: '(?i)A drag data store mode, which is one of the following'
+    reason: 'The drag data store consists of the following information (list intro).'
+  - id: html-navigation-focus-changed-during-ongoing-navigation
+    field: HTML#focus-changed-during-ongoing-navigation
+    owner: [idl:Navigation]
+    type: boolean
+    initial: false
+    expect_text: '(?i)Focus changed during ongoing navigation, a boolean, initially false'
+    reason: '"associating the following with each Navigation" introduces the list.'
+  - id: html-navigation-ongoing-api-method-tracker
+    field: HTML#ongoing-api-method-tracker
+    owner: [idl:Navigation]
+    initial: null
+    expect_text: '(?i)Ongoing API method tracker, a navigation API method tracker or null'
+    reason: '"associating the following with each Navigation" introduces the list.'
+  - id: html-navigation-ongoing-navigate-event
+    field: HTML#ongoing-navigate-event
+    owner: [idl:Navigation]
+    initial: null
+    expect_text: '(?i)Ongoing navigate event, a NavigateEvent or null'
+    reason: '"associating the following with each Navigation" introduces the list.'
+  - id: html-navigation-suppress-scroll-restoration
+    field: HTML#suppress-normal-scroll-restoration-during-ongoing-navigation
+    owner: [idl:Navigation]
+    type: boolean
+    initial: false
+    expect_text: '(?i)Suppress normal scroll restoration during ongoing navigation, a boolean, initially false'
+    reason: '"associating the following with each Navigation" introduces the list.'
+  - id: html-navigation-upcoming-traverse-api-method-trackers
+    field: HTML#upcoming-traverse-api-method-trackers
+    owner: [idl:Navigation]
+    initial: empty
+    expect_text: '(?i)Upcoming traverse API method trackers, an ordered map'
+    reason: '"associating the following with each Navigation" introduces the list.'
+  - id: html-focused-area-of-the-document
+    field: HTML#focused-area-of-the-document
+    owner: [idl:Document]
+    expect_text: '(?i)in each Document is designated the focused area of the document'
+    reason: '"in each Document" is not a declaration sentence for R2.'
+  - id: html-form-owner
+    field: HTML#form-owner
+    owner: [HTML#form-associated-element]
+    expect_text: '(?i)which is called the element.s form owner'
+    reason: '"can have a relationship" is not a declaration sentence for R2.'
+  - id: html-frozen-base-url
+    field: HTML#frozen-base-url
+    owner: [HTML#the-base-element]
+    expect_text: '(?i)has a frozen base URL'
+    reason: 'Owner phrase is qualified by a long relative clause.'
+  - id: html-tn-is-created-by-web-content
+    field: HTML#is-created-by-web-content
+    owner: [HTML#traversable-navigable]
+    type: boolean
+    initial: false
+    expect_text: '(?i)An is created by web content boolean, initially false'
+    reason: '"a traversable navigable has:" introduces the list.'
+  - id: html-tn-current-session-history-step
+    field: HTML#tn-current-session-history-step
+    owner: [HTML#traversable-navigable]
+    type: number
+    initial: 0
+    expect_text: '(?i)A current session history step, a number, initially 0'
+    reason: '"a traversable navigable has:" introduces the list.'
+  - id: html-tn-running-nested-apply-history-step
+    field: HTML#tn-running-nested-apply-history-step
+    owner: [HTML#traversable-navigable]
+    type: boolean
+    initial: false
+    expect_text: '(?i)A running nested apply history step boolean, initially false'
+    reason: '"a traversable navigable has:" introduces the list.'
+  - id: html-tn-session-history-entries
+    field: HTML#tn-session-history-entries
+    owner: [HTML#traversable-navigable]
+    expect_text: '(?i)Session history entries, a list of session history entries'
+    reason: '"a traversable navigable has:" introduces the list.'
+  - id: html-last-activation-timestamp
+    field: HTML#last-activation-timestamp
+    owner: [idl:Window]
+    expect_text: '(?i)A last activation timestamp, which is either a DOMHighResTimeStamp'
+    reason: '"each Window W has two relevant values:" introduces the list.'
+  - id: html-last-history-action-activation-timestamp
+    field: HTML#last-history-action-activation-timestamp
+    owner: [idl:Window]
+    expect_text: '(?i)A last history-action activation timestamp, which is either'
+    reason: '"each Window W has two relevant values:" introduces the list.'
+  - id: html-muted-errors
+    field: HTML#muted-errors
+    owner: [HTML#classic-script]
+    type: boolean
+    expect_text: '(?i)A muted errors boolean'
+    reason: '"A classic script ... has the following additional item" introduces the dl.'
+  - id: html-offscreencanvas-context-mode
+    field: HTML#offscreencanvas-context-mode
+    owner: [idl:OffscreenCanvas]
+    expect_text: '(?i)an OffscreenCanvas object also has a context mode'
+    reason: 'The declaration follows a clause, so R2 does not see it.'
+  - id: html-offscreencanvas-placeholder
+    field: HTML#offscreencanvas-placeholder
+    owner: [idl:OffscreenCanvas]
+    expect_text: '(?i)An OffscreenCanvas object may hold a weak reference to a placeholder canvas element'
+    reason: '"may hold" is not a declaration verb for R2.'
+  - id: html-one-permitted-sandboxed-navigator
+    field: HTML#one-permitted-sandboxed-navigator
+    owner: [HTML#browsing-context]
+    expect_text: '(?i)These browsing contexts always have one permitted sandboxed navigator'
+    reason: '"These browsing contexts" (the popups of the previous sentence) is a pronoun phrase.'
+  - id: html-parser-pause-flag
+    field: HTML#parser-pause-flag
+    owner: [HTML#html-parser]
+    type: boolean
+    initial: false
+    expect_text: '(?i)parsers have a script nesting level'
+    reason: '"To handle these cases, parsers have" in the HTML parser section; the owner phrase is not a type name.'
+  - id: html-script-nesting-level
+    field: HTML#script-nesting-level
+    owner: [HTML#html-parser]
+    initial: 0
+    expect_text: '(?i)parsers have a script nesting level'
+    reason: '"To handle these cases, parsers have" in the HTML parser section; the owner phrase is not a type name.'
+  - id: html-popover-toggle-task-tracker
+    field: HTML#popover-toggle-task-tracker
+    owner: [HTML#html-elements]
+    initial: null
+    expect_text: '(?i)popover toggle task tracker, which is a toggle task tracker or null'
+    reason: '"Every HTML element" owns the tracker; the sentence has no verb.'
+  - id: html-processing-the-backup-element-queue
+    field: HTML#processing-the-backup-element-queue
+    owner: [HTML#custom-element-reactions-stack]
+    expect_text: '(?i)each custom element reactions stack also has a processing the backup element queue flag'
+    reason: 'The declaration is the last sentence of a long block.'
+  - id: html-skip-when-determining-incumbent-counter
+    field: HTML#skip-when-determining-incumbent-counter
+    owner: [ECMA-262#sec-execution-contexts]
+    initial: 0
+    expect_text: '(?i)skip-when-determining-incumbent counter value, which is initially zero'
+    reason: '"must contain, as part of their code evaluation state" is not a declaration verb for R2.'
+  - id: html-target-element
+    field: HTML#target-element
+    owner: [idl:Document]
+    initial: null
+    expect_text: '(?i)There is also a target element for each Document'
+    reason: '"There is ... for each Document" is not a declaration sentence for R2.'
+  - id: html-document-referrer
+    field: 'HTML#the-document''s-referrer'
+    owner: [idl:Document]
+    type: string
+    expect_text: '(?i)The document.s referrer is a string'
+    reason: 'The owner is the possessive in the field name.'
+  - id: html-text-track-cue-end-time
+    field: HTML#text-track-cue-end-time
+    owner: [HTML#text-track-cue]
+    expect_text: '(?i)\bAn end time\b'
+    reason: '"Each text track cue consists of:" introduces the dl.'
+  - id: html-text-track-cue-identifier
+    field: HTML#text-track-cue-identifier
+    owner: [HTML#text-track-cue]
+    expect_text: '(?i)\bAn identifier\b'
+    reason: '"Each text track cue consists of:" introduces the dl.'
+  - id: html-text-track-cue-start-time
+    field: HTML#text-track-cue-start-time
+    owner: [HTML#text-track-cue]
+    expect_text: '(?i)\bA start time\b'
+    reason: '"Each text track cue consists of:" introduces the dl.'
+  - id: html-text-track-in-band-metadata-track-dispatch-type
+    field: HTML#text-track-in-band-metadata-track-dispatch-type
+    owner: [HTML#text-track]
+    expect_text: '(?i)in-band metadata track dispatch type'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-kind
+    field: HTML#text-track-kind
+    owner: [HTML#text-track]
+    expect_text: '(?i)The kind of text track'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-label
+    field: HTML#text-track-label
+    owner: [HTML#text-track]
+    expect_text: '(?i)\bA label\b'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-language
+    field: HTML#text-track-language
+    owner: [HTML#text-track]
+    expect_text: '(?i)\bA language\b'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-list-of-cues
+    field: HTML#text-track-list-of-cues
+    owner: [HTML#text-track]
+    expect_text: '(?i)A list of zero or more cues'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-mode
+    field: HTML#text-track-mode
+    owner: [HTML#text-track]
+    expect_text: '(?i)\bA mode\b'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-text-track-readiness-state
+    field: HTML#text-track-readiness-state
+    owner: [HTML#text-track]
+    expect_text: '(?i)\bA readiness state\b'
+    reason: '"A text track is a TextTrack object and consists of:" introduces the dl.'
+  - id: html-shtpq-algorithm-set
+    field: HTML#session-history-traversal-parallel-queue-algorithm-set
+    owner: [HTML#session-history-traversal-parallel-queue]
+    expect_text: '(?i)It has an algorithm set, an ordered set'
+    reason: '"It" refers to the session history traversal parallel queue of the previous sentence.'
+  - id: html-list-of-text-tracks
+    field: HTML#list-of-text-tracks
+    owner: [HTML#media-element]
+    expect_text: '(?i)known as the media element.s list of text tracks'
+    reason: '"can have a group of associated text tracks, known as" is not a declaration sentence for R2.'

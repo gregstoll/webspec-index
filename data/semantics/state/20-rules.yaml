@@ -1,0 +1,68 @@
+schema: 1
+package: webspec-semantics
+rules:
+  - id: add-to-field-collection
+    description: Unlinked "Add X to R's F" adds to a set- or list-valued field.
+    match:
+      text: '(?:^|, then |; )Add (?P<operand>.+?) to (?P<target>(?:the |this )?\S.*?)(?:\.|,|;|$)'
+      exclude_text:
+        - '(?i)\badd \S+ to \*\w+\*(?:\.|$)'   # local accumulators
+        - '(?:^|, then |; )Add to \*\w+\* '    # "Add to *list* X": local list, operand after it
+    emit:
+      kind: state.mutate
+      params:
+        op: append
+        target: {capture: target, from: path}
+        operand: {capture: operand, from: text}
+  - id: decrease-by
+    match:
+      text: '(?:^|, |and )decrease (?P<target>.+?) by '
+    emit:
+      kind: state.mutate
+      params: {op: decrement, target: {capture: target, from: path}}
+  - id: html-canvas-reset-transform
+    description: >-
+      "The resetTransform() method, when invoked, must reset the current transformation
+      matrix to the identity matrix." "Reset" is not a grammar verb, so the IR leaves the
+      occurrence unclassified.
+    match:
+      subject: HTML#dom-context-2d-resettransform
+      text: 'must reset the current transformation matrix to '
+    emit:
+      kind: state.write
+      params: {field: HTML#current-transformation-matrix, op: set}
+  - id: remove-from-field-collection
+    description: Unlinked "Remove X from R's F" removes from a set- or list-valued field.
+    match:
+      text: '(?:^|, then |; )Remove (?P<operand>.+?) from (?P<target>(?:the |this )?\S.*?)(?:\.|,|;|$)'
+      exclude_text: ['(?i)\bremove \S+ from \*\w+\*(?:\.|$)']   # local lists
+    emit:
+      kind: state.mutate
+      params:
+        op: remove
+        target: {capture: target, from: path}
+        operand: {capture: operand, from: text}
+  - id: insert-into-field-collection
+    description: Unlinked "Insert X into R's F" inserts into a list-valued field.
+    match:
+      text: '(?:^|, then |; )Insert (?P<operand>.+?) into (?P<target>(?:the |this )?\S.*?)(?:\.|,|;|$)'
+      exclude_text: ['(?i)\binsert \S+ into \*\w+\*(?:\.|$)']   # local lists
+    emit:
+      kind: state.mutate
+      params:
+        op: insert
+        target: {capture: target, from: path}
+        operand: {capture: operand, from: text}
+  - id: change-field-to
+    description: >-
+      "Change R's F to V" replaces the field's value. state.mutate has no set op, so the
+      rule uses replace, the mutation op for a whole-value change.
+    match:
+      text: '(?:^|, then |; )Change (?P<target>(?:the |this )?\S.*?) to (?P<operand>.+?)(?:\.|;|$)'
+      exclude_text: ['(?i)\bchange \*\w+\* to ']   # local variables
+    emit:
+      kind: state.mutate
+      params:
+        op: replace
+        target: {capture: target, from: path}
+        operand: {capture: operand, from: text}

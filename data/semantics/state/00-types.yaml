@@ -1,0 +1,20 @@
+schema: 1
+package: webspec-semantics
+types:
+  - id: html-media-element-alias
+    type: HTML#media-element
+    alias_of: idl:HTMLMediaElement
+    expect_text: 'HTMLMediaElement objects .* are simply known as media elements'
+    reason: '"media element" is defined as HTMLMediaElement instances; names differ.'
+  - id: dom-traversal-participants
+    type: DOM#traversal            # the "Traversal" heading; no dfn defines "traversal"
+    name: traversal                # binds data-dfn-for="traversal" (§6.3 step 5)
+    kind: concept
+    implemented_by: [idl:NodeIterator, idl:TreeWalker]   # adds supertype edges
+    expect_text: '(?i)Each NodeIterator and TreeWalker object has an associated'
+    reason: DOM declares traversal state once for both iterator interfaces.
+  - id: dom-tree-participants
+    type: DOM#concept-tree         # data-dfn-for="tree": parent, children, root, …
+    implemented_by: [idl:Node]
+    expect_text: '(?i)A tree is a finite hierarchical tree structure'
+    reason: Nodes are the tree participants in DOM, so Node's type view lists tree fields.

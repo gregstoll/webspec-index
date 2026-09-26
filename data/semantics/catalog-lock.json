@@ -1,7 +1,7 @@
 {
-  "content_sha256": "f08dcf217cf0106a5d00f552f8f0b6402d9b9b0257cd56aa0c3a86c7701df8c4",
+  "content_sha256": "56adcb0f7b465758081fb628802ca9c405f28e8560084e2ad598897ed5932eb1",
   "package": "webspec-semantics",
   "schema": 1,
   "source_repository": "webspec-semantics",
-  "source_revision": "sha256:f08dcf217cf0106a5d00f552f8f0b6402d9b9b0257cd56aa0c3a86c7701df8c4"
+  "source_revision": "sha256:56adcb0f7b465758081fb628802ca9c405f28e8560084e2ad598897ed5932eb1"
 }
