@@ -340,12 +340,12 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     assert!(
         !conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+                "SELECT EXISTS(SELECT 1 FROM effect_publication WHERE id=1)",
                 [],
                 |row| row.get::<_, bool>(0)
             )
             .unwrap(),
-        "a cold automatic hint must not build the graph"
+        "a cold automatic hint must not publish effects"
     );
     let lenses = client.request(
         10,
@@ -376,14 +376,14 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
         "{}",
         String::from_utf8_lossy(&precompute.stderr)
     );
-    let has_graph: bool = conn
+    let published: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+            "SELECT EXISTS(SELECT 1 FROM effect_publication WHERE id=1)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert!(has_graph);
+    assert!(published);
     let previous = client.refresh_requests;
     let _ = client.request(9, "textDocument/inlayHint", hint_params.clone());
     client.wait_for_refresh_after(previous);
@@ -425,12 +425,12 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
 
     assert!(
         conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1)",
+            "SELECT EXISTS(SELECT 1 FROM effect_publication WHERE id=1)",
             [],
             |row| row.get::<_, bool>(0)
         )
         .unwrap(),
-        "graph must still be present after warm interactions"
+        "the publication must still be present after warm interactions"
     );
 
     let warm_lenses = client.request(
@@ -515,7 +515,7 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     );
     assert_eq!(explicit_document, document);
 
-    // Explicit explanations read the same stored graph; they must not invalidate
+    // Explicit explanations read the same publication; they must not invalidate
     // the cached hints.
     let cached = client.request(5, "textDocument/inlayHint", hint_params.clone());
     assert!(cached[0]["label"].as_str().unwrap().eq(" ✓"));
@@ -523,7 +523,7 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     client.stop();
 
     // A persistent read failure must not feed a refresh/resubmission loop.
-    conn.execute("UPDATE effect_graph SET topology = X'00'", [])
+    conn.execute("UPDATE effect_fragments SET payload = X'00'", [])
         .unwrap();
     let mut client = LspClient::start(&db.path().join("index.db"));
     client.request(

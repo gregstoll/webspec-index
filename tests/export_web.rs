@@ -1,7 +1,40 @@
 use std::path::Path;
 
 use webspec_index::db;
+use webspec_index::effects::service::{publish, PublishMode};
+use webspec_index::effects::{default_catalog, EffectsOptions};
 use webspec_index::export::{export_web, ExportOptions};
+
+/// One algorithm per spec, so the publication has rows for each.
+fn store_structure(conn: &rusqlite::Connection, snapshot_id: i64, spec: &str, anchor: &str) {
+    let html = format!(
+        "<div class=algorithm><p>To <dfn id={anchor}>run</dfn>:</p><ol><li>Return.</li></ol></div>"
+    );
+    let structure = webspec_index::parse::steps::extract_step_structure(
+        &html,
+        spec,
+        "https://example.test/",
+        "hash:test",
+    );
+    db::effects::store_structure(
+        conn,
+        snapshot_id,
+        webspec_index::parse::steps::STRUCTURE_VERSION,
+        &serde_json::to_string(&structure).unwrap(),
+    )
+    .unwrap();
+}
+
+fn publish_effects(conn: &rusqlite::Connection) {
+    publish(
+        conn,
+        &default_catalog(&[]).unwrap(),
+        &EffectsOptions::default(),
+        PublishMode::Incremental,
+        Default::default(),
+    )
+    .unwrap();
+}
 
 fn seeded_db(path: &Path) -> (rusqlite::Connection, i64) {
     let conn = rusqlite::Connection::open(path).unwrap();
@@ -36,16 +69,12 @@ fn seeded_db(path: &Path) -> (rusqlite::Connection, i64) {
         )
         .unwrap();
     }
-    conn.execute_batch(
-        "INSERT INTO effect_structures(snapshot_id, representation_version, structure_json) VALUES (1, 'v', '{}');
-         INSERT INTO effect_local_matches(input_key, payload_json) VALUES ('k', '{}');
-         INSERT INTO update_checks(spec_id, last_checked) VALUES (1, 'now');
-         INSERT INTO effect_graph(id, generation, semantic_key, manifest_json, topology, opaque_anchor_issue_id)
-           VALUES (1, (SELECT CAST(value AS INTEGER) FROM meta WHERE key='effects_generation'), 's', '{}', X'00', NULL);
-         INSERT INTO effect_summary_cache(subject_key,spec,semantic_key,budget_key,payload)
-           VALUES ('html', 'HTML', 's', '{}', X'00'),
-                  ('rfc', 'RFC9110', 's', '{}', X'00'),
-                  ('__effect_summary_complete__', '', 's', '{}', X'00');",
+    store_structure(&conn, html_snap, "HTML", "navigate");
+    store_structure(&conn, rfc_snap, "RFC9110", "section-1");
+    db::write::store_memo(&conn, html_snap, b"memo").unwrap();
+    conn.execute(
+        "INSERT INTO update_checks(spec_id, last_checked) VALUES (1, 'now')",
+        [],
     )
     .unwrap();
     (conn, html_snap)
@@ -76,6 +105,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
             ),
         )
         .unwrap();
+        publish_effects(&conn);
     }
     let out = dir.path().join("web");
     let manifest = export_web(&src, &out, &options()).unwrap();
@@ -121,7 +151,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         .unwrap();
     for gone in [
         "effect_structures",
-        "effect_local_matches",
+        "markdown_memo",
         "update_checks",
         "state_models",
     ] {
@@ -150,14 +180,27 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         .query_row("SELECT COUNT(*) FROM specs", [], |r| r.get(0))
         .unwrap();
     assert_eq!(specs, 1);
-    let cached_specs: Vec<String> = conn
-        .prepare("SELECT spec FROM effect_summary_cache ORDER BY spec")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
+    let strings = |sql: &str| -> Vec<String> {
+        conn.prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert_eq!(
+        strings("SELECT spec FROM effect_fragments ORDER BY spec"),
+        ["HTML", "RFC9110"],
+        "every fragment is kept, so read-time linking sees pruned callees"
+    );
+    assert_eq!(
+        strings("SELECT DISTINCT spec FROM effect_summaries ORDER BY spec"),
+        ["HTML"]
+    );
+    let frozen: bool = conn
+        .query_row("SELECT frozen FROM effect_publication", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(cached_specs, ["", "HTML"]);
+    assert!(frozen);
     let sections: i64 = conn
         .query_row("SELECT COUNT(*) FROM sections", [], |r| r.get(0))
         .unwrap();
@@ -170,15 +213,24 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         )
         .unwrap();
     assert_eq!(fts, 1);
-    let has_graph: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1
-             AND generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation'))",
-            [],
-            |r| r.get(0),
+    let summary: webspec_index::effects::EffectSummaryResult =
+        webspec_index::effects::service::get_effect_summary_on(
+            &conn,
+            &serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "subject": {"spec": "HTML", "anchor": "navigate"},
+                "options": {"mode": "cached"}
+            }))
+            .unwrap(),
         )
         .unwrap();
-    assert!(has_graph, "pruning must not mark the stored graph stale");
+    assert!(
+        matches!(
+            summary.effects_status,
+            webspec_index::effects::EffectsStatus::Ready { .. }
+        ),
+        "the frozen publication stays current after pruning: {summary:?}"
+    );
     let has_index: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_refs_to'",
@@ -193,9 +245,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
 fn export_refuses_without_prepared_effects() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
-    let (conn, _) = seeded_db(&src);
-    conn.execute_batch("DELETE FROM effect_graph;").unwrap();
-    drop(conn);
+    drop(seeded_db(&src));
     let err = export_web(&src, &dir.path().join("web"), &options()).unwrap_err();
     assert!(err.to_string().contains("effects --all"), "{err}");
 }
@@ -204,7 +254,9 @@ fn export_refuses_without_prepared_effects() {
 fn export_fails_the_size_gate() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
-    drop(seeded_db(&src));
+    let (conn, _) = seeded_db(&src);
+    publish_effects(&conn);
+    drop(conn);
     let mut opts = options();
     opts.max_total_bytes = 1024;
     let err = export_web(&src, &dir.path().join("web"), &opts).unwrap_err();
@@ -216,8 +268,7 @@ fn export_specs_filter_keeps_only_listed_specs() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
     let (conn, _) = seeded_db(&src);
-    // Seed a second spec (DOM, provider=whatwg). Inserting into specs/snapshots
-    // bumps the effects_generation trigger, so update the effect_run to match.
+    // Seed a second spec (DOM, provider=whatwg), then publish.
     let dom = db::write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
         .unwrap();
     let dom_snap = db::write::insert_snapshot(&conn, dom, "hash:dddd", "2026-09-01").unwrap();
@@ -226,10 +277,7 @@ fn export_specs_filter_keeps_only_listed_specs() {
         [dom_snap],
     )
     .unwrap();
-    conn.execute_batch(
-        "UPDATE effect_graph SET generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation');",
-    )
-    .unwrap();
+    publish_effects(&conn);
     drop(conn);
 
     let out = dir.path().join("web");

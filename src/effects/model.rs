@@ -916,13 +916,6 @@ pub fn effect_handles(full_digests: &[String]) -> Vec<String> {
         .collect()
 }
 
-pub fn analysis_id(manifest: &InputManifest, generation: i64) -> Result<String, serde_json::Error> {
-    Ok(format!(
-        "an_{}",
-        &digest_serializable(&(manifest, generation))?[..16]
-    ))
-}
-
 pub fn source_node_id(snapshot_sha: &str, structural_location: &str) -> String {
     let digest = hex_sha256(format!("{snapshot_sha}\0{structural_location}").as_bytes());
     format!("src_{}", &digest[..24])

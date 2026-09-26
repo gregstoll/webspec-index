@@ -43,7 +43,6 @@ pub fn replace_snapshot_in_place(
         diff_sections(tx, snapshot_id, rows.sections, &mut stats)?;
         diff_refs(tx, snapshot_id, rows.refs, &mut stats)?;
         tx.execute("DELETE FROM idl_defs WHERE snapshot_id=?1", [snapshot_id])?;
-        // Also bumps the effects generation, which covers the section and ref changes.
         write::insert_idl_defs_bulk(tx, snapshot_id, rows.idl)?;
         Ok(stats)
     })

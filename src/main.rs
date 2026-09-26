@@ -165,6 +165,13 @@ struct EffectsArgs {
     )]
     all: bool,
 
+    #[arg(
+        long,
+        requires = "all",
+        help = "Build effects from scratch instead of incrementally"
+    )]
+    rebuild: bool,
+
     #[arg(long, help = "Return summaries without witness explanations")]
     summary_only: bool,
 
@@ -1279,6 +1286,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             let EffectsArgs {
                 subject,
                 all,
+                rebuild,
                 summary_only,
                 compact,
                 step,
@@ -1322,10 +1330,15 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             };
 
             if all {
-                let result = effects::recompute_effects(&effects::RecomputeEffectsRequest {
+                let request = effects::RecomputeEffectsRequest {
                     schema_version: effects::EFFECTS_SCHEMA_VERSION,
                     options,
-                })?;
+                };
+                let result = if rebuild {
+                    effects::rebuild_effects(&request)?
+                } else {
+                    effects::recompute_effects(&request)?
+                };
                 print_output(&cli.format, &result, |_| {
                     format!(
                         "Effects graph built: {} bodies, {} relationships.\n",

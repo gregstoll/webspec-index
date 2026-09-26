@@ -35,3 +35,10 @@ fn effects_rejects_zero_budgets_before_opening_the_index() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("0 is not in 1.."));
 }
+
+#[test]
+fn effects_rebuild_requires_all() {
+    let output = cli(&["effects", "HTML#navigate", "--rebuild"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--all"));
+}

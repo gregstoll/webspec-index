@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use webspec_index::db;
-use webspec_index::effects::service::build_and_store_graph;
+use webspec_index::effects::service::{publish, PublishMode};
 use webspec_index::effects::{default_catalog, EffectsOptions};
 use webspec_index::export::{export_web, ExportOptions};
 use webspec_index::model::{ParsedReference, ParsedSection, RefKind, SectionType};
@@ -151,8 +151,14 @@ fn main() {
     .expect("store DOM structure");
 
     let catalog = default_catalog(&[]).expect("catalog");
-    build_and_store_graph(&conn, &catalog, &EffectsOptions::default(), Some(1))
-        .expect("build effects graph");
+    publish(
+        &conn,
+        &catalog,
+        &EffectsOptions::default(),
+        PublishMode::Incremental,
+        Default::default(),
+    )
+    .expect("publish effects");
 
     drop(conn);
 

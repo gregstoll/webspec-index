@@ -211,6 +211,7 @@ fn sync_from_html(
         html: Arc::new(html),
         content_hash,
         previous_memo: previous_memo(conn, previous_snapshot_id)?,
+        fragment: None,
     })?;
     write_parsed_html(
         conn,
@@ -268,6 +269,7 @@ pub fn index_html(
         content_hash: hash_html(&html),
         html: Arc::new(html),
         previous_memo: previous_memo(conn, queries::get_snapshot(conn, spec_name)?)?,
+        fragment: None,
     })?;
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
     let now = Utc::now();
@@ -292,6 +294,7 @@ fn write_parsed_html(
         structure_json,
         state,
         memo,
+        fragment,
     } = prepared;
     let synthetic_sha = format!("hash:{content_hash}");
     write::atomic_write(conn, |conn| {
@@ -329,6 +332,22 @@ fn write_parsed_html(
         )?;
         crate::db::state::store_state(conn, snapshot_id, &state)?;
         write::store_memo(conn, snapshot_id, &memo)?;
+        if let Some(fragment) = fragment {
+            crate::db::effects::store_fragment(
+                conn,
+                &crate::db::effects::FragmentKey {
+                    snapshot_id,
+                    spec: spec_name.to_owned(),
+                    indexed_at: conn.query_row(
+                        "SELECT indexed_at FROM snapshots WHERE id=?1",
+                        [snapshot_id],
+                        |row| row.get(0),
+                    )?,
+                    config_key: fragment.config_key,
+                },
+                &fragment.payload,
+            )?;
+        }
 
         store_update_check(conn, spec_id, now, Some(now), Some(&content_hash))?;
         Ok((snapshot_id, true))
@@ -864,6 +883,7 @@ async fn fetch_html_update(plan: &mut HtmlUpdateWork) -> Result<FetchedHtml> {
         html: Arc::new(html),
         content_hash,
         previous_memo: decode_stored_memo(plan.previous_memo.take()),
+        fragment: None,
     }))
 }
 
@@ -974,6 +994,7 @@ async fn reparse_cached(
                 content_hash: hash_html(&html),
                 html: Arc::new(html),
                 previous_memo: memo,
+                fragment: None,
             });
             pending.push(Some(spec_id));
         }

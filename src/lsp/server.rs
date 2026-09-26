@@ -266,7 +266,7 @@ impl State {
 
     /// Schedule semantic work away from hover/inlay request paths. The coarse
     /// job key deduplicates requests while the engine computes the authoritative
-    /// input fingerprint (catalog contents, environment and corpus generation).
+    /// input fingerprint (the publication's semantic key and whether it is current).
     async fn schedule_effect(self: &Arc<Self>, job: EffectJob) {
         let state = Arc::clone(self);
         tokio::spawn(async move {

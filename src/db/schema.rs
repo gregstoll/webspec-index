@@ -243,8 +243,10 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
     // effects tables and snapshots itself).
     let effect_and_schema_tables = [
         "effect_sites",
-        "effect_graph",
-        "effect_local_matches",
+        "effect_summaries",
+        "effect_publication",
+        "effect_spec_deps",
+        "effect_fragments",
         "effect_anchors",
         "effect_structures",
         "markdown_memo",
@@ -321,7 +323,12 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(false)
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, kind: &str) -> Result<()> {
+pub(super) fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    kind: &str,
+) -> Result<()> {
     if !has_table(conn, table)? {
         return Ok(());
     }

@@ -421,20 +421,66 @@ pub fn load_catalog(packages: impl IntoIterator<Item = Package>) -> Result<Catal
             )?;
         }
     }
-    let digest_value = Value::Array(
-        packages
+    let content_digest = catalog_digest_of(
+        &packages
             .iter()
-            .map(|package| json!({"package": package.id, "content_sha256": package.content_digest}))
-            .collect(),
-    );
-    let content_digest = canonical_json_sha256(&digest_value)
-        .map_err(|error| CatalogError::new(error.to_string()))?;
+            .map(|package| (package.id.clone(), package.content_digest.clone()))
+            .collect::<Vec<_>>(),
+    )?;
     Ok(Catalog {
         schema: EFFECTS_SCHEMA_VERSION,
         packages,
         effects,
         content_digest,
     })
+}
+
+/// Content digest of a catalog made of `(package id, package digest)` pairs.
+pub(crate) fn catalog_digest_of(packages: &[(String, String)]) -> Result<String, CatalogError> {
+    let mut packages: Vec<_> = packages.iter().collect();
+    packages.sort_by(|left, right| left.0.cmp(&right.0));
+    let digest_value = Value::Array(
+        packages
+            .iter()
+            .map(|(id, digest)| json!({"package": id, "content_sha256": digest}))
+            .collect(),
+    );
+    canonical_json_sha256(&digest_value).map_err(|error| CatalogError::new(error.to_string()))
+}
+
+/// `(package id, content digest)` of a package's `(path, YAML)` files, without
+/// compiling its declarations.
+pub(crate) fn package_digest(files: &[(&str, &str)]) -> Result<(String, String), CatalogError> {
+    let mut files: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, content)| ((*path).to_owned(), (*content).to_owned()))
+        .collect();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let digest = files_digest(&files)?;
+    let (path, content) = &files[0];
+    let package_id = parse_file(path, content)?.package;
+    validate_id(&package_id, "package identifier", path)?;
+    Ok((package_id, digest))
+}
+
+/// Digest of a package's sorted files; rejects an empty package and non-YAML names.
+fn files_digest(files: &[(String, String)]) -> Result<String, CatalogError> {
+    if files.is_empty() {
+        return Err(CatalogError::new("catalog package contains no YAML files"));
+    }
+    let mut digest_files = Vec::with_capacity(files.len());
+    for (path, content) in files {
+        if !(path.ends_with(".yaml") || path.ends_with(".yml")) {
+            return Err(CatalogError::file(
+                path,
+                "embedded catalog file must end in .yaml or .yml",
+            ));
+        }
+        digest_files
+            .push(json!({"path": path, "content_sha256": sha256_bytes(content.as_bytes())}));
+    }
+    canonical_json_sha256(&Value::Array(digest_files))
+        .map_err(|error| CatalogError::new(error.to_string()))
 }
 
 /// Load embedded package sets followed by zero or more extension directories.
@@ -502,22 +548,10 @@ fn collect_yaml_files(
 
 fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, CatalogError> {
     files.sort_by(|left, right| left.0.cmp(&right.0));
-    if files.is_empty() {
-        return Err(CatalogError::new("catalog package contains no YAML files"));
-    }
+    let content_digest = files_digest(&files)?;
     let mut raws = Vec::with_capacity(files.len());
-    let mut digest_files = Vec::with_capacity(files.len());
     for (path, content) in &files {
-        if !(path.ends_with(".yaml") || path.ends_with(".yml")) {
-            return Err(CatalogError::file(
-                path,
-                "embedded catalog file must end in .yaml or .yml",
-            ));
-        }
-        let raw = parse_file(path, content)?;
-        digest_files
-            .push(json!({"path": path, "content_sha256": sha256_bytes(content.as_bytes())}));
-        raws.push((path.clone(), raw));
+        raws.push((path.clone(), parse_file(path, content)?));
     }
     let package_id = raws[0].1.package.clone();
     validate_id(&package_id, "package identifier", &raws[0].0)?;
@@ -632,8 +666,6 @@ fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, Catalog
             });
         }
     }
-    let content_digest = canonical_json_sha256(&Value::Array(digest_files))
-        .map_err(|error| CatalogError::new(error.to_string()))?;
     Ok(Package {
         schema: EFFECTS_SCHEMA_VERSION,
         id: package_id,

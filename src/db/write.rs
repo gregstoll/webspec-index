@@ -136,7 +136,6 @@ pub fn insert_sections_bulk(
             }
         }
 
-        super::effects::invalidate(tx)?;
         Ok(())
     })
 }
@@ -170,7 +169,6 @@ pub fn insert_refs_bulk(
             }
         }
 
-        super::effects::invalidate(tx)?;
         Ok(())
     })
 }
@@ -202,7 +200,6 @@ pub fn insert_idl_defs_bulk(
             }
         }
 
-        super::effects::invalidate(tx)?;
         Ok(())
     })
 }
@@ -241,6 +238,7 @@ fn delete_snapshot_children(
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<()> {
     let effect_and_schema_tables = [
+        "effect_fragments",
         "effect_anchors",
         "effect_structures",
         "markdown_memo",

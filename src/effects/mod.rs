@@ -29,5 +29,6 @@ pub use query::QueryWithEffects;
 pub use query::{query_section_with_effects, QueryWithEffects};
 #[cfg(feature = "native")]
 pub use service::{
-    explain_effects, get_effect_preview, get_effect_summary, input_fingerprint, recompute_effects,
+    explain_effects, get_effect_preview, get_effect_summary, input_fingerprint, rebuild_effects,
+    recompute_effects,
 };

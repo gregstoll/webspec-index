@@ -1,9 +1,24 @@
 //! Parallel parse of fetched spec documents.
 
+use crate::effects::catalog::Catalog;
+use crate::effects::fragment::{build_fragment, encode_fragment, FragmentInput};
 use crate::model::ParsedSpec;
 use crate::parse::markdown::{encode_memo, MarkdownMemo};
 use rayon::prelude::*;
 use std::sync::{mpsc, Arc};
+
+/// What a parse needs to build the spec's effects fragment beside its state.
+#[derive(Clone)]
+pub(crate) struct FragmentContext {
+    pub catalog: Arc<Catalog>,
+    pub environment: String,
+}
+
+/// An encoded fragment and the configuration it was built under.
+pub(crate) struct BuiltFragment {
+    pub config_key: String,
+    pub payload: Vec<u8>,
+}
 
 pub(crate) struct ParseJob {
     pub spec_name: String,
@@ -11,6 +26,8 @@ pub(crate) struct ParseJob {
     pub html: Arc<String>,
     pub content_hash: String,
     pub previous_memo: MarkdownMemo,
+    /// Set when effects are on.
+    pub fragment: Option<FragmentContext>,
 }
 
 pub(crate) struct ParsedHtml {
@@ -19,6 +36,7 @@ pub(crate) struct ParsedHtml {
     pub structure_json: String,
     pub state: crate::state::StateSpec,
     pub memo: Vec<u8>,
+    pub fragment: Option<BuiltFragment>,
 }
 
 /// Parse `jobs` on a pool of `threads` workers. Results are in job order.
@@ -56,7 +74,8 @@ pub(crate) fn chunk_len(threads: usize) -> usize {
 /// Parse one document on two workers, each with its own `Html`: the first
 /// extracts sections, references and IDL (through the markdown memo), the
 /// second extracts the step structure, then takes the first worker's sections
-/// and IDL to extract state on its own document.
+/// and IDL to extract state on its own document and, when effects are on, to
+/// build the effects fragment beside it.
 pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
     let (tx, rx) = mpsc::sync_channel::<Arc<ParsedSpec>>(1);
     let ParseJob {
@@ -65,6 +84,7 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
         html,
         content_hash,
         previous_memo,
+        fragment: fragment_context,
     } = job;
     let synthetic_sha = format!("hash:{content_hash}");
     let (html_a, spec_a, base_a) = (html.clone(), spec_name.clone(), base_url.clone());
@@ -86,7 +106,7 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
             let _ = tx.send(parsed.clone());
             Ok((parsed, encode_memo(&memo)))
         },
-        move || -> anyhow::Result<(String, crate::state::StateSpec)> {
+        move || -> anyhow::Result<(String, crate::state::StateSpec, Option<BuiltFragment>)> {
             let document = scraper::Html::parse_document(&html);
             let structure = crate::parse::steps::extract_step_structure_from_document(
                 &document,
@@ -97,21 +117,56 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
             let parsed = rx
                 .recv()
                 .map_err(|_| anyhow::anyhow!("section worker failed"))?;
-            let state = crate::state::extract_state(&crate::state::StateInputs {
-                document: &document,
-                spec: &spec_name,
-                base_url: &base_url,
-                snapshot_sha: &synthetic_sha,
-                structure: &structure,
-                sections: &parsed.sections,
-                idl_definitions: &parsed.idl_definitions,
-                catalog: crate::state::extract::bundled_catalog(),
+            // The document is not `Sync`, so state stays on this thread while the
+            // fragment builds on another. The structure worker may wait on rayon
+            // work here: past `recv`, the sender it depends on has already sent.
+            let mut fragment = None;
+            let state = rayon::in_place_scope(|scope| {
+                if let Some(context) = fragment_context {
+                    let (fragment, parsed, structure) = (&mut fragment, &parsed, &structure);
+                    let (spec, base, sha) = (&spec_name, &base_url, &synthetic_sha);
+                    scope.spawn(move |_| {
+                        let anchors = crate::effects::service::parsed_anchors(
+                            spec,
+                            base,
+                            parsed,
+                            structure,
+                            &context.catalog,
+                        );
+                        let built = build_fragment(&FragmentInput {
+                            spec,
+                            snapshot_sha: sha,
+                            base_url: base,
+                            structure: Some(structure),
+                            anchors: &anchors,
+                            catalog: &context.catalog,
+                            environment: &context.environment,
+                        });
+                        *fragment = Some(BuiltFragment {
+                            config_key: crate::effects::service::config_key(
+                                &context.catalog.content_digest,
+                                &context.environment,
+                            ),
+                            payload: encode_fragment(&built),
+                        });
+                    });
+                }
+                crate::state::extract_state(&crate::state::StateInputs {
+                    document: &document,
+                    spec: &spec_name,
+                    base_url: &base_url,
+                    snapshot_sha: &synthetic_sha,
+                    structure: &structure,
+                    sections: &parsed.sections,
+                    idl_definitions: &parsed.idl_definitions,
+                    catalog: crate::state::extract::bundled_catalog(),
+                })
             });
-            Ok((serde_json::to_string(&structure)?, state))
+            Ok((serde_json::to_string(&structure)?, state, fragment))
         },
     );
     let (parsed, memo) = sections?;
-    let (structure_json, state) = structure_and_state?;
+    let (structure_json, state, fragment) = structure_and_state?;
     let parsed =
         Arc::try_unwrap(parsed).map_err(|_| anyhow::anyhow!("parsed spec still shared"))?;
     Ok(ParsedHtml {
@@ -120,6 +175,7 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
         structure_json,
         state,
         memo,
+        fragment,
     })
 }
 
@@ -156,6 +212,7 @@ mod tests {
                     html: std::sync::Arc::new(html.to_string()),
                     content_hash: crate::fetch::hash_bytes(html.as_bytes()),
                     previous_memo: MarkdownMemo::new(),
+                    fragment: None,
                 })
                 .collect::<Vec<_>>()
         };
@@ -172,6 +229,50 @@ mod tests {
     }
 
     #[test]
+    fn parsed_fragment_equals_the_fragment_built_from_the_stored_parse() {
+        use crate::effects::service::{config_key, publish, PublishMode};
+        use crate::effects::{default_catalog, fragment::decode_fragment, EffectsOptions};
+        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html");
+        let (spec, base) = ("HTML", "https://html.spec.whatwg.org/");
+        let catalog = default_catalog(&[]).unwrap();
+        let options = EffectsOptions::default();
+        let conn = crate::db::open_test_db().unwrap();
+        super::super::index_html(&conn, spec, base, "whatwg", html.into()).unwrap();
+        publish(
+            &conn,
+            &catalog,
+            &options,
+            PublishMode::Rebuild,
+            Default::default(),
+        )
+        .unwrap();
+        let key = config_key(&catalog.content_digest, &options.environment);
+        let stored = crate::db::effects::load_fragment_payloads(&conn, &key).unwrap();
+        let parsed = parse_jobs(
+            vec![ParseJob {
+                spec_name: spec.into(),
+                base_url: base.into(),
+                html: Arc::new(html.into()),
+                content_hash: super::super::hash_html(html),
+                previous_memo: MarkdownMemo::new(),
+                fragment: Some(FragmentContext {
+                    catalog: Arc::new(catalog),
+                    environment: options.environment,
+                }),
+            }],
+            1,
+        )
+        .remove(0)
+        .unwrap();
+        let built = parsed.fragment.unwrap();
+        assert_eq!(built.config_key, key);
+        assert_eq!(
+            decode_fragment(&built.payload).unwrap(),
+            decode_fragment(&stored[0].1).unwrap()
+        );
+    }
+
+    #[test]
     fn single_thread_pool_does_not_deadlock() {
         let job = ParseJob {
             spec_name: "T".into(),
@@ -181,6 +282,7 @@ mod tests {
             ),
             content_hash: "x".into(),
             previous_memo: MarkdownMemo::new(),
+            fragment: None,
         };
         assert!(parse_jobs(vec![job], 1)[0].is_ok());
     }

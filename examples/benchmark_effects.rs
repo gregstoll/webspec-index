@@ -228,10 +228,9 @@ async fn main() -> Result<()> {
     let mut sizes = BTreeMap::new();
     for (table, column) in [
         ("effect_structures", "structure_json"),
-        ("effect_graph", "topology"),
+        ("effect_fragments", "payload"),
         ("effect_sites", "json"),
-        ("effect_local_matches", "payload_json"),
-        ("effect_summary_cache", "payload"),
+        ("effect_summaries", "payload"),
     ] {
         let size: i64 = conn.query_row(
             &format!("SELECT coalesce(sum(length({column})),0) FROM {table}"),
@@ -240,26 +239,26 @@ async fn main() -> Result<()> {
         )?;
         sizes.insert(table, size);
     }
-    // A prepared compact query must not deserialize the graph. Corrupt the
-    // topology only after exporting, then repeat the query in a new process so
-    // an in-memory graph cache cannot hide a regression.
-    conn.execute("UPDATE effect_graph SET topology = X'00' WHERE id = 1", [])?;
+    // A prepared compact query must not link the fragments. Corrupt them only
+    // after exporting, then repeat the query in a new process so an in-memory
+    // graph cache cannot hide a regression.
+    conn.execute("UPDATE effect_fragments SET payload = X'00'", [])?;
     let prepared = Command::new(std::env::current_exe()?)
         .arg("--query-only")
         .arg(temporary.path().join("index.db"))
         .arg(&subject)
         .output()
-        .context("checking prepared query without graph topology")?;
+        .context("checking prepared query without fragments")?;
     anyhow::ensure!(
         prepared.status.success(),
-        "prepared query failed without graph topology: {}",
+        "prepared query failed without fragments: {}",
         String::from_utf8_lossy(&prepared.stderr)
     );
     let prepared_result: serde_json::Value = serde_json::from_slice(&prepared.stdout)?;
     anyhow::ensure!(
         prepared_result["effects"] == fresh_result["effects"]
             && prepared_result["effects_status"] == fresh_result["effects_status"],
-        "prepared query changed when graph topology was unavailable"
+        "prepared query changed when fragments were unavailable"
     );
     warm.sort_by(f64::total_cmp);
     prepared_warm.sort_by(f64::total_cmp);

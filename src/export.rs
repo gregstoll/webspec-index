@@ -65,21 +65,18 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
     drop(source);
 
     let conn = Connection::open(&work)?;
-    // Pruning fires the effects invalidation triggers on specs and snapshots, which
-    // would mark the stored graph stale in the export. The graph stays valid for the
-    // specs that remain, so the counter is put back afterwards.
-    let generation = crate::db::effects::generation(&conn)?;
+    // Pruning changes the corpus; the publication stays valid for the specs that
+    // remain, and every fragment is kept so read-time linking still sees the
+    // callees of pruned specs, whose snapshots are gone.
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
     prune(&conn, &options.providers, &options.specs)?;
     conn.execute_batch(
-        "DROP TABLE IF EXISTS effect_structures;
-         DROP TABLE IF EXISTS effect_local_matches;
+        "UPDATE effect_publication SET frozen = 1;
+         DROP TABLE IF EXISTS effect_structures;
+         DROP TABLE IF EXISTS markdown_memo;
          DROP TABLE IF EXISTS update_checks;
          DROP TABLE IF EXISTS state_models;
          INSERT INTO sections_fts(sections_fts) VALUES('optimize');",
-    )?;
-    conn.execute(
-        "UPDATE meta SET value = ?1 WHERE key = 'effects_generation'",
-        [generation],
     )?;
     let specs = exported_specs(&conn)?;
     conn.execute_batch(&format!(
@@ -97,15 +94,24 @@ pub fn export_web(source_db: &Path, out_dir: &Path, options: &ExportOptions) -> 
     Ok(manifest)
 }
 
+/// The export serves the publication for the bundled catalog and the default
+/// environment, so it must be current for those.
 fn ensure_prepared_effects(conn: &Connection) -> Result<()> {
-    let has_graph: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM effect_graph WHERE id=1
-           AND generation = (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'effects_generation'))",
-        [],
-        |row| row.get(0),
-    )?;
-    if !has_graph {
-        bail!("no effects graph for the current index; run `webspec-index effects --all` first");
+    use crate::effects::service::{catalog_digest, publication_is_current};
+    let digest = catalog_digest(&[]).map_err(|e| anyhow::anyhow!(e.message))?;
+    let environment = crate::effects::EffectsOptions::default().environment;
+    let current = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='effect_publication')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?
+        .then(|| publication_is_current(conn, &digest, &environment))
+        .transpose()
+        .map_err(|e| anyhow::anyhow!(e.message))?
+        .unwrap_or(false);
+    if !current {
+        bail!("effects are not published for the current index; run `webspec-index effects --all` first");
     }
     Ok(())
 }
@@ -145,7 +151,7 @@ fn prune(conn: &Connection, providers: &[String], specs: &[String]) -> Result<()
          DELETE FROM effect_structures WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM snapshots WHERE id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM specs WHERE id NOT IN (SELECT spec_id FROM snapshots);
-         DELETE FROM effect_summary_cache WHERE spec <> '' AND spec NOT IN (SELECT name FROM specs);
+         DELETE FROM effect_summaries WHERE spec NOT IN (SELECT name FROM specs);
          DROP TABLE doomed_snapshots;",
     );
     conn.execute_batch(&batch)?;
