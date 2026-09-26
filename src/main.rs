@@ -575,6 +575,8 @@ enum Command {
             help = "Sites per group (field view), fields (lists), or rows per table (type view)"
         )]
         limit: Option<u32>,
+        #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
+        rules: Vec<String>,
     },
 
     /// Update specifications to latest versions
@@ -1197,13 +1199,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             no_inits,
             unclassified,
             limit,
+            rules,
         } => {
             let options = webspec_index::state::query::StateQueryOptions {
                 include_inits: !no_inits,
                 unclassified,
                 limit,
             };
-            match webspec_index::state::service::state(&selector, &options).await? {
+            match webspec_index::state::service::state(&selector, &options, &rules).await? {
                 Ok(result) => {
                     print_output(&cli.format, &result, webspec_index::state::render::response);
                     Ok(ExitCode::SUCCESS)

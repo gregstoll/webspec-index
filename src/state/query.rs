@@ -1,15 +1,20 @@
 //! State queries (§10): selector resolution and the field, type, member and
 //! field-list views. Every answer is assembled from the `state_*` rows of the
-//! current snapshots; no stored `StateSpec` payload is decoded.
+//! current snapshots. Only query-time rule packages decode stored `StateSpec`
+//! payloads: the sites of snapshots their rules touch are derived in memory.
 use crate::db::state::{self as db, StateSnapshot, StoredField, StoredMember, StoredSite};
+use crate::state::catalog::StateRule;
+use crate::state::ir::StatementSource;
 use crate::state::lookup::{fold_name, FieldEntry, Lookup, TypeIndex, TypeNode};
 use crate::state::model::{
     AnchorRole, AnchorTarget, ConceptAliasBasis, FieldBasis, InitialValue, OwnerBasis, OwnerRef,
-    OwnerVia, StateIssueCode, SuperBasis, SuperEdge, TypeExpr, TypeKey, TypeKind,
+    OwnerVia, Site, StateCatalog, StateIssueCode, StateSpec, SuperBasis, SuperEdge, TypeExpr,
+    TypeKey, TypeKind,
 };
+use crate::state::{classify, extract, ir, rules};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 const FIELD_SITE_LIMIT: u32 = 50;
@@ -40,6 +45,7 @@ pub enum StateErrorCode {
     SpecNotIndexed,
     NotFound,
     AmbiguousSelector,
+    InvalidRules,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +56,7 @@ pub struct StateError {
 }
 
 impl StateError {
-    fn new(code: StateErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: StateErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -322,6 +328,18 @@ pub fn query(
     selector: &str,
     options: &StateQueryOptions,
 ) -> Result<StateResponse, StateError> {
+    query_with_rules(conn, selector, options, &StateCatalog::default())
+}
+
+/// [`query`] with the rules of `extra` applied on top of the stored model
+/// (§8.3): each in-scope snapshot a rule may match gets its sites re-derived
+/// in memory, so the answer adds rule sites and drops the sites they supersede.
+pub fn query_with_rules(
+    conn: &Connection,
+    selector: &str,
+    options: &StateQueryOptions,
+    extra: &StateCatalog,
+) -> Result<StateResponse, StateError> {
     let selector = selector.trim();
     let parsed = parse_selector(selector)?;
     let snapshots = db::state_snapshots(conn)?;
@@ -331,7 +349,7 @@ pub fn query(
             "no indexed spec has a state model; run `webspec-index update`",
         ));
     }
-    let scope = Scope::load(conn, snapshots, options)?;
+    let scope = Scope::load(conn, snapshots, options, extra)?;
     match parsed {
         Selector::Anchor { spec, anchor } => scope.anchor_view(&spec, &anchor),
         Selector::SpecGlob { spec, pattern } => scope.spec_glob(selector, &spec, &pattern),
@@ -797,9 +815,120 @@ struct ClassCounts {
     removes: u32,
 }
 
+impl ClassCounts {
+    fn add(&mut self, class: &str, op: &str, count: u32) {
+        match class {
+            "write" => self.writes += count,
+            "init" => self.inits += count,
+            "unclassified" => self.unclassified += count,
+            _ => {}
+        }
+        if matches!(class, "write" | "init" | "declared") {
+            if removes_member(op) {
+                self.removes += count;
+            } else {
+                self.adds += count;
+            }
+        }
+    }
+}
+
 /// A member site's effect: set operations add the member, `unset`/`remove` remove it.
 fn removes_member(op: &str) -> bool {
     matches!(op, "unset" | "remove")
+}
+
+fn site_target(site: &StoredSite) -> (&str, &str) {
+    (
+        site.target_spec.as_deref().unwrap_or_default(),
+        site.target_anchor.as_deref().unwrap_or_default(),
+    )
+}
+
+/// A derived site as `state_sites` stores it for a snapshot of `spec`.
+fn stored_row(spec: &str, site: Site) -> StoredSite {
+    let (target_spec, target_anchor) = match site.target {
+        Some(target) => (Some(target.spec), Some(target.anchor)),
+        None => (None, None),
+    };
+    StoredSite {
+        spec: spec.to_string(),
+        class: site.class.as_str().to_string(),
+        target_spec,
+        target_anchor,
+        op: site.op,
+        subject_anchor: format!("{}#{}", site.subject.spec, site.subject.anchor),
+        context: site.context,
+        role: site.role,
+        constructed: site.constructed,
+        step_path: site.step_path,
+        step_id: site.step_id,
+        receiver: site.receiver,
+        target_text: site.target_text,
+        value_text: site.value_text,
+        text: site.text,
+        basis: site.basis,
+    }
+}
+
+/// Whether `rule` can match in `source`: its subject fits and its anchor is
+/// linked or its text occurs. Exclusions are left to `rules::apply_rules`.
+fn rule_may_match(rule: &StateRule, source: &StatementSource) -> bool {
+    let spec = &rule.match_spec;
+    if spec.subject.as_ref().is_some_and(|subject| {
+        subject.spec != source.subject.spec || subject.anchor != source.subject.anchor
+    }) {
+        return false;
+    }
+    match (&spec.anchor, &spec.text) {
+        (Some(anchor), _) => source.links.iter().any(|link| {
+            link.target.as_ref().is_some_and(|target| {
+                target.spec.eq_ignore_ascii_case(&anchor.spec) && target.anchor == anchor.anchor
+            })
+        }),
+        (None, Some(text)) => text.regex().is_match(&source.text),
+        (None, None) => false,
+    }
+}
+
+/// The sites of `state` with `extra`'s rules applied after the grammar and
+/// the rules it was indexed with, or `None` when no rule can match. Only the
+/// sources a rule may match are parsed again.
+fn sites_with_rules(mut state: StateSpec, extra: &StateCatalog) -> Option<Vec<Site>> {
+    let bundled = extract::bundled_catalog();
+    let reapply_bundled = !bundled.rules.is_empty()
+        && state.representation_version == bundled.representation_version();
+    let mut touched = HashSet::new();
+    let (mut statements, mut occurrences, mut declared) = (Vec::new(), Vec::new(), Vec::new());
+    for source in &state.sources {
+        if matches!(source.context, ir::SourceContext::BranchLabel { .. })
+            || !extra.rules.iter().any(|rule| rule_may_match(rule, source))
+        {
+            continue;
+        }
+        let mut parsed = ir::parse_source(source);
+        let mut found = classify::classify(source, &parsed);
+        if reapply_bundled {
+            rules::apply_rules(bundled, source, &mut parsed, &mut found, &mut Vec::new());
+        }
+        rules::apply_rules(extra, source, &mut parsed, &mut found, &mut declared);
+        touched.insert(source.id.clone());
+        statements.extend(parsed.statements);
+        occurrences.extend(found);
+    }
+    if touched.is_empty() {
+        return None;
+    }
+    state
+        .statements
+        .retain(|statement| !touched.contains(&statement.source_id));
+    state.statements.extend(statements);
+    state
+        .occurrences
+        .retain(|occurrence| !touched.contains(&occurrence.source_id));
+    state.occurrences.extend(occurrences);
+    state.declared_sites.extend(declared);
+    Some(extract::derive_sites(&state))
 }
 
 fn site_info(site: &StoredSite) -> SiteInfo {
@@ -866,6 +995,12 @@ struct Scope<'a> {
     conn: &'a Connection,
     snapshots: Vec<StateSnapshot>,
     ids: Vec<i64>,
+    /// Snapshots whose sites are read from `state_sites`: every snapshot but
+    /// those in `rule_sites`.
+    site_ids: Vec<i64>,
+    /// Sites of the snapshots query-time rules may match, derived in memory
+    /// and ordered by site id within each snapshot.
+    rule_sites: Vec<StoredSite>,
     spec_of: HashMap<i64, String>,
     types: TypeCatalog,
     options: &'a StateQueryOptions,
@@ -876,19 +1011,72 @@ impl<'a> Scope<'a> {
         conn: &'a Connection,
         snapshots: Vec<StateSnapshot>,
         options: &'a StateQueryOptions,
+        extra: &StateCatalog,
     ) -> anyhow::Result<Self> {
         let ids: Vec<i64> = snapshots.iter().map(|s| s.id).collect();
         let spec_of: HashMap<i64, String> =
             snapshots.iter().map(|s| (s.id, s.spec.clone())).collect();
         let types = TypeCatalog::load(conn, &ids, &spec_of)?;
+        let mut site_ids = ids.clone();
+        let mut rule_sites = Vec::new();
+        if !extra.rules.is_empty() {
+            for snapshot in &snapshots {
+                let Some(state) = db::load_state_model(conn, snapshot.id)? else {
+                    continue;
+                };
+                let Some(mut sites) = sites_with_rules(state, extra) else {
+                    continue;
+                };
+                sites.sort_by(|a, b| a.site_id.cmp(&b.site_id));
+                site_ids.retain(|&id| id != snapshot.id);
+                rule_sites.extend(
+                    sites
+                        .into_iter()
+                        .map(|site| stored_row(&snapshot.spec, site)),
+                );
+            }
+        }
         Ok(Self {
             conn,
             snapshots,
             ids,
+            site_ids,
+            rule_sites,
             spec_of,
             types,
             options,
         })
+    }
+
+    /// Every site targeting one of `targets`, in `db::sites_for_targets` order.
+    fn sites_for_targets(&self, targets: &[(String, String)]) -> anyhow::Result<Vec<StoredSite>> {
+        let mut sites = db::sites_for_targets(self.conn, &self.site_ids, targets)?;
+        if self.rule_sites.is_empty() {
+            return Ok(sites);
+        }
+        let wanted: HashSet<(&str, &str)> = targets
+            .iter()
+            .map(|(spec, anchor)| (spec.as_str(), anchor.as_str()))
+            .collect();
+        sites.extend(
+            self.rule_sites
+                .iter()
+                .filter(|site| wanted.contains(&site_target(site)))
+                .cloned(),
+        );
+        sites.sort_by(|a, b| {
+            (site_target(a), &a.spec, &a.subject_anchor, &a.step_path).cmp(&(
+                site_target(b),
+                &b.spec,
+                &b.subject_anchor,
+                &b.step_path,
+            ))
+        });
+        Ok(sites)
+    }
+
+    fn sites_for_target(&self, spec: &str, anchor: &str) -> anyhow::Result<Vec<StoredSite>> {
+        self.sites_for_targets(&[(spec.to_string(), anchor.to_string())])
     }
 
     fn spec_ids(&self, spec: &str) -> Vec<i64> {
@@ -947,7 +1135,7 @@ impl<'a> Scope<'a> {
             if db::has_current_snapshot(self.conn, spec)? {
                 return Err(Self::spec_not_in_scope(spec, true));
             }
-            let sites = db::sites_for_target(self.conn, &self.ids, spec, anchor)?;
+            let sites = self.sites_for_target(spec, anchor)?;
             if sites.is_empty() {
                 return Err(Self::spec_not_in_scope(spec, false));
             }
@@ -966,7 +1154,7 @@ impl<'a> Scope<'a> {
             .next()
         {
             let field = self.decode(row);
-            let sites = db::sites_for_target(self.conn, &self.ids, spec, anchor)?;
+            let sites = self.sites_for_target(spec, anchor)?;
             return Ok(StateResponse::Field(
                 self.declared_field_view(field, None, sites)?,
             ));
@@ -984,7 +1172,7 @@ impl<'a> Scope<'a> {
         {
             return Ok(StateResponse::Type(self.type_view(key)?));
         }
-        let sites = db::sites_for_target(self.conn, &self.ids, spec, anchor)?;
+        let sites = self.sites_for_target(spec, anchor)?;
         if !sites.is_empty() {
             return Ok(StateResponse::Field(self.field_view(
                 spec,
@@ -1208,7 +1396,23 @@ impl<'a> Scope<'a> {
         else {
             return Ok(Vec::new());
         };
-        Ok(db::opaque_writes_like(self.conn, &self.ids, &names)?
+        let mut sites = db::opaque_writes_like(self.conn, &self.site_ids, &names)?;
+        if !self.rule_sites.is_empty() {
+            sites.extend(
+                self.rule_sites
+                    .iter()
+                    .filter(|site| site.class == "opaque_write")
+                    .cloned(),
+            );
+            sites.sort_by(|a, b| {
+                (&a.spec, &a.subject_anchor, &a.step_path).cmp(&(
+                    &b.spec,
+                    &b.subject_anchor,
+                    &b.step_path,
+                ))
+            });
+        }
+        Ok(sites
             .iter()
             .filter(|site| regex.is_match(&site.target_text))
             .map(site_info)
@@ -1217,7 +1421,7 @@ impl<'a> Scope<'a> {
 
     fn member_view(&self, member: StoredMember) -> Result<StateMemberResult, StateError> {
         let AnchorTarget { spec, anchor } = self.member_target(&member);
-        let sites = db::sites_for_target(self.conn, &self.ids, &spec, &anchor)?;
+        let sites = self.sites_for_target(&spec, &anchor)?;
         let limit = self.field_limit();
         let (mut adds, mut removes, mut unclassified) = (Vec::new(), Vec::new(), Vec::new());
         let mut counts = ClassCounts::default();
@@ -1329,20 +1533,20 @@ impl<'a> Scope<'a> {
         targets: &[(String, String)],
     ) -> Result<HashMap<(String, String), ClassCounts>, StateError> {
         let mut counts: HashMap<(String, String), ClassCounts> = HashMap::new();
-        for row in db::site_counts_for_targets(self.conn, &self.ids, targets)? {
-            let count = row.count;
+        for row in db::site_counts_for_targets(self.conn, &self.site_ids, targets)? {
             let entry = counts.entry((row.spec, row.anchor)).or_default();
-            match row.class.as_str() {
-                "write" => entry.writes += count,
-                "init" => entry.inits += count,
-                "unclassified" => entry.unclassified += count,
-                _ => {}
-            }
-            if matches!(row.class.as_str(), "write" | "init" | "declared") {
-                if removes_member(&row.op) {
-                    entry.removes += count;
-                } else {
-                    entry.adds += count;
+            entry.add(&row.class, &row.op, row.count);
+        }
+        if !self.rule_sites.is_empty() {
+            let wanted: HashSet<(&str, &str)> = targets
+                .iter()
+                .map(|(spec, anchor)| (spec.as_str(), anchor.as_str()))
+                .collect();
+            for site in &self.rule_sites {
+                let target = site_target(site);
+                if wanted.contains(&target) {
+                    let key = (target.0.to_string(), target.1.to_string());
+                    counts.entry(key).or_default().add(&site.class, &site.op, 1);
                 }
             }
         }
@@ -1538,7 +1742,7 @@ impl<'a> Scope<'a> {
                     .find(|f| f.spec == field.spec && f.anchor == field.anchor)
                     .expect("lookup returns one of the given fields");
                 let (spec, anchor) = field.key();
-                let sites = db::sites_for_target(self.conn, &self.ids, &spec, &anchor)?;
+                let sites = self.sites_for_target(&spec, &anchor)?;
                 Ok(StateResponse::Field(self.declared_field_view(
                     field,
                     Some(found_on),
@@ -1616,7 +1820,7 @@ impl<'a> Scope<'a> {
         let listed: Vec<(Field, Option<FoundOn>)> = matches.into_iter().take(limit).collect();
         let targets: Vec<(String, String)> = listed.iter().map(|(field, _)| field.key()).collect();
         let mut sites_by_target: HashMap<(String, String), Vec<StoredSite>> = HashMap::new();
-        for site in db::sites_for_targets(self.conn, &self.ids, &targets)? {
+        for site in self.sites_for_targets(&targets)? {
             let target = (
                 site.target_spec.clone().unwrap_or_default(),
                 site.target_anchor.clone().unwrap_or_default(),
@@ -2066,5 +2270,56 @@ mod tests {
         assert!(like_match("%", ""));
         assert!(like_match("%b%b", "abxb"));
         assert!(!like_match("%nothing%", "is initial about:blank"));
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn query_time_rules_add_sites_and_declarations_are_rejected() {
+        use crate::state::testing::{
+            base_url, index_offline_with, ADD_RULE_YAML, QUERY_DOM, QUERY_HTML,
+        };
+        let conn = crate::db::open_in_memory().unwrap();
+        for (spec, html) in [("DOM", QUERY_DOM), ("HTML", QUERY_HTML)] {
+            index_offline_with(&conn, spec, base_url(spec), html, &StateCatalog::default())
+                .unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("state")).unwrap();
+        std::fs::write(dir.path().join("state/rules.yaml"), ADD_RULE_YAML).unwrap();
+        let extra = crate::state::catalog::load_state_package(dir.path()).unwrap();
+        let options = StateQueryOptions::default();
+        let StateResponse::Field(plain) = query(&conn, "HTML#open-dialogs-list", &options).unwrap()
+        else {
+            panic!()
+        };
+        assert!(plain.writes.is_empty());
+        assert_eq!(plain.unclassified.count, 1);
+        let StateResponse::Field(ruled) =
+            query_with_rules(&conn, "HTML#open-dialogs-list", &options, &extra).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(ruled.writes.len(), 1);
+        assert_eq!(ruled.writes[0].step_path.as_deref(), Some("3"));
+        assert_eq!(
+            ruled.writes[0].basis,
+            "rule:webspec-semantics/add-to-field-collection"
+        );
+        assert_eq!(ruled.unclassified.count, 0);
+        let StateResponse::Field(other) =
+            query_with_rules(&conn, "DOM#concept-node-document", &options, &extra).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(other.writes.len(), 2);
+        let with_fields = crate::state::catalog::load_state_files(&[(
+            "state/f.yaml",
+            "schema: 1\npackage: p\nfields:\n  - id: f\n    field: HTML#f\n    owner: [HTML#o]\n    expect_text: 'x'\n    reason: r\n",
+        )])
+        .unwrap();
+        assert!(crate::state::catalog::rules_only(&with_fields)
+            .unwrap_err()
+            .message
+            .contains("only rules"));
     }
 }

@@ -11,6 +11,7 @@ use crate::state::model::{
     AnchorTarget, InfraKind, InitialValue, Literal, Primitive, TypeExpr, TypeKey, TypeKind,
     TypeRef, STATE_VERSION,
 };
+use crate::state::query::{StateError, StateErrorCode};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -47,6 +48,18 @@ impl StateCatalog {
     pub fn has_declarations(&self) -> bool {
         !self.types.is_empty() || !self.fields.is_empty()
     }
+}
+
+/// Query-time rule packages add rules only: declarations change the stored
+/// model, which is built once at index time.
+pub fn rules_only(catalog: &StateCatalog) -> Result<(), StateError> {
+    if catalog.has_declarations() {
+        return Err(StateError::new(
+            StateErrorCode::InvalidRules,
+            "query-time rule packages may contain only rules; declarations apply when the bundled catalog is built",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
