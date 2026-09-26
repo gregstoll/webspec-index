@@ -860,9 +860,8 @@ mod tests {
         assert!(md.contains("## Navigation"));
     }
 
-    #[test]
-    fn test_query_format_with_content() {
-        let result = QueryResult {
+    fn content_fixture() -> QueryResult {
+        QueryResult {
             spec: "TEST".to_string(),
             sha: "abc123".to_string(),
             anchor: "navigate".to_string(),
@@ -883,13 +882,24 @@ mod tests {
             },
             outgoing_refs: vec![],
             incoming_refs: vec![],
-        };
+        }
+    }
 
-        let md = query(&result, None);
+    #[test]
+    fn test_query_format_with_content() {
+        let md = query(&content_fixture(), None);
         assert!(md.contains("**navigate** (Algorithm)"));
         assert!(md.contains("## Content"));
         assert!(md.contains("To **navigate** a [navigable](#foo)"));
         assert!(md.contains("- Parent: `section-7`"));
+    }
+
+    #[test]
+    fn plain_query_output_is_pinned() {
+        assert_eq!(
+            query(&content_fixture(), None),
+            "# TEST#navigate\n\n**navigate** (Algorithm)\n\n**SHA**: abc123\n\n## Content\n\nTo **navigate** a [navigable](#foo)\n\n## Navigation\n\n- Parent: `section-7`\n"
+        );
     }
 
     #[test]
