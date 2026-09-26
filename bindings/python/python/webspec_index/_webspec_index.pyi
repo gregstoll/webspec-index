@@ -244,6 +244,32 @@ class FileAnalysis:
 
 # ── Functions ────────────────────────────────────────────────────────
 
+def query_view(
+    spec_anchor: str,
+    involving: str | list[str] | None = ...,
+    feeding: str | None = ...,
+    steps: str | list[str] | None = ...,
+    depth: int | None = ...,
+    links: str = ...,
+    no_notes: bool = ...,
+) -> dict:
+    """Return a sliced view of one algorithm as a dict.
+
+    The dict contains all ``query`` fields plus ``content`` (the slice-rendered
+    markdown, with link and note transformations applied) and ``slice`` (a
+    ``SliceResult`` object describing kept steps, omitted runs, matched
+    variables, and status counts).
+
+    *involving*, *steps*: a variable/step name or a list of them.
+    *feeding*: ``"STEP"`` or ``"STEP:VAR,…"`` — earlier steps that define the
+    variables used by *STEP*.
+    *links*: ``"short"`` (default), ``"full"``, or ``"none"``.
+
+    Raises ``WebspecError`` for selector errors or when the section has no
+    slice index.  Raises ``ValueError`` for an invalid *links* value.
+    """
+    ...
+
 def state(
     selector: str,
     include_inits: bool = True,

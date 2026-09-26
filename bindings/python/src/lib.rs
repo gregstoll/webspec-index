@@ -371,6 +371,55 @@ fn parse_anchor(input: &str) -> PyResult<(String, String, Option<String>)> {
     webspec_index::parse_spec_anchor(input).map_err(to_py_err)
 }
 
+fn names(value: Option<Bound<'_, PyAny>>) -> PyResult<Vec<String>> {
+    match value {
+        None => Ok(Vec::new()),
+        Some(v) => match v.extract::<String>() {
+            Ok(one) => Ok(vec![one]),
+            Err(_) => v.extract::<Vec<String>>(),
+        },
+    }
+}
+
+/// A view of one algorithm: ``involving`` / ``steps`` take a string or a list,
+/// ``feeding`` takes ``"24.9.1"`` or ``"24.9.1:historyEntry"``.
+#[pyfunction]
+#[pyo3(signature = (spec_anchor, involving=None, feeding=None, steps=None, depth=None, links="short", no_notes=false))]
+#[allow(clippy::too_many_arguments)]
+fn query_view<'py>(
+    py: Python<'py>,
+    spec_anchor: &str,
+    involving: Option<Bound<'py, PyAny>>,
+    feeding: Option<&str>,
+    steps: Option<Bound<'py, PyAny>>,
+    depth: Option<u32>,
+    links: &str,
+    no_notes: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    use webspec_index::state::slice::select::{FeedingSelector, ViewRequest};
+    let links = match links {
+        "short" => webspec_index::content_filter::LinksMode::Short,
+        "full" => webspec_index::content_filter::LinksMode::Full,
+        "none" => webspec_index::content_filter::LinksMode::None,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "links must be short, full or none, not {other:?}"
+            )))
+        }
+    };
+    let feeding = feeding
+        .map(FeedingSelector::parse)
+        .transpose()
+        .map_err(|e| WebspecError::new_err(e.to_string()))?;
+    let view = ViewRequest { involving: names(involving)?, feeding, steps: names(steps)?, depth };
+    match run(webspec_index::state::slice::service::query_view(
+        spec_anchor, &view, links, no_notes,
+    ))? {
+        Ok(value) => effect_result(py, &value),
+        Err(error) => Err(WebspecError::new_err(error.to_string())),
+    }
+}
+
 /// Analyze a source file or directory for spec references and step-comment validation.
 #[pyfunction]
 #[pyo3(signature = (path, recursive=false, threshold=0.85))]
@@ -416,6 +465,7 @@ fn _webspec_index(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(clear_db, m)?)?;
     m.add_function(wrap_pyfunction!(specs, m)?)?;
     m.add_function(wrap_pyfunction!(parse_anchor, m)?)?;
+    m.add_function(wrap_pyfunction!(query_view, m)?)?;
     m.add_function(wrap_pyfunction!(analyze, m)?)?;
 
     Ok(())

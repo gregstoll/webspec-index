@@ -3,6 +3,8 @@
 pub mod index;
 pub mod render;
 pub mod select;
+#[cfg(feature = "native")]
+pub mod service;
 pub mod summary;
 pub mod view;
 
