@@ -923,10 +923,11 @@ impl Parser<'_> {
             .text
             .match_indices("new ")
             .filter_map(|(new, _)| {
-                let start = [2, 3]
+                let before = &enc.text[..new];
+                let article = ["a ", "an "]
                     .into_iter()
-                    .filter_map(|back| new.checked_sub(back))
-                    .find(|&start| self.keyword(start, &["a new ", "an new "]).is_some())?;
+                    .find(|article| before.ends_with(article))?;
+                let start = new - article.len();
                 let at_word = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
                 (at_word && !enc.is_protected(start)).then_some(start)
             })
@@ -2462,6 +2463,22 @@ mod tests {
         assert_eq!(p.statements.len(), 1);
         assert!(!p.clauses[0].consumed);
         assert_eq!(p.clauses[0].verb.as_deref(), Some("append"));
+    }
+
+    #[test]
+    fn initializer_scan_steps_over_multibyte_text() {
+        for step in [
+            r##"Let <var>t</var> be <var>x</var> new <a href="#t">thing</a>."##,
+            r##"Let <var>t</var> be <a href="#x">x</a> new <a href="#t">thing</a>."##,
+            r##"Let <var>t</var> be «a new <a href="#t">thing</a> whose <a href="#f">f</a> is 1»."##,
+        ] {
+            let (_, p) = one(step);
+            assert!(p.clauses[0].consumed, "{step}");
+        }
+        let (s, p) = one(
+            r##"Let <var>t</var> be é new «a new <a href="#t">thing</a> whose <a href="#f">f</a> is 1»."##,
+        );
+        assert_eq!(role_of(&s, &p, "f"), Some(OccurrenceClass::Init));
     }
 
     #[test]
