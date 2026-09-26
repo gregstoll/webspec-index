@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 pub use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
+pub use crate::state::catalog::StateCatalog;
 
 pub const STATE_VERSION: &str = "3";
 
@@ -413,22 +414,6 @@ pub struct ReviewItem {
     pub text: String,
 }
 
-/// Reviewed declarations and rules applied at index time. Stage C adds the
-/// loaded content; until then the bundled catalog is empty.
-#[derive(Debug, Clone, Default)]
-pub struct StateCatalog {
-    pub digest: Option<String>,
-}
-
-impl StateCatalog {
-    pub fn representation_version(&self) -> String {
-        match &self.digest {
-            Some(digest) => format!("{STATE_VERSION}+{digest}"),
-            None => STATE_VERSION.to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateSpec {
     pub representation_version: String,
@@ -464,23 +449,6 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<TypeKey>("\"HTML#navigable\"").unwrap(),
             concept
-        );
-    }
-
-    #[test]
-    #[allow(clippy::needless_update)]
-    fn representation_version_includes_catalog_digest_only_when_present() {
-        assert_eq!(
-            StateCatalog::default().representation_version(),
-            STATE_VERSION
-        );
-        let catalog = StateCatalog {
-            digest: Some("sha256:ab".into()),
-            ..StateCatalog::default()
-        };
-        assert_eq!(
-            catalog.representation_version(),
-            format!("{STATE_VERSION}+sha256:ab")
         );
     }
 

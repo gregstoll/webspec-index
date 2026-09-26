@@ -3,6 +3,7 @@
 //! Layering: `parse::steps` → `state` → (later) `effects`. This module never
 //! imports the effects layer; shared rule primitives live in `crate::semantics`.
 pub(crate) mod block;
+pub mod catalog;
 pub(crate) mod classify;
 pub(crate) mod declare;
 pub mod extract;

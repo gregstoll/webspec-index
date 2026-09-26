@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webspec-index.dev/schemas/state/catalog.schema.json",
+  "title": "WebSpec state catalog file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "package"],
+  "properties": {
+    "schema": {"const": 1},
+    "package": {"$ref": "../effects/catalog.schema.json#/$defs/id"},
+    "types": {"type": "array", "default": [], "items": {"$ref": "#/$defs/typeDeclaration"}},
+    "fields": {"type": "array", "default": [], "items": {"$ref": "#/$defs/fieldDeclaration"}},
+    "rules": {"type": "array", "default": [], "items": {"$ref": "#/$defs/stateRule"}}
+  },
+  "$defs": {
+    "typeKey": {
+      "anyOf": [
+        {"type": "string", "pattern": "^idl:\\S+$"},
+        {"$ref": "../effects/catalog.schema.json#/$defs/anchor"}
+      ]
+    },
+    "typeDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "expect_text", "reason"],
+      "properties": {
+        "id": {"$ref": "../effects/catalog.schema.json#/$defs/id"},
+        "type": {"$ref": "../effects/catalog.schema.json#/$defs/anchor"},
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["idl_interface", "idl_mixin", "idl_dictionary", "infra_struct", "concept", "element"]},
+        "alias_of": {"$ref": "#/$defs/typeKey"},
+        "implemented_by": {"type": "array", "default": [], "items": {"$ref": "#/$defs/typeKey"}},
+        "expect_text": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "fieldDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "field", "expect_text", "reason"],
+      "properties": {
+        "id": {"$ref": "../effects/catalog.schema.json#/$defs/id"},
+        "field": {"$ref": "../effects/catalog.schema.json#/$defs/anchor"},
+        "owner": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/typeKey"}},
+        "type": {"$ref": "#/$defs/typeExpr"},
+        "initial": {"$ref": "#/$defs/initial"},
+        "expect_text": {"type": "string"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "typeExpr": {
+      "oneOf": [
+        {"enum": ["boolean", "string", "number", "integer", "byte_sequence", "scalar_value_string"]},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nominal"],
+          "properties": {"nominal": {"$ref": "../effects/catalog.schema.json#/$defs/anchor"}}
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "list": {"$ref": "#/$defs/typeExpr"},
+            "ordered_set": {"$ref": "#/$defs/typeExpr"},
+            "ordered_map": {"$ref": "#/$defs/typeExpr"},
+            "map": {"$ref": "#/$defs/typeExpr"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["union"],
+          "properties": {
+            "union": {
+              "type": "array",
+              "minItems": 2,
+              "items": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/typeExpr"}]}
+            }
+          }
+        },
+        {"$ref": "#/$defs/opaque"}
+      ]
+    },
+    "opaque": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opaque"],
+      "properties": {"opaque": {"type": "string", "minLength": 1}}
+    },
+    "initial": {
+      "oneOf": [
+        {"type": "boolean"},
+        {"type": "null"},
+        {"type": "integer"},
+        {"type": "string"},
+        {"$ref": "#/$defs/opaque"}
+      ]
+    },
+    "stateRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "emit"],
+      "properties": {
+        "id": {"$ref": "../effects/catalog.schema.json#/$defs/id"},
+        "match": {"$ref": "../effects/catalog.schema.json#/$defs/match"},
+        "emit": {"$ref": "#/$defs/stateEmit"},
+        "description": {"type": "string"}
+      }
+    },
+    "pathCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture", "from"],
+      "properties": {
+        "capture": {"$ref": "../effects/catalog.schema.json#/$defs/capture/properties/capture"},
+        "from": {"const": "path"}
+      }
+    },
+    "textCapture": {
+      "allOf": [
+        {"$ref": "../effects/catalog.schema.json#/$defs/capture"},
+        {"required": ["from"], "properties": {"from": {"const": "text"}}}
+      ]
+    },
+    "stateEmit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "params"],
+          "properties": {
+            "kind": {"const": "state.write"},
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "op"],
+              "properties": {
+                "field": {"$ref": "../effects/catalog.schema.json#/$defs/anchor"},
+                "op": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "params"],
+          "properties": {
+            "kind": {"const": "state.init"},
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field"],
+              "properties": {"field": {"$ref": "../effects/catalog.schema.json#/$defs/anchor"}}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "params"],
+          "properties": {
+            "kind": {"const": "state.mutate"},
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["op", "target"],
+              "properties": {
+                "op": {"type": "string", "minLength": 1},
+                "target": {"$ref": "#/$defs/pathCapture"},
+                "operand": {"$ref": "#/$defs/textCapture"}
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
