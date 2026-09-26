@@ -52,6 +52,8 @@ pub struct QueryResponse {
     pub query: effects::QueryWithEffects,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_html: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slice: Option<Box<state::slice::SliceResult>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +66,8 @@ pub enum Request {
         effects: bool,
         #[serde(default)]
         render: Render,
+        #[serde(default)]
+        view: Option<state::slice::ViewRequest>,
     },
     Exists {
         target: String,
@@ -159,6 +163,7 @@ pub enum Request {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", content = "result", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum Response {
     Specs {
         specs: Vec<SpecInfo>,
@@ -195,10 +200,10 @@ pub struct SpecInfo {
     pub commit_date: String,
 }
 
-/// API-level error code. The `Effects` variant carries the inner effects
-/// engine code with an `effects_` prefix (e.g. `"effects_subject_not_found"`)
-/// so effects validation errors never collide with envelope errors such as
-/// `"invalid_request"`; all others serialize as their own snake_case strings.
+/// API-level error code. The `Effects` and `Slice` variants carry their inner
+/// code with a matching prefix (`effects_`, `slice_`) so validation errors
+/// never collide with envelope errors such as `"invalid_request"`; all others
+/// serialize as their own snake_case strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiErrorCode {
     InvalidRequest,
@@ -206,6 +211,7 @@ pub enum ApiErrorCode {
     NotFound,
     Effects(effects::RequestErrorCode),
     State(state::query::StateErrorCode),
+    Slice(state::slice::SliceErrorCode),
     Internal,
 }
 
@@ -230,6 +236,7 @@ impl Serialize for ApiErrorCode {
                     .ok_or_else(|| serde::ser::Error::custom("state error code is not a string"))?;
                 s.serialize_str(&format!("state_{inner}"))
             }
+            ApiErrorCode::Slice(code) => s.serialize_str(&format!("slice_{}", code.as_str())),
         }
     }
 }
@@ -274,6 +281,20 @@ impl From<effects::RequestError> for ApiError {
             code: ApiErrorCode::Effects(e.code),
             message: e.message,
             details: e.details,
+        }
+    }
+}
+
+impl From<state::slice::SliceError> for ApiError {
+    fn from(e: state::slice::SliceError) -> Self {
+        ApiError {
+            code: ApiErrorCode::Slice(e.code),
+            message: e.message,
+            details: if e.candidates.is_empty() {
+                None
+            } else {
+                Some(serde_json::json!({"candidates": e.candidates}))
+            },
         }
     }
 }
@@ -477,11 +498,16 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
             target,
             effects: with_effects,
             render,
+            view,
         } => {
             let (spec, anchor) = resolve_target(&target)?;
-            let query = crate::query_section_from_conn(conn, &spec, &anchor)
+            let mut query = crate::query_section_from_conn(conn, &spec, &anchor)
                 .map_err(map_query_error)?
                 .ok_or_else(|| ApiError::not_found(format!("{spec}#{anchor}")))?;
+            let slice = view
+                .map(|v| state::slice::apply_view(conn, &mut query, &v).map(Box::new))
+                .transpose()
+                .map_err(ApiError::from)?;
             let qwe = if with_effects {
                 with_cached_effects(conn, query)
             } else {
@@ -524,6 +550,7 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
             Ok(Response::Query(QueryResponse {
                 query: qwe,
                 content_html,
+                slice,
             }))
         }
         Request::Exists { target } => {
@@ -1053,6 +1080,88 @@ mod tests {
             ("A", THING),
             ("B", THING),
         ])
+    }
+
+    const GO_VIEW: &str = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given a <var>foo</var>:</p><ol>
+<li><p>Let <var>a</var> be <var>foo</var>.</p></li>
+<li><p>Return.</p></li>
+<li><p>Set <var>b</var> to <var>a</var>.</p></li></ol></div>
+<p>A <dfn id="thing">thing</dfn> is nice.</p>"##;
+
+    #[test]
+    fn query_with_a_view_returns_sliced_content_and_the_slice() {
+        let conn = crate::state::testing::db_with(&[("HTML", GO_VIEW)]);
+        let v = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#go","view":{"involving":["*foo*"]}}"#,
+        );
+        assert_eq!(v["type"], "query", "{v}");
+        assert!(v["result"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("- [step 2 omitted: no use of *foo*]"));
+        assert_eq!(v["result"]["slice"]["algorithm"], "HTML#go");
+        assert_eq!(
+            v["result"]["slice"]["view"],
+            serde_json::json!({"involving": ["foo"], "depth": null})
+        );
+        assert!(v["result"].get("effects").is_none());
+        let html = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#go","render":"html","view":{"depth":1}}"#,
+        );
+        assert!(html["result"]["content_html"].as_str().is_some());
+        let plain = call(&conn, r#"{"type":"query","target":"HTML#go"}"#);
+        assert!(plain["result"].get("slice").is_none());
+        assert!(plain["result"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("2. Return."));
+    }
+
+    #[test]
+    fn view_errors_are_slice_prefixed() {
+        let conn = crate::state::testing::db_with(&[("HTML", GO_VIEW)]);
+        let v = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#go","view":{"involving":["nope"]}}"#,
+        );
+        assert_eq!(
+            (v["type"].as_str(), v["code"].as_str()),
+            (Some("error"), Some("slice_unknown_variable"))
+        );
+        assert_eq!(
+            v["details"]["candidates"],
+            serde_json::json!(["a", "foo", "b"])
+        );
+        let v = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#go","view":{"involving":["foo"],"steps":["1"]}}"#,
+        );
+        assert_eq!(v["code"], "slice_invalid_selector");
+        let v = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#thing","view":{"involving":["foo"]}}"#,
+        );
+        assert_eq!(v["code"], "slice_not_an_algorithm");
+        let v = call(
+            &conn,
+            r#"{"type":"query","target":"HTML#go","view":{"bogus":1}}"#,
+        );
+        assert_eq!(v["code"], "invalid_request");
+        use crate::state::slice::select::SliceErrorCode;
+        for (code, wire) in [
+            (SliceErrorCode::InvalidSelector, "slice_invalid_selector"),
+            (SliceErrorCode::NotAnAlgorithm, "slice_not_an_algorithm"),
+            (SliceErrorCode::UnknownVariable, "slice_unknown_variable"),
+            (SliceErrorCode::UnknownStep, "slice_unknown_step"),
+            (SliceErrorCode::Unavailable, "slice_unavailable"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(ApiErrorCode::Slice(code)).unwrap(),
+                wire
+            );
+        }
     }
 
     #[test]
