@@ -32,6 +32,7 @@ pub(crate) fn classify(source: &StatementSource, parsed: &ParsedSource) -> Vec<O
                 class,
                 statement_id,
                 basis: "ir".to_string(),
+                rule_ids: Vec::new(),
             }
         })
         .collect()
@@ -44,7 +45,7 @@ pub(crate) fn classify(source: &StatementSource, parsed: &ParsedSource) -> Vec<O
 /// separates its start from `link_start` in the source text).  If that clause
 /// has a verb and was not consumed by the grammar → `Unclassified`; otherwise
 /// → `Read`.
-fn fallback_class(
+pub(crate) fn fallback_class(
     source: &StatementSource,
     parsed: &ParsedSource,
     link_start: usize,

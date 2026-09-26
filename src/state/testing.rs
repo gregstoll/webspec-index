@@ -33,6 +33,22 @@ pub fn extract_html(html: &str, spec: &str) -> StateSpec {
     extract_with_catalog(html, spec, &StateCatalog::default())
 }
 
+/// The spec §8.3 `add-to-field-collection` verb rule as a state catalog file.
+pub const ADD_RULE_YAML: &str = r#"schema: 1
+package: webspec-semantics
+rules:
+  - id: add-to-field-collection
+    match:
+      text: '(?:^|, then |; )Add (?P<operand>.+?) to (?P<target>(?:the |this )?\S.*?)(?:\.|,|;|$)'
+      exclude_text: ['(?i)\badd \S+ to \*\w+\*(?:\.|$)']
+    emit:
+      kind: state.mutate
+      params:
+        op: append
+        target: {capture: target, from: path}
+        operand: {capture: operand, from: text}
+"#;
+
 pub const MINI: &str = r##"<pre><code class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</code></pre>
 <h3 id="the-document-object">The Document object</h3>
 <p>Each <code><a href="#document">Document</a></code> has an <dfn id="is-initial-about:blank">is initial <code>about:blank</code></dfn>, which is a boolean, initially false.</p>

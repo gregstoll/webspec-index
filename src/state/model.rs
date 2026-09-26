@@ -303,6 +303,10 @@ pub struct Occurrence {
     pub statement_id: Option<String>,
     /// `ir`, or `rule:<package>/<id>`.
     pub basis: String,
+    /// Public ids of further rules that matched this write or init, which
+    /// keeps the class and `basis` of whatever produced it first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +431,9 @@ pub struct StateSpec {
     pub prose_mentions: BTreeMap<String, u32>,
     pub coverage: CoverageCounters,
     pub issues: Vec<ModelIssue>,
+    /// `Declared` sites of `state.write`/`state.init` rules that matched no link.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_sites: Vec<Site>,
 }
 
 #[cfg(test)]

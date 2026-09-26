@@ -12,14 +12,14 @@ use crate::parse::steps::{
 use crate::state::catalog::load_state_files;
 use crate::state::declare;
 use crate::state::ir::{
-    self, Expr, Hop, InitForm, MutationOp, OpaqueReason, Path, ProseRole, Root, SetForm,
+    self, Expr, Hop, InitForm, MutationOp, OpBasis, OpaqueReason, Path, ProseRole, Root, SetForm,
     SourceContext, Statement, StatementKind, StatementSource,
 };
 use crate::state::model::{
     CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
     ReviewItem, Site, SiteClass, StateCatalog, StateSpec, TypeKey, TypeRef,
 };
-use crate::state::{classify, prose, types};
+use crate::state::{classify, prose, rules, types};
 
 /// Everything `extract_state` reads. The caller parses the document once and
 /// shares it with the section and structural extraction.
@@ -95,12 +95,21 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     sources.extend(prose.sources);
     let mut statements = Vec::new();
     let mut occurrences = Vec::new();
+    let mut declared_sites = Vec::new();
     for (index, source) in sources.iter().enumerate() {
-        let parsed = match branch_inits.remove(&index) {
+        let mut parsed = match branch_inits.remove(&index) {
             Some((constructed, value)) => ir::parse_branch_label(source, constructed, value),
             None => ir::parse_source(source),
         };
-        occurrences.extend(classify::classify(source, &parsed));
+        let mut source_occurrences = classify::classify(source, &parsed);
+        rules::apply_rules(
+            inputs.catalog,
+            source,
+            &mut parsed,
+            &mut source_occurrences,
+            &mut declared_sites,
+        );
+        occurrences.extend(source_occurrences);
         statements.extend(parsed.statements);
     }
 
@@ -138,6 +147,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         prose_mentions: prose.mentions,
         coverage,
         issues: declared.issues,
+        declared_sites,
     }
 }
 
@@ -383,7 +393,7 @@ fn count_occurrences(
 }
 
 /// `site-` + sha256(source_id \0 link_id-or-statement_id \0 class).
-fn site_id(source_id: &str, local_id: &str, class: SiteClass) -> String {
+pub(crate) fn site_id(source_id: &str, local_id: &str, class: SiteClass) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source_id.as_bytes());
     for component in [local_id, class.as_str()] {
@@ -394,12 +404,12 @@ fn site_id(source_id: &str, local_id: &str, class: SiteClass) -> String {
 }
 
 /// The parts of a site that depend on its class and statement.
-struct SiteParts {
-    op: String,
-    receiver: &'static str,
-    constructed: Option<String>,
-    target_text: String,
-    value_text: Option<String>,
+pub(crate) struct SiteParts {
+    pub op: String,
+    pub receiver: &'static str,
+    pub constructed: Option<String>,
+    pub target_text: String,
+    pub value_text: Option<String>,
 }
 
 /// One `state_sites` row per `Write`/`Init`/`Unclassified` occurrence with a
@@ -414,16 +424,24 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         .collect();
     let mut first_clause: HashMap<&str, usize> = HashMap::new();
     let mut opaque_by_source: HashMap<&str, Vec<&Statement>> = HashMap::new();
+    let mut rule_clauses: HashSet<(&str, usize)> = HashSet::new();
     for statement in &state.statements {
         first_clause
             .entry(statement.source_id.as_str())
             .and_modify(|start| *start = (*start).min(statement.span.start))
             .or_insert(statement.span.start);
-        if matches!(statement.kind, StatementKind::Opaque { verb: Some(_), .. }) {
-            opaque_by_source
+        match statement.kind {
+            StatementKind::Opaque { verb: Some(_), .. } => opaque_by_source
                 .entry(statement.source_id.as_str())
                 .or_default()
-                .push(statement);
+                .push(statement),
+            StatementKind::Mutate {
+                basis: OpBasis::Rule { .. },
+                ..
+            } => {
+                rule_clauses.insert((statement.source_id.as_str(), statement.span.start));
+            }
+            _ => {}
         }
     }
     let type_anchors: HashMap<&AnchorTarget, &TypeKey> = state
@@ -455,6 +473,11 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
             .as_deref()
             .and_then(|id| statements.get(id).copied());
         let parts = match class {
+            // A write rule reclassified an unclassified link: its clause's verb.
+            SiteClass::Write if statement.is_none() => SiteParts {
+                op: clause_verb(&opaque_by_source, source, link),
+                ..write_parts(source, None, link)
+            },
             SiteClass::Write => write_parts(source, statement, link),
             SiteClass::Init => init_parts(source, statement, link, &type_anchors),
             _ => SiteParts {
@@ -502,6 +525,9 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         else {
             continue;
         };
+        if rule_clauses.contains(&(statement.source_id.as_str(), statement.span.start)) {
+            continue;
+        }
         let Some(source) = sources.get(statement.source_id.as_str()) else {
             continue;
         };
@@ -524,6 +550,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
             Some(statement.span),
         ));
     }
+    sites.extend(state.declared_sites.iter().cloned());
     sites
 }
 
@@ -546,7 +573,7 @@ fn site_text(source: &StatementSource, first_clause: &HashMap<&str, usize>) -> S
 }
 
 #[allow(clippy::too_many_arguments)]
-fn site(
+pub(crate) fn site(
     source: &StatementSource,
     text: String,
     site_id: String,

@@ -13,6 +13,7 @@ pub mod model;
 pub(crate) mod prose;
 pub mod query;
 pub mod render;
+pub(crate) mod rules;
 #[cfg(feature = "native")]
 pub mod service;
 pub mod testing;

@@ -605,6 +605,47 @@ pub(crate) fn parse_value(source: &StatementSource) -> Expr {
     p.expr(0, p.value_end(0, None))
 }
 
+/// The links a parsed `PATH` positions, as indices into `source.links`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PathRoles {
+    /// The last hop's link.
+    pub write: Option<usize>,
+    /// The root link and the other hop links.
+    pub read_path: Vec<usize>,
+    /// Links of `ROOT'` phrases and subscripts.
+    pub read: Vec<usize>,
+}
+
+/// `span` of the source text as one complete `PATH` (§7.3), for rule
+/// captures (§8.3); `None` if the path grammar does not cover the whole span.
+pub(crate) fn parse_path_span(
+    source: &StatementSource,
+    span: TextSpan,
+) -> Option<(Path, PathRoles)> {
+    let enc = Encoded::new(source);
+    let p = Parser::new(&enc, source);
+    let text = source.text.get(span.start..span.end)?;
+    let start = enc.to_enc(span.start + (text.len() - text.trim_start().len()));
+    let end = enc.to_enc(span.end - (text.len() - text.trim_end().len()));
+    let parsed = p.path(start, false).filter(|path| path.end == end)?;
+    let mut roles = PathRoles::default();
+    if let Some((last, prefix)) = parsed.hop_links.split_last() {
+        roles.write = *last;
+        roles.read_path.extend(prefix.iter().flatten());
+    }
+    roles.read_path.extend(parsed.root_link);
+    for &(start, end) in &parsed.read_ranges {
+        roles.read.extend(enc.links_in(start, end));
+    }
+    Some((parsed.path, roles))
+}
+
+/// `span` of the source text as one `VALUE`.
+pub(crate) fn parse_expr_span(source: &StatementSource, span: TextSpan) -> Expr {
+    let enc = Encoded::new(source);
+    Parser::new(&enc, source).expr(enc.to_enc(span.start), enc.to_enc(span.end))
+}
+
 /// A `<dl>` initializer entry (§7.3): the label's first link is the field,
 /// `value` the entry value. The other label links are reads.
 pub(crate) fn parse_branch_label(
