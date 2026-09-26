@@ -143,6 +143,14 @@ pub fn db_with(specs: &[(&str, &str)]) -> rusqlite::Connection {
     conn
 }
 
+/// Structure, state (empty catalog) and slice indexes of one HTML string.
+pub fn slice_indexes_html(html: &str, spec: &str) -> Vec<crate::state::slice::SliceIndex> {
+    let structure =
+        crate::parse::steps::extract_step_structure(html, spec, base_url(spec), "hash:t");
+    let state = extract_html(html, spec);
+    crate::state::slice::build_slice_indexes(&structure, &state)
+}
+
 /// DOM and HTML query fixtures together.
 pub fn query_fixture_db() -> rusqlite::Connection {
     db_with(&[("DOM", QUERY_DOM), ("HTML", QUERY_HTML)])
