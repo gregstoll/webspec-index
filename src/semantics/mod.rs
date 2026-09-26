@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
+#[cfg(feature = "native")]
+use std::path::{Path, PathBuf};
 use yaml_rust2::parser::{Event, MarkedEventReceiver, Parser};
 use yaml_rust2::scanner::Marker;
 use yaml_rust2::{Yaml, YamlLoader};
@@ -353,6 +355,48 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
     crate::hex::encode(&Sha256::digest(bytes))
 }
 
+/// Append every `.yaml`/`.yml` file under `directory` as `(path relative to
+/// root with '/' separators, absolute path)`. Symlinks are skipped.
+#[cfg(feature = "native")]
+pub fn collect_yaml_files(
+    root: &Path,
+    directory: &Path,
+    output: &mut Vec<(String, PathBuf)>,
+) -> Result<(), CatalogError> {
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        CatalogError::new(format!(
+            "cannot read catalog directory {}: {error}",
+            directory.display()
+        ))
+    })?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| CatalogError::new(format!("cannot read catalog entry: {error}")))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| CatalogError::new(error.to_string()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_yaml_files(root, &path, output)?;
+        } else if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| extension == "yaml" || extension == "yml")
+        {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| CatalogError::new(error.to_string()))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            output.push((relative, path));
+        }
+    }
+    Ok(())
+}
+
 /// Canonical inline text with the tokens and links whose spans index into it.
 pub trait TextView {
     fn text(&self) -> &str;
@@ -451,6 +495,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "native", unix))]
+    #[test]
+    fn collect_yaml_files_walks_nested_yaml_and_skips_symlinks_and_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("state/nested")).unwrap();
+        std::fs::write(root.join("a.yaml"), "").unwrap();
+        std::fs::write(root.join("state/b.yml"), "").unwrap();
+        std::fs::write(root.join("state/nested/c.yaml"), "").unwrap();
+        std::fs::write(root.join("state/notes.txt"), "").unwrap();
+        std::os::unix::fs::symlink(root.join("a.yaml"), root.join("state/link.yaml")).unwrap();
+        std::os::unix::fs::symlink(root.join("state/nested"), root.join("linked-dir")).unwrap();
+
+        let mut output = Vec::new();
+        collect_yaml_files(root, &root.join("state"), &mut output).unwrap();
+        let mut relative: Vec<_> = output.iter().map(|(path, _)| path.as_str()).collect();
+        relative.sort();
+        assert_eq!(relative, ["state/b.yml", "state/nested/c.yaml"]);
+        assert!(output
+            .iter()
+            .all(|(path, absolute)| *absolute == root.join(path)));
+
+        output.clear();
+        collect_yaml_files(root, root, &mut output).unwrap();
+        let mut relative: Vec<_> = output.iter().map(|(path, _)| path.as_str()).collect();
+        relative.sort();
+        assert_eq!(relative, ["a.yaml", "state/b.yml", "state/nested/c.yaml"]);
+    }
 
     #[test]
     fn scoped_matches_respect_subject_and_exclusions() {

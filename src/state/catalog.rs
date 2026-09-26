@@ -1,6 +1,8 @@
 //! Reviewed state declarations and rules: the `state/` files of a semantics
 //! package (spec §8).
 
+#[cfg(feature = "native")]
+use crate::semantics::collect_yaml_files;
 use crate::semantics::{
     compile_match, compile_pattern, parse_anchor, parse_yaml_file, sha256_bytes, validate_id,
     CatalogError, CatalogPattern, MatchSpec, RawMatchSpec,
@@ -260,46 +262,6 @@ pub fn load_state_package(dir: impl AsRef<Path>) -> Result<StateCatalog, Catalog
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     load_state_files(&borrowed)
-}
-
-#[cfg(feature = "native")]
-fn collect_yaml_files(
-    root: &Path,
-    directory: &Path,
-    output: &mut Vec<(String, std::path::PathBuf)>,
-) -> Result<(), CatalogError> {
-    let entries = std::fs::read_dir(directory).map_err(|error| {
-        CatalogError::new(format!(
-            "cannot read catalog directory {}: {error}",
-            directory.display()
-        ))
-    })?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|error| CatalogError::new(format!("cannot read catalog entry: {error}")))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|error| CatalogError::new(error.to_string()))?;
-        let path = entry.path();
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            collect_yaml_files(root, &path, output)?;
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| extension == "yaml" || extension == "yml")
-        {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| CatalogError::new(error.to_string()))?
-                .to_string_lossy()
-                .replace('\\', "/");
-            output.push((relative, path));
-        }
-    }
-    Ok(())
 }
 
 /// Combine the state catalogs of several packages. Public ids must be unique;

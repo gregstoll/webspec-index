@@ -1,6 +1,8 @@
 use crate::effects::model::{
     canonical_json_sha256, EffectValue, Execution, EFFECTS_SCHEMA_VERSION,
 };
+#[cfg(feature = "native")]
+use crate::semantics::collect_yaml_files;
 use crate::semantics::{
     compile_match, compile_pattern, matches_identifier, parse_anchor, parse_yaml_file,
     sha256_bytes, validate_id, RawMatchSpec,
@@ -419,46 +421,6 @@ pub fn load_catalog_sources(
         )));
     }
     load_catalog(packages)
-}
-
-#[cfg(feature = "native")]
-fn collect_yaml_files(
-    root: &Path,
-    directory: &Path,
-    output: &mut Vec<(String, PathBuf)>,
-) -> Result<(), CatalogError> {
-    let entries = fs::read_dir(directory).map_err(|error| {
-        CatalogError::new(format!(
-            "cannot read catalog directory {}: {error}",
-            directory.display()
-        ))
-    })?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|error| CatalogError::new(format!("cannot read catalog entry: {error}")))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|error| CatalogError::new(error.to_string()))?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        let path = entry.path();
-        if file_type.is_dir() {
-            collect_yaml_files(root, &path, output)?;
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| extension == "yaml" || extension == "yml")
-        {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| CatalogError::new(error.to_string()))?
-                .to_string_lossy()
-                .replace('\\', "/");
-            output.push((relative, path));
-        }
-    }
-    Ok(())
 }
 
 fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, CatalogError> {
