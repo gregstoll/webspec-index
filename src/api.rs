@@ -8,6 +8,11 @@ use std::collections::HashMap;
 
 use crate::effects;
 use crate::model;
+use crate::state;
+
+fn default_true() -> bool {
+    true
+}
 
 fn default_limit() -> u32 {
     20
@@ -138,6 +143,18 @@ pub enum Request {
     Flow {
         target: String,
     },
+    State {
+        selector: String,
+        #[serde(default = "default_true")]
+        include_inits: bool,
+        #[serde(default)]
+        unclassified: bool,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    StateCoverage {
+        spec: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +179,11 @@ pub enum Response {
     EffectsExplain(effects::ExplainEffectsResult),
     EffectsPaths(effects::ExplainEffectsResult),
     Flow(model::FlowResult),
+    StateField(state::query::StateFieldResult),
+    StateType(state::query::StateTypeResult),
+    StateMember(state::query::StateMemberResult),
+    StateFields(state::query::StateFieldListResult),
+    StateCoverage(state::query::StateCoverageResult),
 }
 
 #[derive(Debug, Serialize)]
@@ -183,6 +205,7 @@ pub enum ApiErrorCode {
     SpecNotIndexed,
     NotFound,
     Effects(effects::RequestErrorCode),
+    State(state::query::StateErrorCode),
     Internal,
 }
 
@@ -199,6 +222,13 @@ impl Serialize for ApiErrorCode {
                     serde::ser::Error::custom("effects error code is not a string")
                 })?;
                 s.serialize_str(&format!("effects_{inner}"))
+            }
+            ApiErrorCode::State(code) => {
+                let inner = serde_json::to_value(code).map_err(serde::ser::Error::custom)?;
+                let inner = inner
+                    .as_str()
+                    .ok_or_else(|| serde::ser::Error::custom("state error code is not a string"))?;
+                s.serialize_str(&format!("state_{inner}"))
             }
         }
     }
@@ -244,6 +274,43 @@ impl From<effects::RequestError> for ApiError {
             code: ApiErrorCode::Effects(e.code),
             message: e.message,
             details: e.details,
+        }
+    }
+}
+
+impl From<state::query::StateError> for ApiError {
+    fn from(e: state::query::StateError) -> Self {
+        use state::query::StateErrorCode;
+        match e.code {
+            StateErrorCode::InvalidSelector => ApiError {
+                code: ApiErrorCode::InvalidRequest,
+                message: e.message,
+                details: None,
+            },
+            StateErrorCode::SpecNotIndexed => ApiError {
+                code: ApiErrorCode::SpecNotIndexed,
+                message: e.message,
+                details: None,
+            },
+            StateErrorCode::NotFound => ApiError {
+                code: ApiErrorCode::NotFound,
+                message: e.message,
+                details: if e.candidates.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::json!({"candidates": e.candidates}))
+                },
+            },
+            StateErrorCode::AmbiguousSelector => ApiError {
+                code: ApiErrorCode::State(StateErrorCode::AmbiguousSelector),
+                message: e.message,
+                details: Some(serde_json::json!({"candidates": e.candidates})),
+            },
+            StateErrorCode::InvalidRules => ApiError {
+                code: ApiErrorCode::State(StateErrorCode::InvalidRules),
+                message: e.message,
+                details: None,
+            },
         }
     }
 }
@@ -597,6 +664,32 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
                 ))),
             }
         }
+        Request::State {
+            selector,
+            include_inits,
+            unclassified,
+            limit,
+        } => {
+            let options = state::query::StateQueryOptions {
+                include_inits,
+                unclassified,
+                limit,
+            };
+            let response =
+                state::query::query(conn, &selector, &options).map_err(ApiError::from)?;
+            Ok(match response {
+                state::query::StateResponse::Field(r) => Response::StateField(r),
+                state::query::StateResponse::Type(r) => Response::StateType(r),
+                state::query::StateResponse::Member(r) => Response::StateMember(r),
+                state::query::StateResponse::Fields(r) => Response::StateFields(r),
+            })
+        }
+        Request::StateCoverage { spec } => {
+            let spec = canonical_spec_name(&spec);
+            state::query::coverage(conn, &spec)
+                .map(Response::StateCoverage)
+                .map_err(ApiError::from)
+        }
     }
 }
 
@@ -948,5 +1041,61 @@ mod tests {
         let v = call(&c, r#"{"type":"flow","target":"HTML#nope"}"#);
         assert_eq!(v["type"], "error", "{v}");
         assert_eq!(v["code"], "not_found", "{v}");
+    }
+
+    const THING: &str = r#"<p>A <dfn id="thing">thing</dfn> is a concept. Each thing has:</p><ul><li><p>A <dfn id="x">x</dfn>.</p></li></ul>"#;
+
+    fn state_conn() -> rusqlite::Connection {
+        use crate::state::testing::{db_with, QUERY_DOM, QUERY_HTML};
+        db_with(&[
+            ("DOM", QUERY_DOM),
+            ("HTML", QUERY_HTML),
+            ("A", THING),
+            ("B", THING),
+        ])
+    }
+
+    #[test]
+    fn state_requests_dispatch_and_error_codes() {
+        let conn = state_conn();
+        let v = call(
+            &conn,
+            r#"{"type":"state","selector":"HTML#is-initial-about:blank"}"#,
+        );
+        assert_eq!(v["type"], "state_field");
+        assert_eq!(v["result"]["field"]["anchor"], "is-initial-about:blank");
+        assert!(v["result"].get("inits").is_some());
+        let v = call(
+            &conn,
+            r#"{"type":"state","selector":"HTML#is-initial-about:blank","include_inits":false}"#,
+        );
+        assert!(v["result"].get("inits").is_none());
+        assert_eq!(
+            call(&conn, r#"{"type":"state","selector":"Document"}"#)["type"],
+            "state_type"
+        );
+        assert_eq!(
+            call(&conn, r#"{"type":"state","selector":"HTML#*initial*"}"#)["type"],
+            "state_fields"
+        );
+        assert_eq!(
+            call(&conn, r#"{"type":"state_coverage","spec":"HTML"}"#)["type"],
+            "state_coverage"
+        );
+        let v = call(&conn, r#"{"type":"state","selector":"thing"}"#);
+        assert_eq!(v["type"], "error");
+        assert_eq!(v["code"], "state_ambiguous_selector");
+        assert_eq!(
+            v["details"]["candidates"],
+            serde_json::json!(["A#thing", "B#thing"])
+        );
+        assert_eq!(
+            call(&conn, r#"{"type":"state","selector":""}"#)["code"],
+            "invalid_request"
+        );
+        assert_eq!(
+            call(&conn, r#"{"type":"state","selector":"HTML#nope"}"#)["code"],
+            "not_found"
+        );
     }
 }
