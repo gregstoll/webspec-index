@@ -277,6 +277,135 @@ pub fn slice_index(
     }
 }
 
+/// A reduced DOM "insert": 18 steps, Let chains, a store and a loop (spec §12 fixture G1).
+pub fn slice_fixture_insert() -> crate::state::slice::SliceIndex {
+    slice_index(
+        "insert",
+        &[
+            ("1", &["nodes", "node"]),
+            ("2", &["count", "nodes"]),
+            ("3", &["count"]),
+            ("4", &["node"]),
+            ("4.1", &[]),
+            ("4.2", &["node", "nodes"]),
+            ("5", &["child"]),
+            ("5.1", &["parent", "child", "count"]),
+            ("5.2", &["parent", "child", "count"]),
+            ("6", &["previousSibling", "child", "parent"]),
+            ("7", &["node", "nodes"]),
+            ("7.1", &["node", "parent"]),
+            ("7.2", &["node", "parent"]),
+            ("7.3", &["node", "inclusiveDescendant"]),
+            ("7.3.1", &["inclusiveDescendant"]),
+            (
+                "8",
+                &[
+                    "suppressObservers",
+                    "parent",
+                    "nodes",
+                    "previousSibling",
+                    "child",
+                ],
+            ),
+            ("9", &["parent"]),
+            ("10", &["staticNodeList"]),
+        ],
+        &[
+            (
+                "1",
+                crate::state::slice::DefKind::Let,
+                Some("nodes"),
+                &["node"],
+            ),
+            (
+                "2",
+                crate::state::slice::DefKind::Let,
+                Some("count"),
+                &["nodes"],
+            ),
+            (
+                "6",
+                crate::state::slice::DefKind::Let,
+                Some("previousSibling"),
+                &["child", "parent"],
+            ),
+            (
+                "7.2",
+                crate::state::slice::DefKind::Store,
+                Some("parent"),
+                &["node"],
+            ),
+        ],
+        &[("7.3", "inclusiveDescendant")],
+    )
+}
+
+/// A reduced navigate: 11 steps, backward-slice fixture (spec §12 fixture G3).
+pub fn slice_fixture_navigate() -> crate::state::slice::SliceIndex {
+    slice_index(
+        "navigate",
+        &[
+            ("1", &["documentResource"]),
+            ("2", &["initiator", "sourceDocument"]),
+            ("3", &["sourceDocument"]),
+            ("3.1", &["initiator", "navigable"]),
+            ("4", &["state", "referrerPolicy", "initiator"]),
+            ("4.1", &["state", "initiator"]),
+            ("5", &["entry", "url", "state"]),
+            ("6", &["navigable"]),
+            ("7", &["navigable", "entry", "historyHandling"]),
+            ("8", &["entry"]),
+            ("9", &["other"]),
+        ],
+        &[
+            (
+                "2",
+                crate::state::slice::DefKind::Let,
+                Some("initiator"),
+                &["sourceDocument"],
+            ),
+            (
+                "3.1",
+                crate::state::slice::DefKind::Set,
+                Some("initiator"),
+                &["navigable"],
+            ),
+            (
+                "4",
+                crate::state::slice::DefKind::Let,
+                Some("state"),
+                &["referrerPolicy", "initiator"],
+            ),
+            (
+                "4",
+                crate::state::slice::DefKind::Opaque,
+                None,
+                &["initiator"],
+            ),
+            (
+                "4.1",
+                crate::state::slice::DefKind::Store,
+                Some("state"),
+                &["initiator"],
+            ),
+            (
+                "5",
+                crate::state::slice::DefKind::Let,
+                Some("entry"),
+                &["url", "state"],
+            ),
+            (
+                "6",
+                crate::state::slice::DefKind::Store,
+                Some("navigable"),
+                &[],
+            ),
+            ("8", crate::state::slice::DefKind::Set, Some("entry"), &[]),
+        ],
+        &[],
+    )
+}
+
 /// Classes (snake_case) of the occurrences of `field_selector` (`SPEC#anchor`) in the
 /// sources whose [`site_key`] is `site`, across every current snapshot's state model.
 pub fn occurrence_classes(

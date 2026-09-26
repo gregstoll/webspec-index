@@ -3,6 +3,7 @@
 pub mod index;
 pub mod render;
 pub mod select;
+pub mod summary;
 pub mod view;
 
 pub use index::{build_slice_indexes, DefEdge, DefKind, SliceIndex, SliceStep};
@@ -12,4 +13,5 @@ pub use select::{
     SliceError, SliceErrorCode, SliceVariable, StepRole, StoreNote, Unfollowed, UnfollowedReason,
     VarBasis, ViewRequest,
 };
+pub use summary::{content_heading, content_part, summary_block, view_name};
 pub use view::{apply_view, slice_result, SliceCounts, SliceIssue, SliceResult, SliceStatus};
