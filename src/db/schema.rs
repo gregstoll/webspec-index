@@ -156,6 +156,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS markdown_memo (
+            snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
+            payload     BLOB NOT NULL
         );",
     )?;
 
@@ -243,6 +247,7 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
         "effect_local_matches",
         "effect_anchors",
         "effect_structures",
+        "markdown_memo",
         "refs",
         "idl_defs",
         "sections",

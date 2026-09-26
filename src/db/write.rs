@@ -99,6 +99,16 @@ pub fn insert_snapshot(
     Ok(id)
 }
 
+/// Duplicate anchors keep their first occurrence.
+pub(crate) const INSERT_SECTION_SQL: &str = "INSERT OR IGNORE INTO sections
+     (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number, ord)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+
+pub(crate) const INSERT_REF_SQL: &str =
+    "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
+     step_path, step_text, guard_path, call_site_id, kind, ord)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+
 /// Bulk insert sections for a snapshot
 pub fn insert_sections_bulk(
     conn: &Connection,
@@ -107,11 +117,7 @@ pub fn insert_sections_bulk(
 ) -> Result<()> {
     atomic_write(conn, |tx| {
         {
-            let mut stmt = tx.prepare(
-            "INSERT OR IGNORE INTO sections
-             (snapshot_id, anchor, title, content_text, section_type, parent_anchor, prev_anchor, next_anchor, depth, number, ord)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        )?;
+            let mut stmt = tx.prepare(INSERT_SECTION_SQL)?;
 
             for (ord, section) in sections.iter().enumerate() {
                 stmt.execute((
@@ -143,11 +149,7 @@ pub fn insert_refs_bulk(
 ) -> Result<()> {
     atomic_write(conn, |tx| {
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO refs (snapshot_id, from_anchor, to_spec, to_anchor,
-                               step_path, step_text, guard_path, call_site_id, kind, ord)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            )?;
+            let mut stmt = tx.prepare(INSERT_REF_SQL)?;
 
             let mut next_ord: HashMap<&str, i64> = HashMap::new();
             for reference in refs {
@@ -241,6 +243,7 @@ fn delete_snapshot_children(
     let effect_and_schema_tables = [
         "effect_anchors",
         "effect_structures",
+        "markdown_memo",
         "refs",
         "idl_defs",
         "sections",
@@ -319,6 +322,25 @@ pub fn delete_spec_data(conn: &Connection, spec_id: i64) -> Result<()> {
         tx.execute(&format!("DELETE FROM snapshots WHERE {filter}"), [spec_id])?;
         Ok(())
     })
+}
+
+/// Store the encoded markdown memo of `snapshot_id`'s last parse.
+pub fn store_memo(conn: &Connection, snapshot_id: i64, payload: &[u8]) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO markdown_memo (snapshot_id, payload) VALUES (?1, ?2)",
+        (snapshot_id, payload),
+    )?;
+    Ok(())
+}
+
+pub fn load_memo(conn: &Connection, snapshot_id: i64) -> Result<Option<Vec<u8>>> {
+    Ok(conn
+        .query_row(
+            "SELECT payload FROM markdown_memo WHERE snapshot_id = ?1",
+            [snapshot_id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// Record spec sync metadata for freshness/content-hash based updates.
@@ -931,5 +953,18 @@ mod tests {
                 .unwrap();
             assert_eq!(rows, 0, "{table}");
         }
+    }
+
+    #[test]
+    fn memo_round_trips_and_goes_with_the_snapshot() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id = insert_or_get_spec(&conn, "T", "https://t.test/", "test").unwrap();
+        let snapshot = insert_snapshot(&conn, spec_id, "hash:a", "2026-09-26").unwrap();
+        assert_eq!(load_memo(&conn, snapshot).unwrap(), None);
+        store_memo(&conn, snapshot, b"one").unwrap();
+        store_memo(&conn, snapshot, b"two").unwrap();
+        assert_eq!(load_memo(&conn, snapshot).unwrap(), Some(b"two".to_vec()));
+        delete_spec_data(&conn, spec_id).unwrap();
+        assert_eq!(load_memo(&conn, snapshot).unwrap(), None);
     }
 }

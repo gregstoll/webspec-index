@@ -6,8 +6,10 @@ pub mod snapshot;
 pub mod tc39_pr;
 pub mod whatpr;
 
+use crate::db::snapshot_diff::{self, SnapshotRows};
 use crate::db::{queries, write};
 use crate::parse;
+use crate::parse::markdown::{decode_memo, encode_memo, MarkdownMemo};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -203,7 +205,8 @@ fn sync_from_html(
         }
     }
 
-    let prepared = parse_html(html, spec_name, base_url, content_hash)?;
+    let memo = previous_memo(conn, previous_snapshot_id)?;
+    let prepared = parse_html(html, spec_name, base_url, content_hash, memo)?;
     write_parsed_html(
         conn,
         spec_id,
@@ -220,6 +223,22 @@ struct ParsedHtml {
     parsed: crate::model::ParsedSpec,
     structure_json: String,
     state: crate::state::StateSpec,
+    memo: Vec<u8>,
+}
+
+/// The markdown memo of `snapshot_id`'s last parse. A missing or undecodable
+/// memo is empty: it only saves work, the parse is the same without it.
+fn previous_memo(conn: &Connection, snapshot_id: Option<i64>) -> Result<MarkdownMemo> {
+    let Some(snapshot_id) = snapshot_id else {
+        return Ok(MarkdownMemo::new());
+    };
+    Ok(decode_stored_memo(write::load_memo(conn, snapshot_id)?))
+}
+
+fn decode_stored_memo(payload: Option<Vec<u8>>) -> MarkdownMemo {
+    payload
+        .and_then(|payload| decode_memo(&payload).ok())
+        .unwrap_or_default()
 }
 
 fn parse_html(
@@ -227,10 +246,12 @@ fn parse_html(
     spec_name: &str,
     base_url: &str,
     content_hash: String,
+    previous_memo: MarkdownMemo,
 ) -> Result<ParsedHtml> {
     let synthetic_sha = format!("hash:{content_hash}");
     let document = scraper::Html::parse_document(&html);
-    let parsed = parse::parse_spec_document(&document, spec_name, base_url)?;
+    let (parsed, memo, _) =
+        parse::parse_spec_document_memo(&document, spec_name, base_url, previous_memo)?;
     let structure = parse::steps::extract_step_structure_from_document(
         &document,
         spec_name,
@@ -253,6 +274,7 @@ fn parse_html(
         parsed,
         structure_json: serde_json::to_string(&structure)?,
         state,
+        memo: encode_memo(&memo),
     })
 }
 
@@ -281,7 +303,8 @@ pub fn index_html(
     html: String,
 ) -> anyhow::Result<i64> {
     let content_hash = hash_html(&html);
-    let prepared = parse_html(html, spec_name, base_url, content_hash)?;
+    let memo = previous_memo(conn, queries::get_snapshot(conn, spec_name)?)?;
+    let prepared = parse_html(html, spec_name, base_url, content_hash, memo)?;
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
     let now = Utc::now();
     let (snapshot_id, _) =
@@ -304,18 +327,36 @@ fn write_parsed_html(
         parsed,
         structure_json,
         state,
+        memo,
     } = prepared;
     let synthetic_sha = format!("hash:{content_hash}");
     write::atomic_write(conn, |conn| {
-        write::delete_spec_data(conn, spec_id)?;
-
         let commit_date = now.to_rfc3339();
-        let spec_id_reloaded = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
-        let snapshot_id =
-            write::insert_snapshot(conn, spec_id_reloaded, &synthetic_sha, &commit_date)?;
-        write::insert_sections_bulk(conn, snapshot_id, &parsed.sections)?;
-        write::insert_refs_bulk(conn, snapshot_id, &parsed.references)?;
-        write::insert_idl_defs_bulk(conn, snapshot_id, &parsed.idl_definitions)?;
+        let snapshot_id = match queries::get_snapshot(conn, spec_name)? {
+            Some(snapshot_id) => {
+                snapshot_diff::replace_snapshot_in_place(
+                    conn,
+                    snapshot_id,
+                    &synthetic_sha,
+                    &commit_date,
+                    SnapshotRows {
+                        sections: &parsed.sections,
+                        refs: &parsed.references,
+                        idl: &parsed.idl_definitions,
+                    },
+                )?;
+                snapshot_id
+            }
+            None => {
+                let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider_name)?;
+                let snapshot_id =
+                    write::insert_snapshot(conn, spec_id, &synthetic_sha, &commit_date)?;
+                write::insert_sections_bulk(conn, snapshot_id, &parsed.sections)?;
+                write::insert_refs_bulk(conn, snapshot_id, &parsed.references)?;
+                write::insert_idl_defs_bulk(conn, snapshot_id, &parsed.idl_definitions)?;
+                snapshot_id
+            }
+        };
         crate::db::effects::store_structure(
             conn,
             snapshot_id,
@@ -323,8 +364,9 @@ fn write_parsed_html(
             &structure_json,
         )?;
         crate::db::state::store_state(conn, snapshot_id, &state)?;
+        write::store_memo(conn, snapshot_id, &memo)?;
 
-        store_update_check(conn, spec_id_reloaded, now, Some(now), Some(&content_hash))?;
+        store_update_check(conn, spec_id, now, Some(now), Some(&content_hash))?;
         Ok((snapshot_id, true))
     })
 }
@@ -655,7 +697,8 @@ pub async fn update_all_specs(
                 }
                 Ok(HtmlUpdatePlan::NeedsWork(plan)) => {
                     let handle = tokio::spawn(async move {
-                        let result = prepare_html_update(&plan).await;
+                        let mut plan = plan;
+                        let result = prepare_html_update(&mut plan).await;
                         (plan, result)
                     });
                     jobs.push((index, handle));
@@ -697,6 +740,7 @@ struct HtmlUpdateWork {
     force: bool,
     cached_html: Option<String>,
     can_reuse_unchanged: bool,
+    previous_memo: Option<Vec<u8>>,
 }
 
 enum HtmlUpdatePlan {
@@ -748,6 +792,10 @@ fn plan_html_update(
     } else {
         None
     };
+    let previous_memo = match previous_snapshot_id {
+        Some(snapshot_id) => write::load_memo(conn, snapshot_id)?,
+        None => None,
+    };
     if cached_html.is_some() {
         eprintln!(
             "note: {spec_name}: re-parsing from on-disk cache (use --refetch to download fresh)"
@@ -764,10 +812,11 @@ fn plan_html_update(
         force,
         cached_html,
         can_reuse_unchanged: is_reusable,
+        previous_memo,
     })))
 }
 
-async fn prepare_html_update(plan: &HtmlUpdateWork) -> Result<PreparedHtmlUpdate> {
+async fn prepare_html_update(plan: &mut HtmlUpdateWork) -> Result<PreparedHtmlUpdate> {
     let html = if let Some(html) = plan.cached_html.as_ref() {
         html.clone()
     } else {
@@ -793,9 +842,13 @@ async fn prepare_html_update(plan: &HtmlUpdateWork) -> Result<PreparedHtmlUpdate
     }
     let spec_name = plan.spec_name.clone();
     let base_url = plan.base_url.clone();
+    let previous_memo = plan.previous_memo.take();
     Ok(PreparedHtmlUpdate::Parsed(Box::new(
-        tokio::task::spawn_blocking(move || parse_html(html, &spec_name, &base_url, content_hash))
-            .await??,
+        tokio::task::spawn_blocking(move || {
+            let memo = decode_stored_memo(previous_memo);
+            parse_html(html, &spec_name, &base_url, content_hash, memo)
+        })
+        .await??,
     )))
 }
 
@@ -976,7 +1029,7 @@ mod tests {
         let conn = db::open_test_db().unwrap();
         let spec_id =
             write::insert_or_get_spec(&conn, "PREPARED", "https://example.test", "test").unwrap();
-        let plan = HtmlUpdateWork {
+        let mut plan = HtmlUpdateWork {
             spec_id,
             spec_name: "PREPARED".to_string(),
             base_url: "https://example.test".to_string(),
@@ -987,8 +1040,9 @@ mod tests {
             force: true,
             cached_html: Some("<h2 id=\"prepared\">Prepared</h2>".to_string()),
             can_reuse_unchanged: false,
+            previous_memo: None,
         };
-        let parsed = prepare_html_update(&plan).await.unwrap();
+        let parsed = prepare_html_update(&mut plan).await.unwrap();
         let snapshot_id = commit_html_update(&conn, plan, parsed).unwrap().unwrap();
         assert_eq!(
             queries::get_snapshot(&conn, "PREPARED").unwrap(),
@@ -1020,6 +1074,52 @@ mod tests {
         conn.execute("DELETE FROM state_models", []).unwrap();
         assert!(!crate::db::state::has_state_model(&conn, snapshot, &version).unwrap());
         assert!(!snapshot_is_reusable(&conn, snapshot).unwrap());
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn reindex_keeps_snapshot_id_and_reuses_the_memo() {
+        let conn = crate::db::open_test_db().unwrap();
+        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html").to_string();
+        let first = index_html(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+            html.clone(),
+        )
+        .unwrap();
+        conn.execute_batch(
+            "CREATE TEMP TABLE section_deletes(anchor TEXT);
+             CREATE TEMP TRIGGER count_section_deletes AFTER DELETE ON sections
+             BEGIN INSERT INTO section_deletes VALUES (old.anchor); END;",
+        )
+        .unwrap();
+        let edited = format!("{html}<h2 id=\"new-heading\">New</h2>");
+        let second = index_html(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+            edited,
+        )
+        .unwrap();
+        assert_eq!(first, second, "the snapshot is updated in place");
+        assert!(crate::db::write::load_memo(&conn, second)
+            .unwrap()
+            .is_some());
+        let deletes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM section_deletes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(deletes, 0, "unchanged sections are kept, not re-inserted");
+        let new_heading: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sections WHERE snapshot_id=?1 AND anchor='new-heading'",
+                [second],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_heading, 1);
     }
 
     // ── cache decision ────────────────────────────────────────────────────────

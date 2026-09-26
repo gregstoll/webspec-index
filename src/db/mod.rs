@@ -1,6 +1,7 @@
 pub mod effects;
 pub mod queries;
 pub mod schema;
+pub mod snapshot_diff;
 pub mod state;
 pub mod write;
 
