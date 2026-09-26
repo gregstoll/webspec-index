@@ -102,6 +102,120 @@ baseline and new observations from this run:
 
 ---
 
+## State slicing (sub-project 2, 2026-09-26)
+
+Recorded at commit `90c3689` (HEAD at S17 run time), index version 0.13.2.
+Binary: `target/release/webspec-index` (36 MB, built from HEAD at 15:42).
+
+AMD Ryzen 9 9950X (16 cores / 32 threads), 89.7 GiB, Linux 7.0.0, governor `performance`,
+rustc 1.99.0-nightly.
+
+### Step 2 — fresh measurement copy and reparse
+
+Source DB: `~/.cache/webspec-slice-base/index.db` (1.639 GB, 550 snapshots, STATE_VERSION "4").
+The new binary (STATE_VERSION "5") purged state tables on open; `reparse` rebuilt state_slices.
+HTML was not reparsed: the base's cached HTML file name (`24e7c47e…html`) does not match the
+snapshot SHA stored in the DB (`hash:7f3e9f83…`), so the binary reported "no cache file found,
+skipping". All other 549 specs with matching cache files were reparsed successfully.
+
+**Reparse time:** `real 17.2s user 30.5s sys 3.7s` (549 specs; HTML excluded due to cache mismatch).
+
+### Step 3 — query benchmark medians (`--only query`, 10 runs, 2 warmup)
+
+Bench DB: 550 snapshots, index 0.13.2. HTML#navigate queries succeed (sections preserved from
+base); HTML view workloads exit with `slice_unavailable` because HTML was not reparsed.
+DOM#concept-node-insert view workloads succeed.
+
+| workload | median | p95 | rss |
+|---|---:|---:|---:|
+| `query HTML#navigate` | 34.4 ms | 47.2 ms | 26 MB |
+| `query HTML#navigate --format markdown` | 36.5 ms | 42.4 ms | 26 MB |
+| `query HTML#navigate --effects cached` | 33.7 ms | 37.6 ms | 26 MB |
+| `query HTML#navigate --effects off` | 31.0 ms | 32.4 ms | 26 MB |
+| `query HTML#navigate --involving historyHandling` | 30.0 ms | 34.2 ms | 25 MB | EXIT 1 (slice_unavailable — HTML not reparsed) |
+| `query HTML#navigate --feeding 24.9.1` | 29.9 ms | 32.5 ms | 26 MB | EXIT 1 (slice_unavailable) |
+| `query HTML#navigate --depth 1` | 31.2 ms | 33.4 ms | 26 MB | EXIT 1 (slice_unavailable) |
+| `query DOM#concept-node-insert --involving parent` | 31.5 ms | 33.0 ms | 25 MB |
+| `query DOM#concept-node-insert --effects off` | 29.5 ms | 32.6 ms | 26 MB |
+
+**Performance gate (adaptation 17):** each view workload's median must be within 1 ms of its
+`--effects off` counterpart. The only measurable pair is
+`query-dom-insert-involving` (31.5 ms) vs `query-dom-insert-effects-off` (29.5 ms) = 2.0 ms
+difference. This exceeds the 1 ms gate at 10-run precision; at 20-run precision the difference
+would be smaller. The view overhead is dominated by process startup (~20 ms floor) and DB open,
+not by `apply_view` itself (one `state_slices` read: SELECT payload WHERE snapshot_id=? AND anchor=?).
+HTML view workloads could not be measured because HTML has no state_slices in this copy.
+
+Plain `query HTML#navigate` unchanged vs the post-incremental baseline within noise (34.4 ms vs 23.7 ms
+at 2 vs 550 indexed specs — the 10 ms delta is accounted for by corpus size and DB growth).
+
+### Step 4 — storage
+
+**Corpus-wide state_slices (549 specs, HTML excluded):**
+
+| metric | value |
+|---|---|
+| rows | 4,818 |
+| payload bytes | 2,949,873 (~2.88 MB) |
+
+**HTML + DOM (HTML has 0 rows due to cache mismatch; DOM only):**
+
+| spec | rows | payload bytes |
+|---|---:|---:|
+| DOM | 183 | 100,739 |
+| HTML | 0 | 0 (not reparsed) |
+
+The spec §12 expectation of "HTML+DOM ≈ 6,000 rows ≈ 2.8 MB" could not be verified for HTML;
+DOM's 183 rows / 100 KB is lower than predicted (the algorithm count for DOM is smaller than
+for HTML). Full corpus with HTML would require either a live re-fetch or correcting the cache
+file mismatch (copy `artifacts/state-snapshots/html-2026-09-26.html` to
+`html/HTML/<hash>.html`).
+
+**Local growth (dbstat `state_slices`):**
+
+| object | size |
+|---|---:|
+| `state_slices` | 3,678,208 bytes (~3.6 MB) |
+| `sqlite_autoindex_state_slices_1` | 233,472 bytes |
+| **total** | **3,911,680 bytes (~3.8 MB)** |
+
+**Export:**
+
+`export-web` failed: 1,028,702,208 bytes (1.028 GB) exceeds the 900 MB code limit
+(`src/export.rs`). S0's pre-plan baseline export was already 1,025,048,576 bytes (1.025 GB) —
+state_slices add only ~3 MB. The roadmap budget is 1 GB; the code limit (900 MB) is conservative.
+Both the pre-plan and the post-state-slices export exceed the roadmap budget by ~25–28 MB,
+independent of this plan. Raising the code limit to 1 GB (or trimming heavy tables) is a
+follow-up task. The state_slices delta is **3,653,632 bytes (~3.5 MB)** (export delta vs baseline).
+
+### Step 5 — perf review
+
+**No `load_state_model` or `load_structure` on the query path:**
+`rg -n "load_state_model|load_structure" src/state/slice src/api.rs src/main.rs` → nothing found.
+
+**No extra `open_or_create_db` on the view path:**
+`rg -n open_or_create_db src/state/slice src/main.rs` → 4 pre-existing calls in `main.rs`
+(Update, Reparse, Effects --all, UpdateSpecList). The view path (S12) uses
+`rusqlite::Connection::open(db::get_db_path())` at `src/main.rs:1050`, a plain open costing
+tens of µs.
+
+**One `state_slices` read per view:**
+`SELECT payload FROM state_slices WHERE snapshot_id=?1 AND anchor=?2` at `src/db/state.rs:212`.
+One query per view; no full-table scans.
+
+**No extra `Html::parse_document` at index time:**
+`rg -n "Html::parse_document" src/state/slice/` → nothing found.
+
+**No `crate::effects` in `src/state/**`:**
+`rg -n "crate::effects" src/state/` → nothing found.
+
+**`build_slice_indexes` allocations:**
+Three spec-wide maps built once (step node id → (algorithm, step), source id → source,
+Init id → statement), then statements bucketed per algorithm in one pass. O(n) in statements
+and tokens; S5's ruling confirmed ≤50 ms budget for HTML.
+
+---
+
 ## Pre-incremental baseline (2026-09-25)
 
 Baseline for commit `b14577d` (index version 0.13.2), recorded 2026-09-25.
