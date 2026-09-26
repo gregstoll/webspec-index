@@ -224,6 +224,8 @@ fn sync_from_html(
         content_hash,
         previous_memo: previous_memo(conn, previous_snapshot_id)?,
         fragment: None,
+        #[cfg(test)]
+        test_fail: false,
     })?;
     write_parsed_html(
         conn,
@@ -282,6 +284,8 @@ pub fn index_html(
         html: Arc::new(html),
         previous_memo: previous_memo(conn, queries::get_snapshot(conn, spec_name)?)?,
         fragment: None,
+        #[cfg(test)]
+        test_fail: false,
     })?;
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
     let now = Utc::now();
@@ -466,6 +470,11 @@ pub(crate) struct ChangedHtml {
     pub html: String,
     pub content_hash: String,
     pub validators: SourceValidators,
+    /// Causes `parse_one` to panic when this `ChangedHtml` is parsed; used
+    /// only in cfg(test) to exercise the graceful-degradation path in
+    /// `parse_and_write`.
+    #[cfg(test)]
+    pub(crate) test_fail: bool,
 }
 
 /// A note about a freshness result, for stderr.
@@ -555,6 +564,8 @@ pub(crate) fn apply_freshness(
                         last_modified,
                         source_hash: Some(source_hash),
                     },
+                    #[cfg(test)]
+                    test_fail: false,
                 }),
                 notes: Vec::new(),
             })
@@ -1046,6 +1057,8 @@ fn prepare_html_update(
             content_hash,
             previous_memo: decode_stored_memo(plan.previous_memo.take()),
             fragment: None,
+            #[cfg(test)]
+            test_fail: false,
         },
         validators,
     )
@@ -1163,6 +1176,8 @@ async fn reparse_cached(
                 html: Arc::new(html),
                 previous_memo: memo,
                 fragment: None,
+                #[cfg(test)]
+                test_fail: false,
             });
             pending.push(Some((spec_id, SourceValidators::stored(state.as_ref()))));
         }

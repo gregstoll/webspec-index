@@ -28,6 +28,11 @@ pub(crate) struct ParseJob {
     pub previous_memo: MarkdownMemo,
     /// Set when effects are on.
     pub fragment: Option<FragmentContext>,
+    /// Causes `parse_one` to panic; used only in cfg(test) to exercise
+    /// per-job `catch_unwind` isolation and the graceful-degradation path
+    /// in `parse_and_write`.
+    #[cfg(test)]
+    pub(crate) test_fail: bool,
 }
 
 pub(crate) struct ParsedHtml {
@@ -42,6 +47,9 @@ pub(crate) struct ParsedHtml {
 /// Parse `jobs` on a pool of `threads` workers. Results are in job order.
 /// Every job's document is held in memory at once, so callers pass bounded
 /// chunks (see [`chunk_len`]).
+///
+/// A panic inside a single job is caught per-job via `catch_unwind` so it
+/// does not cancel the remaining jobs.
 pub(crate) fn parse_jobs(jobs: Vec<ParseJob>, threads: usize) -> Vec<anyhow::Result<ParsedHtml>> {
     let pool = match rayon::ThreadPoolBuilder::new()
         .num_threads(threads.max(1))
@@ -56,7 +64,21 @@ pub(crate) fn parse_jobs(jobs: Vec<ParseJob>, threads: usize) -> Vec<anyhow::Res
                 .collect();
         }
     };
-    pool.install(|| jobs.into_par_iter().map(parse_one).collect())
+    pool.install(|| {
+        jobs.into_par_iter()
+            .map(|job| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_one(job)))
+                    .unwrap_or_else(|payload| {
+                        let msg = payload
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| payload.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic payload");
+                        Err(anyhow::anyhow!("parse worker panicked: {msg}"))
+                    })
+            })
+            .collect()
+    })
 }
 
 /// Worker count for [`parse_jobs`].
@@ -77,6 +99,10 @@ pub(crate) fn chunk_len(threads: usize) -> usize {
 /// and IDL to extract state on its own document and, when effects are on, to
 /// build the effects fragment beside it.
 pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
+    #[cfg(test)]
+    if job.test_fail {
+        panic!("test-injected parse panic for {}", job.spec_name);
+    }
     let (tx, rx) = mpsc::sync_channel::<Arc<ParsedSpec>>(1);
     let ParseJob {
         spec_name,
@@ -85,6 +111,8 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
         content_hash,
         previous_memo,
         fragment: fragment_context,
+        #[cfg(test)]
+            test_fail: _,
     } = job;
     let synthetic_sha = format!("hash:{content_hash}");
     let (html_a, spec_a, base_a) = (html.clone(), spec_name.clone(), base_url.clone());
@@ -213,6 +241,7 @@ mod tests {
                     content_hash: crate::fetch::hash_bytes(html.as_bytes()),
                     previous_memo: MarkdownMemo::new(),
                     fragment: None,
+                    test_fail: false,
                 })
                 .collect::<Vec<_>>()
         };
@@ -259,6 +288,7 @@ mod tests {
                     catalog: Arc::new(catalog),
                     environment: options.environment,
                 }),
+                test_fail: false,
             }],
             1,
         )
@@ -283,7 +313,35 @@ mod tests {
             content_hash: "x".into(),
             previous_memo: MarkdownMemo::new(),
             fragment: None,
+            test_fail: false,
         };
         assert!(parse_jobs(vec![job], 1)[0].is_ok());
+    }
+
+    #[test]
+    fn catch_unwind_isolates_job_panic() {
+        let html = include_str!("../../tests/fixtures/effects/structure/wattsi.html");
+        let make_job = |name: &str, fail: bool| ParseJob {
+            spec_name: name.into(),
+            base_url: "https://t.test/".into(),
+            html: std::sync::Arc::new(html.into()),
+            content_hash: name.into(),
+            previous_memo: MarkdownMemo::new(),
+            fragment: None,
+            test_fail: fail,
+        };
+        let results = parse_jobs(vec![make_job("OK", false), make_job("FAIL", true)], 2);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].is_ok(), "non-panicking job must succeed");
+        assert!(
+            results[1].is_err(),
+            "panicking job must return Err, not kill other jobs"
+        );
+        let msg = results[1]
+            .as_ref()
+            .err()
+            .expect("FAIL job must be Err")
+            .to_string();
+        assert!(msg.contains("panicked"), "error must note the panic: {msg}");
     }
 }

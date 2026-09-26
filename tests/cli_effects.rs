@@ -1,9 +1,16 @@
 use std::process::Command;
+use std::sync::OnceLock;
+
+fn test_db_dir() -> &'static tempfile::TempDir {
+    static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().expect("tempdir for cli_effects tests"))
+}
 
 fn cli(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_webspec-index"))
         .args(args)
         .env("CODEX_SANDBOX", "1")
+        .env("SPEC_INDEX_TEST_DB", test_db_dir().path().join("index.db"))
         .output()
         .expect("run webspec-index")
 }

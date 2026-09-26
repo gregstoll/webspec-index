@@ -92,10 +92,12 @@ to select host implementation mappings.
 
 `recompute_effects()` triggers an incremental effects rebuild for the indexed
 corpus (equivalent to `webspec-index effects --all`). It returns when the
-publication is up to date. If a `get_effect_summary()` call returns
-`{"status": "Unavailable", "snapshot_changed": true}`, the spec's HTML was
-updated and effects have not been rebuilt yet; call `recompute_effects()` once to
-rebuild, then retry the query. Pass `rebuild=True` to build from scratch instead.
+publication is up to date. When a spec's HTML was updated and effects have not
+been rebuilt yet, `get_effect_summary()` raises `WebspecError` with a message
+starting `snapshot_changed:`; call `recompute_effects()` once to rebuild, then
+retry the query. From the CLI, `query` output carries
+`"effects_status": {"state": "unavailable", "semantics": "may", "issues": ["snapshot_changed"], "omitted": 0}`
+in that state.
 
 Errors are raised as `webspec_index.WebspecError`.
 

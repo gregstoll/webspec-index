@@ -19,14 +19,18 @@ the full-corpus expected values; gates apply against the full corpus.
 |---|---|---|---|
 | first query after HTML change (excl. network) | 4.09 s | ≤4.5 s | PASS |
 | second query after HTML change | 24.1 ms† | ≤20 ms | PASS† |
-| incremental effects after HTML change | 415 ms / 322 MB | ≤2.5 s / 500 MB | PASS |
-| full effects rebuild | 1.67 s / 634 MB | ≤5 s / 1 GB | PASS |
+| incremental effects after HTML change | not measured (2-spec corpus) | ≤2.5 s / 500 MB | — |
+| full effects rebuild | not measured (2-spec corpus) | ≤5 s / 1 GB | — |
 | HTML re-parse with memo hits | n/a‡ | ≤2.5 s | — |
 
 † Includes ~5 ms process-startup overhead; query-layer latency is within gate.
 ‡ HTML cache file was out of sync with the snapshot hash; `reparse` skipped re-parsing.
   The 34 ms reported for `reparse-html-memo-hit` and `reparse-html-cold` is the
   skip path, not a re-parse.  Re-run after `update` to get representative numbers.
+
+Note: the "not measured" rows reflect the state at recording time (2 indexed snapshots after
+a schema-migration purge). A full-corpus measurement (full `update` → `bench.py` →
+`incremental_parity --iterations 10` → `spec_fuzz E1-E3,D1`) is pending.
 
 AMD Ryzen 9 9950X (16 cores / 32 threads), 89.7 GiB, Linux 7.0.0, governor `performance`,
 rustc 1.99.0-nightly. DB: 0.64 GB, 2 snapshots, 11,553 sections, 64,395 refs.

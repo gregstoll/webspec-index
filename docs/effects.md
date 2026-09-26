@@ -43,7 +43,7 @@ webspec-index effects "HTML#navigate" --effect-id ef_7185cecba7f35a16 --max-dept
 
 “Continue the remaining steps in the current flow” describes one continuation edge, not the timing of the entire algorithm. Separately scheduled bodies are labeled at the boundary. All paths remain possible paths with unchecked feasibility.
 
-`query --effects cached` returns only valid stored analysis. `query --effects off` preserves the original query shape. When a spec's content changed since the last publication, an ordinary query rebuilds effects inline within a time budget (default 5 s, overridden by `WEBSPEC_EFFECTS_INLINE_BUDGET_MS`). If the rebuild exceeds the budget or another rebuild is running, the result carries `effects.Unavailable` with `snapshot_changed: true` and a note to run `webspec-index effects --all`. `update` refreshes effects and prepares representative paths after its indexing batch; `update --effects off` skips that work. Missing dependencies are reported, without recursively fetching them.
+`query --effects cached` returns only valid stored analysis. `query --effects off` preserves the original query shape. When a spec's content changed since the last publication, an ordinary query rebuilds effects inline within a time budget (default 5 s, overridden by `WEBSPEC_EFFECTS_INLINE_BUDGET_MS`). If the rebuild exceeds the budget or another rebuild is running, the result carries `"effects_status": {"state": "unavailable", "semantics": "may", "issues": ["snapshot_changed"], "omitted": 0}` and a note to run `webspec-index effects --all`. `update` refreshes effects and prepares representative paths after its indexing batch; `update --effects off` skips that work. Missing dependencies are reported, without recursively fetching them.
 
 ## Rules
 

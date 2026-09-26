@@ -147,12 +147,14 @@ searchfox-cli --spec-refs '<url>'
 
 ## Effects data may be temporarily unavailable
 
-`query` output includes an `effects` field. When that field carries
-`"status": "Unavailable"` with `"snapshot_changed": true`, the spec's HTML was
-updated since effects were last built and the inline rebuild did not complete in
-time. The data is not wrong — it is absent. Run `webspec-index effects --all` to
-rebuild; subsequent queries serve fresh summaries. This state is transient and
-does not affect anchors, cross-references, or any non-effects output.
+`query` output includes an `effects_status` field. When that field carries
+`"state": "unavailable"` with `"snapshot_changed"` in `"issues"` (shape:
+`{"state": "unavailable", "semantics": "may", "issues": ["snapshot_changed"], "omitted": 0}`),
+the spec's HTML was updated since effects were last built and the inline rebuild
+did not complete in time. The data is not wrong — it is absent. Run
+`webspec-index effects --all` to rebuild; subsequent queries serve fresh
+summaries. This state is transient and does not affect anchors,
+cross-references, or any non-effects output.
 
 ## Hard rules
 

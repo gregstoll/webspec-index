@@ -337,6 +337,16 @@ pub async fn refresh(
 ) -> anyhow::Result<RefreshReport> {
     let targets = load_targets(conn, specs)?;
     let mut report = RefreshReport::default();
+    // Fast path: skip the lock entirely when every target is current and the
+    // publication is up to date.  This avoids the two write transactions that
+    // `try_claim` + its guard-drop commit on every warm query or `exists`.
+    if everything_current(conn, &targets, options)? {
+        report.effects = match options.effects {
+            EffectsRefresh::Off => EffectsOutcome::NotRequested,
+            _ => EffectsOutcome::Current,
+        };
+        return Ok(report);
+    }
     let guard = match claim(conn, &targets, options).await? {
         Claim::Held(guard) => guard,
         Claim::Current => {
@@ -446,12 +456,27 @@ async fn parse_and_write(
                 content_hash: html.content_hash,
                 previous_memo: fetch::previous_memo(conn, snapshot)?,
                 fragment: fragment.clone(),
+                #[cfg(test)]
+                test_fail: html.test_fail,
             });
-            pending.push((target, html.validators));
+            pending.push((target, snapshot, html.validators));
         }
         let parsed = fetch::parse_chunk(jobs, threads).await;
-        for ((target, validators), parsed) in pending.into_iter().zip(parsed) {
-            let parsed = parsed?;
+        for ((target, snapshot, validators), parsed) in pending.into_iter().zip(parsed) {
+            let parsed = match parsed {
+                Ok(p) => p,
+                Err(e) => {
+                    if snapshot.is_some() {
+                        eprintln!(
+                            "note: {}: re-index failed ({e}); serving the cached snapshot",
+                            target.name
+                        );
+                        report.failed.push(target.name.clone());
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
             let built_fragment = parsed.fragment.is_some();
             fetch::write_parsed_html(
                 conn,
@@ -771,6 +796,85 @@ mod tests {
         assert!(
             site_count > 0,
             "EffectsRefresh::Always must store effect_sites, got 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn warm_refresh_leaves_db_unchanged() {
+        let (dir, stub) = indexed_corpus_with_stub(&MULTI).await;
+        let conn = open(&dir);
+        let changes_before = conn.total_changes();
+        let lock_rows_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM refresh_lock", [], |r| r.get(0))
+            .unwrap();
+        let options = RefreshOptions {
+            freshness: FreshnessOptions {
+                origin: Some(stub.origin()),
+                ..FreshnessOptions::default()
+            },
+            ..RefreshOptions::new(
+                LockPolicy::Wait(Duration::from_secs(5)),
+                EffectsRefresh::Inline {
+                    budget: Duration::from_secs(60),
+                },
+            )
+        };
+        let report = refresh_for_query(&conn, "DOM", &options).await.unwrap();
+        assert_eq!(
+            conn.total_changes(),
+            changes_before,
+            "warm refresh must not write the DB"
+        );
+        let lock_rows_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM refresh_lock", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            lock_rows_before, lock_rows_after,
+            "warm refresh must not touch refresh_lock"
+        );
+        assert!(report.parsed.is_empty());
+        assert_eq!(report.effects, EffectsOutcome::Current);
+    }
+
+    #[tokio::test]
+    async fn dep_parse_failure_serves_cached_target() {
+        let (dir, stub) = indexed_corpus_with_stub(&MULTI).await;
+        stub.put(
+            "infra.spec.whatwg.org/",
+            &MULTI_INFRA_EDITED,
+            Some("W/\"new\""),
+            None,
+        );
+        let conn = open(&dir);
+        let targets = load_targets(&conn, &["INFRA".to_string()]).unwrap();
+        let snapshot = crate::db::queries::get_snapshot(&conn, "INFRA").unwrap();
+        let changed = vec![(
+            &targets[0],
+            snapshot,
+            crate::fetch::ChangedHtml {
+                html: BETA.to_string(),
+                content_hash: "new-hash".to_string(),
+                validators: Default::default(),
+                test_fail: true,
+            },
+        )];
+        let mut report = RefreshReport::default();
+        parse_and_write(&conn, changed, None, &mut report)
+            .await
+            .unwrap();
+        assert!(
+            report.failed.contains(&"INFRA".to_string()),
+            "failed dep must appear in report.failed"
+        );
+        assert!(
+            report.parsed.is_empty(),
+            "no spec must be recorded as parsed"
+        );
+        assert!(
+            crate::db::queries::get_snapshot(&conn, "DOM")
+                .unwrap()
+                .is_some(),
+            "DOM snapshot must still be present"
         );
     }
 }
