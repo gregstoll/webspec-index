@@ -1,0 +1,23 @@
+{
+  "name": "slice-l5-multi-binding-let",
+  "spec": "DOM",
+  "base_url": "https://dom.spec.whatwg.org",
+  "anchor": "dom-eventtarget-addeventlistener",
+  "invariant": "L5",
+  "status": "known_bug",
+  "bug": "IR limitation: a Let binding several names (\"Let *capture*, *passive*, *once*, and *signal* be ...\") produces no statement, so the slice index has no Let edge and involving the value's variables misses every later use",
+  "signature": "L5|algorithm/algo-div|let:involving",
+  "expected": {
+    "lets": [
+      {
+        "from": "options",
+        "step": "1",
+        "uses": [
+          "1",
+          "2"
+        ],
+        "var": "capture"
+      }
+    ]
+  }
+}

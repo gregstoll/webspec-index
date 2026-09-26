@@ -1,12 +1,15 @@
-//! Slice invariants L1–L3 (spec §14.3): mention coverage, conservation and context closure.
+//! Slice invariants L1–L5 (spec §14.3): mention coverage, conservation, context closure, rendered
+//! alignment and Let closure.
 
 use std::collections::{BTreeMap, HashSet};
 
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use scraper::ElementRef;
 use serde_json::json;
 use webspec_index::db::state::load_slice_index;
 use webspec_index::state::extract::{extract_state, StateInputs};
 use webspec_index::state::model::StateCatalog;
+use webspec_index::state::slice::render::{render_view, Rendering};
 use webspec_index::state::slice::select::{slice, KeptStep, Slice, StepRole, ViewRequest};
 use webspec_index::state::slice::{build_slice_indexes, SliceIndex};
 
@@ -18,14 +21,13 @@ use crate::oracle::N;
 pub struct SourceStep {
     pub path: String,
     pub own_vars: Vec<String>,
-    #[allow(dead_code)]
     pub own_text: String,
 }
 
 /// Walk the algorithm body OLs and extract every numbered `li` with its variables and text.
 ///
 /// Steps are numbered in document order: top-level steps share a counter across all body OLs;
-/// nested steps within a `li` reset the counter for their OL.
+/// each nested OL numbers from 1, as the rendered markdown does.
 pub fn source_steps(s: &SectionCtx) -> Vec<SourceStep> {
     let ols = super::structure::body_ols(s);
     let mut result = Vec::new();
@@ -57,10 +59,9 @@ fn walk_ol(ol: N, prefix: &[usize], counter: &mut usize, out: &mut Vec<SourceSte
             own_text,
         });
 
-        let mut nested_counter = 0usize;
         for grandchild in child.children() {
             if crate::oracle::elname(&grandchild) == Some("ol") {
-                walk_ol(grandchild, &my_path, &mut nested_counter, out);
+                walk_ol(grandchild, &my_path, &mut 0, out);
             }
         }
     }
@@ -216,6 +217,153 @@ pub fn open_prefixes(s: &Slice) -> Vec<String> {
     gaps
 }
 
+/// Ordered-item paths of `markdown` outside blockquotes. Each component is the list's start number
+/// plus the item's index in that list: a list resumed after an omission marker starts at the spec's
+/// number.
+fn rendered_paths(markdown: &str) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    let mut quote_depth = 0usize;
+    // (start number of an ordered list, items seen so far)
+    let mut lists: Vec<(Option<u64>, u64)> = Vec::new();
+    // Per open item: its index in `paths` when it is an ordered item outside blockquotes.
+    let mut open: Vec<Option<usize>> = Vec::new();
+    for event in Parser::new_ext(markdown, Options::all()) {
+        match event {
+            Event::Start(Tag::BlockQuote(_)) => quote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => quote_depth -= 1,
+            Event::Start(Tag::List(start)) => lists.push((start, 0)),
+            Event::End(TagEnd::List(_)) => {
+                lists.pop();
+            }
+            Event::Start(Tag::Item) => {
+                let Some((Some(start), seen)) = lists.last_mut() else {
+                    open.push(None);
+                    continue;
+                };
+                let number = *start + *seen;
+                *seen += 1;
+                if quote_depth > 0 {
+                    open.push(None);
+                    continue;
+                }
+                let path = match open.iter().rev().find_map(|o| *o) {
+                    Some(parent) => format!("{}.{number}", paths[parent]),
+                    None => number.to_string(),
+                };
+                open.push(Some(paths.len()));
+                paths.push(path);
+            }
+            Event::End(TagEnd::Item) => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+    paths
+}
+
+/// Whether `line` matches `^\s*- \[steps? .* omitted`.
+fn is_marker_line(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix("- [step") else {
+        return false;
+    };
+    let rest = rest.strip_prefix('s').unwrap_or(rest);
+    rest.strip_prefix(' ')
+        .is_some_and(|tail| tail.contains(" omitted"))
+}
+
+/// Compares aligned rendered markdown with the slice it renders: first the number of marker lines
+/// against the omitted runs (`markers:{found}!={runs}`), then the ordered-item paths against the kept
+/// paths (`paths:{rendered}!={kept}`). Returns the first mismatch.
+pub fn render_mismatch(rendered_md: &str, slice: &Slice) -> Option<String> {
+    let markers = rendered_md.lines().filter(|l| is_marker_line(l)).count();
+    if markers != slice.omitted.len() {
+        return Some(format!("markers:{markers}!={}", slice.omitted.len()));
+    }
+    let rendered = rendered_paths(rendered_md);
+    let kept: Vec<&str> = slice.steps.iter().map(|k| k.path.as_str()).collect();
+    if rendered != kept {
+        return Some(format!("paths:{}!={}", rendered.join(","), kept.join(",")));
+    }
+    None
+}
+
+/// The `(x, v)` of a step reading `Let x be … v …`: `x` is the own var right after `Let `, `v` the
+/// first own var after the following ` be `, in the same sentence.
+fn let_binding(step: &SourceStep) -> Option<(&str, &str)> {
+    let text = step.own_text.trim_start();
+    let rest = text.strip_prefix("Let ")?;
+    let offset = text.len() - rest.len();
+    let mut vars = step.own_vars.iter();
+    let x = vars.next().filter(|x| !x.is_empty())?;
+    if find_word(text, offset, x) != Some(offset) {
+        return None;
+    }
+    let mut cursor = offset + x.len();
+    let be = cursor + text[cursor..].find(" be ")? + " be ".len();
+    let sentence_end = text[be..]
+        .match_indices('.')
+        .map(|(i, _)| be + i)
+        .find(|&i| text[i + 1..].chars().next().is_none_or(char::is_whitespace))
+        .unwrap_or(text.len());
+    for v in vars.filter(|v| !v.is_empty()) {
+        let at = find_word(text, cursor, v)?;
+        if at >= sentence_end {
+            return None;
+        }
+        cursor = at + v.len();
+        if at >= be && v != x {
+            return Some((x, v));
+        }
+    }
+    None
+}
+
+/// Byte offset of the first whole-word occurrence of `word` in `text` at or after `from`.
+fn find_word(text: &str, from: usize, word: &str) -> Option<usize> {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut pos = from;
+    while let Some(i) = text[pos..].find(word) {
+        let at = pos + i;
+        let end = at + word.len();
+        let before = text[..at].chars().next_back().is_none_or(|c| !is_word(c));
+        let after = text[end..].chars().next().is_none_or(|c| !is_word(c));
+        if before && after {
+            return Some(at);
+        }
+        pos = at + text[at..].chars().next().map_or(1, char::len_utf8);
+    }
+    None
+}
+
+/// For each `Let x be … v …` source step: the source steps mentioning `x` that `involving: [v]`
+/// does not keep. Returns `let:{step}:{x}<-{v}:missing:{path}` strings.
+pub fn let_closure_gaps(index: &SliceIndex, source: &[SourceStep]) -> Vec<String> {
+    let mut result = Vec::new();
+    for step in source {
+        let Some((x, v)) = let_binding(step) else {
+            continue;
+        };
+        let view_req = ViewRequest {
+            involving: vec![v.to_string()],
+            ..Default::default()
+        };
+        let Ok(s) = slice(index, &view_req) else {
+            continue;
+        };
+        let kept: HashSet<&str> = s.steps.iter().map(|k| k.path.as_str()).collect();
+        for user in source {
+            if user.own_vars.iter().any(|u| u == x) && !kept.contains(user.path.as_str()) {
+                let item = format!("let:{}:{x}<-{v}:missing:{}", step.path, user.path);
+                if !result.contains(&item) {
+                    result.push(item);
+                }
+            }
+        }
+    }
+    result
+}
+
 // ── Invariant wrappers ───────────────────────────────────────────────────────────────────────────
 
 pub struct L1;
@@ -283,6 +431,10 @@ impl Invariant for L2 {
             return Outcome::NotApplicable;
         };
         let source_count = super::structure::step_counts(s).0;
+        // A switch or property-list body has no `ol` steps for the oracle to count.
+        if source_count == 0 {
+            return Outcome::NotApplicable;
+        }
         let mut items: Vec<Evidence> = Vec::new();
         for var_name in &index.vars {
             let view_req = ViewRequest {
@@ -339,6 +491,95 @@ impl Invariant for L3 {
             Outcome::fail(items, json!({}), json!({}))
         }
     }
+}
+
+pub struct L4;
+impl Invariant for L4 {
+    fn id(&self) -> &'static str {
+        "L4"
+    }
+    fn check(&self, ctx: Ctx<'_, '_>) -> Outcome {
+        let Some(s) = section_ctx(&ctx) else {
+            return Outcome::NotApplicable;
+        };
+        let Some(index) = s.spec.slice_index(s.anchor()) else {
+            return Outcome::NotApplicable;
+        };
+        let mut checked = false;
+        let mut items: Vec<Evidence> = Vec::new();
+        for var_name in &index.vars {
+            let view_req = ViewRequest {
+                involving: vec![var_name.clone()],
+                ..Default::default()
+            };
+            let Ok(sl) = slice(&index, &view_req) else {
+                continue;
+            };
+            let view = render_view(s.content(), &index, &sl);
+            if view.rendering == Rendering::Unaligned {
+                return Outcome::NotApplicable;
+            }
+            checked = true;
+            if let Some(mismatch) = render_mismatch(&view.content, &sl) {
+                let kind = mismatch.split(':').next().unwrap_or_default().to_string();
+                items.push(
+                    Evidence::new(&kind, mismatch, "involving")
+                        .rendered(Some(format!("involving: [{var_name}]"))),
+                );
+            }
+        }
+        if !checked {
+            Outcome::NotApplicable
+        } else if items.is_empty() {
+            Outcome::Pass
+        } else {
+            Outcome::fail(items, json!({}), json!({}))
+        }
+    }
+}
+
+pub struct L5;
+impl Invariant for L5 {
+    fn id(&self) -> &'static str {
+        "L5"
+    }
+    fn check(&self, ctx: Ctx<'_, '_>) -> Outcome {
+        let Some(s) = section_ctx(&ctx) else {
+            return Outcome::NotApplicable;
+        };
+        let Some(index) = s.spec.slice_index(s.anchor()) else {
+            return Outcome::NotApplicable;
+        };
+        let gaps = let_closure_gaps(&index, &source_steps(s));
+        let items = gaps
+            .into_iter()
+            .map(|gap| Evidence::new("let", gap, "involving"))
+            .collect::<Vec<_>>();
+        if items.is_empty() {
+            Outcome::Pass
+        } else {
+            Outcome::fail(items, json!({}), json!({}))
+        }
+    }
+}
+
+/// The `Let` bindings of a section's source steps with the steps mentioning each bound name: what
+/// a regression fixture for L5 checks the product's slices against.
+pub fn let_expectations(s: &SectionCtx) -> serde_json::Value {
+    let source = source_steps(s);
+    let lets: Vec<serde_json::Value> = source
+        .iter()
+        .filter_map(|step| {
+            let (x, v) = let_binding(step)?;
+            let uses: Vec<&str> = source
+                .iter()
+                .filter(|u| u.own_vars.iter().any(|o| o == x))
+                .map(|u| u.path.as_str())
+                .collect();
+            Some(json!({"step": step.path, "var": x, "from": v, "uses": uses}))
+        })
+        .collect();
+    json!({ "lets": lets })
 }
 
 // ── SpecCtx slice index ──────────────────────────────────────────────────────────────────────────

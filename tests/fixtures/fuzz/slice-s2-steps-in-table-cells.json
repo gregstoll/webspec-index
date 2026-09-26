@@ -1,0 +1,14 @@
+{
+  "name": "slice-s2-steps-in-table-cells",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "dom-offscreencanvas-getcontext",
+  "invariant": "S2",
+  "status": "known_bug",
+  "bug": "IR limitation: steps nested in table cells (OffscreenCanvas getContext's context-mode table) are not algorithm steps, so the IR, the slice index and the markdown keep only the 3 steps outside the table (also fails L2)",
+  "signature": "S2|algorithm/algo-div|ir-fewer-steps:ols=1",
+  "expected": {
+    "depth": 2,
+    "steps": 13
+  }
+}

@@ -11,11 +11,13 @@ use webspec_index::effects::model::EffectsOptions;
 use webspec_index::effects::service::{publish, PublishMode};
 use webspec_index::model::ParsedSection;
 
+use webspec_index::state::slice::render::render_view;
 use webspec_index::state::slice::select::{slice as slice_fn, ViewRequest};
-use webspec_index::state::slice::SliceIndex;
+use webspec_index::state::slice::{DefKind, SliceIndex};
 use webspec_index::state::testing::slice_index;
 
 use crate::check::{self, SpecInput, SpecResult};
+use crate::invariants::slice::{let_closure_gaps, render_mismatch};
 use crate::invariants::{
     self, check_e1, check_e2, check_e3, query, slice as inv_slice, Ctx, Invariant, Outcome,
     SectionCtx, SpecCtx,
@@ -847,4 +849,107 @@ fn open_prefixes_reports_a_kept_path_without_its_prefix() {
         gaps.contains(&"1.1".to_string()) && gaps.contains(&"run-parent:9".to_string()),
         "{gaps:?}"
     );
+}
+
+// ── 8. Slice invariants L4–L5 ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn slice_invariants_l4_l5_are_quiet_on_a_clean_algorithm() {
+    let c = ctx(SLICE_OK);
+    for id in ["L4", "L5"] {
+        assert!(matches!(check_anchor(&c, "go", id), Outcome::Pass), "{id}");
+    }
+}
+
+#[test]
+fn misaligned_content_makes_l4_not_applicable() {
+    let c = ctx(SLICE_OK);
+    let planted = planted(&c, "go", "L4", |md| {
+        md.replacen("2. ", "2. \n\n    1. extra\n\n", 1)
+    });
+    assert!(
+        matches!(planted, Outcome::NotApplicable),
+        "an extra item makes rendering fall back to full content"
+    );
+}
+
+#[test]
+fn render_mismatch_reports_a_removed_marker_and_a_lost_step() {
+    let md = "To go:\n\n1. A *x*.\n2. B.\n3. C *x*.\n";
+    let index = slice_index("go", &[("1", &["x"]), ("2", &[]), ("3", &["x"])], &[], &[]);
+    let s = view(&index, "x");
+    let rendered = render_view(md, &index, &s).content;
+    assert_eq!(render_mismatch(&rendered, &s), None);
+    let no_marker: String = rendered
+        .lines()
+        .filter(|l| !l.contains("omitted"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert!(render_mismatch(&no_marker, &s)
+        .unwrap()
+        .starts_with("markers:0!=1"));
+    let lost_step = rendered.replace("3. C *x*.\n", "");
+    assert!(render_mismatch(&lost_step, &s)
+        .unwrap()
+        .starts_with("paths:"));
+}
+
+#[test]
+fn let_closure_gaps_report_a_missing_let_edge() {
+    let source = [
+        src("1", &["x", "v"], "Let x be v."),
+        src("2", &["x"], "Return x."),
+    ];
+    let broken = slice_index("go", &[("1", &["v", "x"]), ("2", &["x"])], &[], &[]);
+    assert_eq!(let_closure_gaps(&broken, &source), ["let:1:x<-v:missing:2"]);
+    let good = slice_index(
+        "go",
+        &[("1", &["v", "x"]), ("2", &["x"])],
+        &[("1", DefKind::Let, Some("x"), &["v"])],
+        &[],
+    );
+    assert!(let_closure_gaps(&good, &source).is_empty());
+}
+
+#[test]
+fn source_steps_number_each_nested_list_from_one() {
+    let c = ctx(
+        r##"<div class="algorithm"><p>To <dfn id="go">go</dfn>:</p><ol>
+<li><p>If <var>a</var>:</p><ol><li><p>Let <var>b</var> be 1.</p></li><li><p>Return.</p></li></ol>
+<p>Otherwise:</p><ol><li><p>Return <var>a</var>.</p></li></ol></li>
+</ol></div>"##,
+    );
+    let paths: Vec<String> = source_steps_of(&c, "go")
+        .into_iter()
+        .map(|s| s.path)
+        .collect();
+    assert_eq!(paths, ["1", "1.1", "1.2", "1.1"]);
+}
+
+#[test]
+fn let_closure_reads_the_value_from_the_lets_own_sentence() {
+    let source = [
+        src(
+            "1",
+            &["x", "y"],
+            "Let x be the input.\n\n    Let y be a list.",
+        ),
+        src("2", &["x"], "Return x."),
+    ];
+    let index = slice_index("go", &[("1", &["x", "y"]), ("2", &["x"])], &[], &[]);
+    assert!(let_closure_gaps(&index, &source).is_empty());
+}
+
+#[test]
+fn l2_is_not_applicable_where_the_oracle_counts_no_step_body() {
+    let c = ctx(
+        r##"<div data-algorithm=""><p>To <dfn id="go">go</dfn> given <var>p</var>, switching on <var>p</var>'s type:</p>
+<dl class="switch"><dt>A</dt><dd><ol><li><p>If <var>p</var> is null, then return false.</p></li><li><p>Return true.</p></li></ol></dd>
+<dt>B</dt><dd><ol><li><p>Return false.</p></li></ol></dd></dl></div>"##,
+    );
+    assert!(c.slice_index("go").is_some(), "the product indexes steps");
+    assert!(matches!(
+        check_anchor(&c, "go", "L2"),
+        Outcome::NotApplicable
+    ));
 }

@@ -1,0 +1,10 @@
+{
+  "name": "slice-l4-sibling-lists-in-one-step",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "algorithm-for-assigning-header-cells",
+  "invariant": "L4",
+  "status": "fixed",
+  "bug": "a step holding two lists numbers both from 1, so step paths repeat: rendering looked runs up by path, cut overlapping ranges (panic) or replaced a kept step of the same path; runs now carry their step positions and end where a sibling list restarts",
+  "expected": {}
+}

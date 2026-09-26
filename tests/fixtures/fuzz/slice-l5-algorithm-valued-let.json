@@ -1,0 +1,23 @@
+{
+  "name": "slice-l5-algorithm-valued-let",
+  "spec": "HTML",
+  "base_url": "https://html.spec.whatwg.org",
+  "anchor": "preload",
+  "invariant": "L5",
+  "status": "known_bug",
+  "bug": "IR limitation: a Let defining steps (\"Let *reportTiming* given a Document *document* be to report timing for *controller* ...\") produces no statement, so the slice index has no Let edge and involving *controller* misses the calls of *reportTiming*",
+  "signature": "L5|algorithm/algo-div|let:involving",
+  "expected": {
+    "lets": [
+      {
+        "from": "controller",
+        "step": "1",
+        "uses": [
+          "1",
+          "2.1"
+        ],
+        "var": "reportTiming"
+      }
+    ]
+  }
+}

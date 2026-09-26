@@ -36,9 +36,9 @@ pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fuzz")
 }
 
-const PROMOTABLE: [&str; 19] = [
+const PROMOTABLE: [&str; 21] = [
     "C1", "C2", "C3", "S1", "S2", "S3", "M0", "M1", "M2", "M4", "R1", "R2", "N1", "T1", "A1", "D1",
-    "E1", "E2", "E3",
+    "E1", "E2", "E3", "L4", "L5",
 ];
 
 /// Oracle-computed values the regression test compares the product against.
@@ -75,6 +75,7 @@ pub fn expected_values(inv: &dyn Invariant, s: &SectionCtx) -> serde_json::Value
             json!({"anchors": anchors})
         }
         "D1" => json!({"content": s.section.content_text}),
+        "L5" => crate::invariants::slice::let_expectations(s),
         _ => json!({}),
     }
 }

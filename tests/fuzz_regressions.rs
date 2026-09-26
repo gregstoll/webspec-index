@@ -19,6 +19,7 @@ use serde_json::Value;
 use webspec_index::content_filter::{transform_content, LinksMode};
 use webspec_index::model::{ParsedSection, ParsedSpec};
 use webspec_index::spec_registry::SpecRegistry;
+use webspec_index::state::slice::render::{render_view, Rendering};
 use webspec_index::state::slice::select::{slice as slice_fn, StepRole, ViewRequest};
 use webspec_index::state::testing::slice_indexes_html;
 
@@ -105,6 +106,58 @@ fn scan(md: &str) -> Md {
         }
     }
     out
+}
+
+/// Ordered-item paths outside blockquotes; each component is the list's start number plus the
+/// item's index in that list.
+fn rendered_paths(md: &str) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    let mut quote_depth = 0usize;
+    let mut lists: Vec<(Option<u64>, u64)> = Vec::new();
+    let mut open: Vec<Option<usize>> = Vec::new();
+    for ev in Parser::new_ext(md, Options::all()) {
+        match ev {
+            Event::Start(Tag::BlockQuote(_)) => quote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => quote_depth -= 1,
+            Event::Start(Tag::List(start)) => lists.push((start, 0)),
+            Event::End(TagEnd::List(_)) => {
+                lists.pop();
+            }
+            Event::Start(Tag::Item) => {
+                let Some((Some(start), seen)) = lists.last_mut() else {
+                    open.push(None);
+                    continue;
+                };
+                let number = *start + *seen;
+                *seen += 1;
+                if quote_depth > 0 {
+                    open.push(None);
+                    continue;
+                }
+                let path = match open.iter().rev().find_map(|o| *o) {
+                    Some(parent) => format!("{}.{number}", paths[parent]),
+                    None => number.to_string(),
+                };
+                open.push(Some(paths.len()));
+                paths.push(path);
+            }
+            Event::End(TagEnd::Item) => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+    paths
+}
+
+/// `^\s*- \[steps? .* omitted`
+fn is_marker_line(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix("- [step") else {
+        return false;
+    };
+    let rest = rest.strip_prefix('s').unwrap_or(rest);
+    rest.strip_prefix(' ')
+        .is_some_and(|tail| tail.contains(" omitted"))
 }
 
 fn words(t: &str) -> Vec<String> {
@@ -569,6 +622,68 @@ fn evaluate(f: &Fixture, html: &str) -> Result<(), String> {
                             return fail(format!("L3 {var_name}: run parent {parent} not kept"));
                         }
                     }
+                }
+            }
+            Ok(())
+        }
+        "L4" => {
+            let indexes = slice_indexes_html(html, &f.spec);
+            let index = indexes
+                .iter()
+                .find(|i| i.anchor == f.anchor)
+                .ok_or_else(|| format!("no slice index for #{}", f.anchor))?;
+            for var_name in &index.vars {
+                let view_req = ViewRequest {
+                    involving: vec![var_name.clone()],
+                    ..Default::default()
+                };
+                let s = slice_fn(index, &view_req).map_err(|e| e.to_string())?;
+                let view = render_view(&content, index, &s);
+                if view.rendering == Rendering::Unaligned {
+                    return Ok(());
+                }
+                let markers = view.content.lines().filter(|l| is_marker_line(l)).count();
+                if markers != s.omitted.len() {
+                    return fail(format!(
+                        "L4 {var_name}: markers:{markers}!={}",
+                        s.omitted.len()
+                    ));
+                }
+                let rendered = rendered_paths(&view.content);
+                let kept: Vec<&str> = s.steps.iter().map(|k| k.path.as_str()).collect();
+                if rendered != kept {
+                    return fail(format!(
+                        "L4 {var_name}: paths:{}!={}",
+                        rendered.join(","),
+                        kept.join(",")
+                    ));
+                }
+            }
+            Ok(())
+        }
+        "L5" => {
+            let indexes = slice_indexes_html(html, &f.spec);
+            let index = indexes
+                .iter()
+                .find(|i| i.anchor == f.anchor)
+                .ok_or_else(|| format!("no slice index for #{}", f.anchor))?;
+            for l in e["lets"].as_array().ok_or("expected.lets missing")? {
+                let (step, var, from) = (
+                    l["step"].as_str().unwrap_or_default(),
+                    l["var"].as_str().unwrap_or_default(),
+                    l["from"].as_str().unwrap_or_default(),
+                );
+                let view_req = ViewRequest {
+                    involving: vec![from.to_string()],
+                    ..Default::default()
+                };
+                let s = slice_fn(index, &view_req).map_err(|e| e.to_string())?;
+                let kept: HashSet<&str> = s.steps.iter().map(|k| k.path.as_str()).collect();
+                if let Some(path) = strings(l, "uses")
+                    .into_iter()
+                    .find(|p| !kept.contains(p.as_str()))
+                {
+                    return fail(format!("let:{step}:{var}<-{from}:missing:{path}"));
                 }
             }
             Ok(())

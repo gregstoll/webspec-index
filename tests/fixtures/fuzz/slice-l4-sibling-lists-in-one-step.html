@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en-US-x-hixie">
+<body>
+<div data-algorithm="">
+  <p>Each cell can be assigned zero or more header cells. The <dfn id="algorithm-for-assigning-header-cells">algorithm for assigning header
+  cells</dfn> to a cell <var>principal cell</var> is as follows.</p>
+
+  <ol><li>
+    <p>Let <var>header list</var> be an empty list of cells.</p>
+   </li><li>
+    <p>Let (<var>principal<sub>x</sub></var>, <var>principal<sub>y</sub></var>) be the coordinate of the slot to which the <var>principal
+    cell</var> is anchored.</p>
+   </li><li>
+    <dl class="switch"><dt>If the <var>principal cell</var> has a <code id="header-and-data-cell-semantics:attr-tdth-headers"><a href="#attr-tdth-headers">headers</a></code> attribute specified</dt><dd>
+      
+
+      <ol><li>
+        <p>Take the value of the <var>principal cell</var>'s <code id="header-and-data-cell-semantics:attr-tdth-headers-2"><a href="#attr-tdth-headers">headers</a></code> attribute and <a data-x-internal="split-a-string-on-spaces" href="https://infra.spec.whatwg.org/#split-on-ascii-whitespace" id="header-and-data-cell-semantics:split-a-string-on-spaces">split it on ASCII whitespace</a>, letting <var>id list</var> be the
+        list of tokens obtained.</p>
+       </li><li>
+        
+        
+        <p>For each token in the <var>id list</var>, if the
+        first element in the <code id="header-and-data-cell-semantics:document"><a href="#document">Document</a></code> with an <a data-x-internal="concept-id" href="https://dom.spec.whatwg.org/#concept-id" id="header-and-data-cell-semantics:concept-id">ID</a> equal to
+        the token is a cell in the same <a href="#concept-table" id="header-and-data-cell-semantics:concept-table">table</a>, and that cell is not the
+        <var>principal cell</var>, then add that cell to <var>header list</var>.</p>
+       </li></ol>
+     </dd><dt>If <var>principal cell</var> does not have a <code id="header-and-data-cell-semantics:attr-tdth-headers-3"><a href="#attr-tdth-headers">headers</a></code> attribute specified</dt><dd>
+      <ol><li>
+        <p>Let <var>principal<sub>width</sub></var> be the width of the <var>principal cell</var>.</p>
+       </li><li>
+        <p>Let <var>principal<sub>height</sub></var> be the height of the <var>principal cell</var>.</p>
+       </li><li>
+        <p>For each value of <var>y</var> from <var>principal<sub>y</sub></var> to <var>principal<sub>y</sub></var>+<var>principal<sub>height</sub></var>-1, run
+        the <a href="#internal-algorithm-for-scanning-and-assigning-header-cells" id="header-and-data-cell-semantics:internal-algorithm-for-scanning-and-assigning-header-cells">internal algorithm for scanning and assigning header cells</a>, with the <var>principal cell</var>, the <var>header list</var>, the initial coordinate
+        (<var>principal<sub>x</sub></var>, <var>y</var>), and the
+        increments <span>Δ<var>x</var>=−1</span> and <span>Δ<var>y</var>=0</span>.</p>
+       </li><li>
+        <p>For each value of <var>x</var> from <var>principal<sub>x</sub></var> to <var>principal<sub>x</sub></var>+<var>principal<sub>width</sub></var>-1, run
+        the <a href="#internal-algorithm-for-scanning-and-assigning-header-cells" id="header-and-data-cell-semantics:internal-algorithm-for-scanning-and-assigning-header-cells-2">internal algorithm for scanning and assigning header cells</a>, with the <var>principal cell</var>, the <var>header list</var>, the initial coordinate
+        (<var>x</var>, <var>principal<sub>y</sub></var>), and the
+        increments <span>Δ<var>x</var>=0</span> and <span>Δ<var>y</var>=−1</span>.</p>
+       </li><li>
+        <p>If the <var>principal cell</var> is anchored in a <a href="#concept-row-group" id="header-and-data-cell-semantics:concept-row-group">row group</a>, then add all header cells that are <a href="#row-group-header" id="header-and-data-cell-semantics:row-group-header">row group headers</a> and are anchored in the same row group
+        with an <var>x</var>-coordinate less than or equal to <var>principal<sub>x</sub></var>+<var>principal<sub>width</sub></var>-1 and a <var>y</var>-coordinate less than or
+        equal to <var>principal<sub>y</sub></var>+<var>principal<sub>height</sub></var>-1 to <var>header
+        list</var>.</p>
+
+        
+       </li><li>
+        <p>If the <var>principal cell</var> is anchored in a <a href="#concept-column-group" id="header-and-data-cell-semantics:concept-column-group">column group</a>, then add all header cells that are <a href="#column-group-header" id="header-and-data-cell-semantics:column-group-header">column group headers</a> and are anchored in the same column
+        group with an <var>x</var>-coordinate less than or equal to <var>principal<sub>x</sub></var>+<var>principal<sub>width</sub></var>-1 and a <var>y</var>-coordinate less than or
+        equal to <var>principal<sub>y</sub></var>+<var>principal<sub>height</sub></var>-1 to <var>header
+        list</var>.</p>
+
+        
+       </li></ol>
+     </dd></dl>
+   </li><li>
+    <p>Remove all the <a href="#empty-cell" id="header-and-data-cell-semantics:empty-cell">empty cells</a> from the <var>header
+    list</var>.</p>
+   </li><li>
+    <p>Remove any duplicates from the <var>header list</var>.</p>
+   </li><li>
+    <p>Remove <var>principal cell</var> from the <var>header list</var> if it is
+    there.</p> 
+   </li><li>
+    <p>Assign the headers in the <var>header list</var> to the <var>principal
+    cell</var>.</p>
+   </li></ol>
+  </div>
+</body>
+</html>

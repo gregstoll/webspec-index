@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en-US-x-hixie">
+<body>
+<div data-algorithm="">
+  <p>The <dfn data-dfn-for="OffscreenCanvas" data-dfn-type="method" id="dom-offscreencanvas-getcontext"><code>getContext(<var>contextId</var>,
+  <var>options</var>)</code></dfn> method of an  object, when invoked,
+  must run these steps:</p>
+
+  <ol><li>
+    
+
+    <table><tbody><tr><th>"<dfn id="offscreen-context-type-2d"><code>2d</code></dfn>"
+       </th><td>
+        <ol><li><p>Let <var>context</var> be the result of running the
+         <a href="#offscreen-2d-context-creation-algorithm" id="the-offscreencanvas-interface:offscreen-2d-context-creation-algorithm">offscreen 2D context creation algorithm</a> given
+         <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-9">this</a> and <var>options</var>.</p></li><li><p>Set <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-10">this</a>'s <a href="#offscreencanvas-context-mode" id="the-offscreencanvas-interface:offscreencanvas-context-mode-4">context
+         mode</a> to <a href="#offscreencanvas-context-2d" id="the-offscreencanvas-interface:offscreencanvas-context-2d-2">2d</a>.</p></li><li><p>Return <var>context</var>.</p></li></ol>
+       </td><td>
+        Return the same object as was returned the last time the method was invoked with this same
+        first argument.
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Throw an <a data-x-internal="invalidstateerror" href="https://webidl.spec.whatwg.org/#invalidstateerror" id="the-offscreencanvas-interface:invalidstateerror-2">"<code>InvalidStateError</code>"</a> <code id="the-offscreencanvas-interface:domexception-2"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.
+      </td></tr><tr><th>"<dfn id="offscreen-context-type-bitmaprenderer"><code>bitmaprenderer</code></dfn>"
+       </th><td>
+        <ol><li><p>Let <var>context</var> be the result of running the
+         <a href="#imagebitmaprenderingcontext-creation-algorithm" id="the-offscreencanvas-interface:imagebitmaprenderingcontext-creation-algorithm"><code>ImageBitmapRenderingContext</code> creation
+         algorithm</a> given <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-11">this</a> and <var>options</var>.</p></li><li><p>Set <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-12">this</a>'s <a href="#offscreencanvas-context-mode" id="the-offscreencanvas-interface:offscreencanvas-context-mode-5">context
+         mode</a> to <a href="#offscreencanvas-context-bitmaprenderer" id="the-offscreencanvas-interface:offscreencanvas-context-bitmaprenderer-2">bitmaprenderer</a>.</p></li><li><p>Return <var>context</var>.</p></li></ol>
+       </td><td>
+        Return null.
+       </td><td>
+        Return the same object as was returned the last time the method was invoked with this same
+        first argument.
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Throw an <a data-x-internal="invalidstateerror" href="https://webidl.spec.whatwg.org/#invalidstateerror" id="the-offscreencanvas-interface:invalidstateerror-3">"<code>InvalidStateError</code>"</a> <code id="the-offscreencanvas-interface:domexception-3"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.
+      </td></tr><tr><th>"<dfn id="offscreen-context-type-webgl"><code>webgl</code></dfn>" or "<dfn id="offscreen-context-type-webgl2"><code>webgl2</code></dfn>"
+       </th><td>
+        <ol><li><p>Let <var>context</var> be the result of following the instructions given in the
+         WebGL specifications' <i>Context Creation</i> sections. <a href="#refsWEBGL">[WEBGL]</a></p></li><li><p>If <var>context</var> is null, then return null; otherwise set
+         <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-13">this</a>'s <a href="#offscreencanvas-context-mode" id="the-offscreencanvas-interface:offscreencanvas-context-mode-6">context
+         mode</a> to <a href="#offscreencanvas-context-webgl" id="the-offscreencanvas-interface:offscreencanvas-context-webgl-2">webgl</a> or <a href="#offscreencanvas-context-webgl2" id="the-offscreencanvas-interface:offscreencanvas-context-webgl2-2">webgl2</a>.</p></li><li><p>Return <var>context</var>.</p></li></ol>
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Return the same value as was returned the last time the method was invoked with this same
+        first argument.
+       </td><td>
+        Return null.
+       </td><td>
+        Throw an <a data-x-internal="invalidstateerror" href="https://webidl.spec.whatwg.org/#invalidstateerror" id="the-offscreencanvas-interface:invalidstateerror-4">"<code>InvalidStateError</code>"</a> <code id="the-offscreencanvas-interface:domexception-4"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.
+      </td></tr><tr><th>"<dfn id="offscreen-context-type-webgpu"><code>webgpu</code></dfn>"
+       </th><td>
+        <ol><li><p>Let <var>context</var> be the result of following the instructions given in
+         <cite>WebGPU</cite>'s <a href="https://gpuweb.github.io/gpuweb/#canvas-rendering">Canvas Rendering</a> section.
+         <a href="#refsWEBGPU">[WEBGPU]</a></p></li><li><p>If <var>context</var> is null, then return null; otherwise set <a data-x-internal="this" href="https://webidl.spec.whatwg.org/#this" id="the-offscreencanvas-interface:this-14">this</a>'s
+         <a href="#offscreencanvas-context-mode" id="the-offscreencanvas-interface:offscreencanvas-context-mode-7">context mode</a> to <a href="#offscreencanvas-context-webgpu" id="the-offscreencanvas-interface:offscreencanvas-context-webgpu-2">webgpu</a>.</p></li><li><p>Return <var>context</var>.</p></li></ol>
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Return null.
+       </td><td>
+        Return the same value as was returned the last time the method was invoked with this same
+        first argument.
+       </td><td>
+        Throw an <a data-x-internal="invalidstateerror" href="https://webidl.spec.whatwg.org/#invalidstateerror" id="the-offscreencanvas-interface:invalidstateerror-5">"<code>InvalidStateError</code>"</a> <code id="the-offscreencanvas-interface:domexception-5"><a data-x-internal="domexception" href="https://webidl.spec.whatwg.org/#dfn-DOMException">DOMException</a></code>.
+    </td></tr></tbody></table>
+   </li></ol>
+  </div>
+</body>
+</html>

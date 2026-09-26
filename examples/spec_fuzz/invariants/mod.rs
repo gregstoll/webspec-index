@@ -147,6 +147,8 @@ pub fn all() -> Vec<&'static dyn Invariant> {
         &slice::L1,
         &slice::L2,
         &slice::L3,
+        &slice::L4,
+        &slice::L5,
     ]
 }
 
