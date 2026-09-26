@@ -5,11 +5,13 @@
 pub(crate) mod block;
 pub(crate) mod classify;
 pub(crate) mod declare;
-pub(crate) mod extract;
+pub mod extract;
 pub mod ir;
 pub mod lookup;
 pub mod model;
+pub mod testing;
 pub(crate) mod typeexpr;
 pub(crate) mod types;
 
+pub use extract::{derive_occurrence_counts, derive_sites, extract_state, StateInputs};
 pub use model::*;

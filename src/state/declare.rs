@@ -249,7 +249,6 @@ fn dfn_names(dfn: &ElementRef<'_>) -> (String, Vec<String>) {
 }
 
 /// Concept dfns: `dfn[id]` without `data-dfn-type` or with `"dfn"`, not parameters, not in `<pre>`.
-#[allow(dead_code)]
 pub(crate) fn concept_dfns(document: &Html) -> Vec<ConceptDfn> {
     static SEL: OnceLock<Selector> = OnceLock::new();
     let sel = SEL.get_or_init(|| Selector::parse("dfn[id]").unwrap());
@@ -267,7 +266,6 @@ pub(crate) fn concept_dfns(document: &Html) -> Vec<ConceptDfn> {
         .collect()
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct DeclareOutput {
     pub fields: Vec<FieldDef>,
@@ -276,7 +274,6 @@ pub(crate) struct DeclareOutput {
     pub counters: DeclareCounters,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct DeclareCounters {
     pub concept_dfns: u32,
@@ -287,7 +284,6 @@ pub(crate) struct DeclareCounters {
 }
 
 /// Names bound by reviewed type declarations (§8.2 `name`).
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct NameBindings {
     pub names: HashMap<String, TypeKey>,
@@ -600,7 +596,7 @@ fn is_cross_spec(key: &TypeKey, spec: &str) -> bool {
     matches!(key, TypeKey::Anchor(target) if target.spec != spec)
 }
 
-fn rule_key(basis: &OwnerBasis) -> &'static str {
+pub(crate) fn rule_key(basis: &OwnerBasis) -> &'static str {
     match basis {
         OwnerBasis::DfnFor => "dfn_for",
         OwnerBasis::DeclarationSentence => "declaration_sentence",
@@ -611,7 +607,6 @@ fn rule_key(basis: &OwnerBasis) -> &'static str {
 }
 
 /// Infers fields and their owners from concept dfns outside algorithm steps (§6.3).
-#[allow(dead_code)]
 pub(crate) fn declare_fields(
     document: &Html,
     spec: &str,
