@@ -76,6 +76,16 @@ Read the whole section when a hop's own text and guards are not enough:
 `webspec-index query '<SPEC#anchor>' --format markdown`
 (links default to `short` — `SPEC#anchor` — which you can feed back into `query`; use `--links full` for absolute URLs).
 
+To trace a parameter through one algorithm, add `--involving`:
+
+```bash
+webspec-index query '<SPEC#anchor>' --involving <param> --format markdown
+```
+
+This returns only steps that use or are influenced by `<param>`, with markers for every omitted run.
+For guards, `--feeding <STEP>:<VAR>` answers "where does *x* in step 18 come from": the backward
+slice shows which earlier steps define the value that reaches the guard.
+
 `query` output shows cross-reference counts. When a section has fewer than 5 refs in one direction
 they are listed; otherwise a ready-made `refs` command is emitted — copy and run it to fetch the
 full list (e.g. `webspec-index refs HTML#navigate -d incoming -l 117`).

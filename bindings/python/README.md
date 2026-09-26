@@ -99,6 +99,28 @@ retry the query. From the CLI, `query` output carries
 `"effects_status": {"state": "unavailable", "semantics": "may", "issues": ["snapshot_changed"], "omitted": 0}`
 in that state.
 
+Algorithm views (sliced output, steps involving a parameter or backward from a step):
+
+```python
+# Forward slice: steps that use or are influenced by historyHandling
+result = wsi.query_view("HTML#navigate", involving="historyHandling")
+print(result["content"])                # sliced algorithm markdown
+for step in result["slice"]["steps"]:
+    print(step["path"], step["role"])   # e.g. "24.9" "match"
+
+# Backward slice: where does historyEntry in step 24.9.1 come from?
+result = wsi.query_view("HTML#navigate", feeding="24.9.1:historyEntry")
+print(result["content"])
+print(result["slice"]["summary"])       # lists unfollowed paths and rebound names
+```
+
+`query_view(spec_anchor, involving=None, feeding=None, steps=None, depth=None)` returns a dict
+with a `content` key (sliced algorithm markdown with omission markers) and a `slice` key
+(counts, step roles, omitted runs, summary). `involving` accepts a name or list of names;
+`feeding` accepts `"24.9.1"` or `"24.9.1:historyEntry"`. Raises `WebspecError` with a code
+starting `slice_` (e.g. `slice_unavailable`) when the slice index is not available or the
+selector is invalid.
+
 Errors are raised as `webspec_index.WebspecError`.
 
 ## Development
