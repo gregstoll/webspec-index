@@ -19,6 +19,8 @@ use serde_json::Value;
 use webspec_index::content_filter::{transform_content, LinksMode};
 use webspec_index::model::{ParsedSection, ParsedSpec};
 use webspec_index::spec_registry::SpecRegistry;
+use webspec_index::state::slice::select::{slice as slice_fn, StepRole, ViewRequest};
+use webspec_index::state::testing::slice_indexes_html;
 
 #[derive(serde::Deserialize)]
 struct Fixture {
@@ -485,6 +487,88 @@ fn evaluate(f: &Fixture, html: &str) -> Result<(), String> {
                     return fail(
                         "extract_step_structure differs between runs on the same input".into(),
                     );
+                }
+            }
+            Ok(())
+        }
+        "L1" => {
+            let indexes = slice_indexes_html(html, &f.spec);
+            let index = indexes
+                .iter()
+                .find(|i| i.anchor == f.anchor)
+                .ok_or_else(|| format!("no slice index for #{}", f.anchor))?;
+            let var_name = e["variable"].as_str().ok_or("expected.variable missing")?;
+            let want_paths: HashSet<String> = strings(e, "paths").into_iter().collect();
+            let view_req = ViewRequest {
+                involving: vec![var_name.to_string()],
+                ..Default::default()
+            };
+            let s = slice_fn(index, &view_req).map_err(|e| e.to_string())?;
+            let got_paths: HashSet<String> = s
+                .steps
+                .iter()
+                .filter(|k| matches!(k.role, StepRole::Match | StepRole::Inherited))
+                .map(|k| k.path.clone())
+                .collect();
+            if got_paths != want_paths {
+                return fail(format!(
+                    "L1 {var_name}: paths {got_paths:?}, want {want_paths:?}"
+                ));
+            }
+            Ok(())
+        }
+        "L2" => {
+            let indexes = slice_indexes_html(html, &f.spec);
+            let index = indexes
+                .iter()
+                .find(|i| i.anchor == f.anchor)
+                .ok_or_else(|| format!("no slice index for #{}", f.anchor))?;
+            let total = index.steps.len();
+            for var_name in &index.vars {
+                let view_req = ViewRequest {
+                    involving: vec![var_name.clone()],
+                    ..Default::default()
+                };
+                let s = slice_fn(index, &view_req).map_err(|e| e.to_string())?;
+                let kept = s.steps.len();
+                let omitted: usize = s.omitted.iter().map(|r| r.steps as usize).sum();
+                if kept + omitted != total {
+                    return fail(format!("L2 {var_name}: count:{kept}+{omitted}!={total}"));
+                }
+            }
+            Ok(())
+        }
+        "L3" => {
+            let indexes = slice_indexes_html(html, &f.spec);
+            let index = indexes
+                .iter()
+                .find(|i| i.anchor == f.anchor)
+                .ok_or_else(|| format!("no slice index for #{}", f.anchor))?;
+            for var_name in &index.vars {
+                let view_req = ViewRequest {
+                    involving: vec![var_name.clone()],
+                    ..Default::default()
+                };
+                let s = slice_fn(index, &view_req).map_err(|e| e.to_string())?;
+                let kept_set: HashSet<&str> = s.steps.iter().map(|k| k.path.as_str()).collect();
+                for step in &s.steps {
+                    let parts: Vec<&str> = step.path.split('.').collect();
+                    for depth in 1..parts.len() {
+                        let prefix = parts[..depth].join(".");
+                        if !kept_set.contains(prefix.as_str()) {
+                            return fail(format!(
+                                "L3 {var_name}: prefix {prefix} missing for kept {}",
+                                step.path
+                            ));
+                        }
+                    }
+                }
+                for run in &s.omitted {
+                    if let Some(parent) = &run.parent {
+                        if !kept_set.contains(parent.as_str()) {
+                            return fail(format!("L3 {var_name}: run parent {parent} not kept"));
+                        }
+                    }
                 }
             }
             Ok(())

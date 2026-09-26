@@ -170,7 +170,7 @@ pub fn step_counts(s: &SectionCtx) -> (usize, usize) {
 }
 
 /// Source step body: top-level `ol`s of an algorithm region.
-fn body_ols<'a>(s: &SectionCtx<'a>) -> Vec<N<'a>> {
+pub(super) fn body_ols<'a>(s: &SectionCtx<'a>) -> Vec<N<'a>> {
     if s.ty() != SectionType::Algorithm || !s.region.shape.has_region() {
         return Vec::new();
     }

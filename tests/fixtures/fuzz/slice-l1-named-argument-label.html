@@ -1,0 +1,190 @@
+<!doctype html><html><body>
+<div class="algorithm" data-algorithm="insert">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node-insert">insert</dfn> a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤③">node</a> <var>node</var> into a
+<a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤④">node</a> <var>parent</var> before null or a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑤">node</a> <var>child</var>, with an
+optional boolean <dfn class="dfn-paneled" data-dfn-for="insert" data-dfn-type="dfn" data-noexport id="insert-suppressobservers"><var>suppressObservers</var></dfn> (default false):
+
+</p>
+    <ol>
+     <li>
+      <p>Let <var>nodes</var> be <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②⓪">children</a>, if <var>node</var> is a
+ <code class="idl"><a data-link-type="idl" href="#documentfragment" id="ref-for-documentfragment⑧">DocumentFragment</a></code> <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑥">node</a>; otherwise « <var>node</var> ».
+
+ </p>
+     </li><li>
+      <p>Let <var>count</var> be <var>nodes</var>’s <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-size" id="ref-for-list-size②">size</a>.
+
+ </p>
+     </li><li>
+      <p>If <var>count</var> is 0, then return.
+
+ </p>
+     </li><li>
+      <p>If <var>node</var> is a <code class="idl"><a data-link-type="idl" href="#documentfragment" id="ref-for-documentfragment⑨">DocumentFragment</a></code> <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑦">node</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p><a data-link-type="dfn" href="#concept-node-remove" id="ref-for-concept-node-remove①">Remove</a> its <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②①">children</a> with
+   <a data-link-type="dfn" href="#remove-suppressobservers" id="ref-for-remove-suppressobservers"><i>suppressObservers</i></a> set to true.
+
+   </p>
+       </li><li>
+        <p><a data-link-type="dfn" href="#queue-a-tree-mutation-record" id="ref-for-queue-a-tree-mutation-record">Queue a tree mutation record</a> for <var>node</var> with « », <var>nodes</var>, null, and
+    null.
+
+    </p>
+        <p class="note" role="note">This step intentionally does not pay attention to <var>suppressObservers</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>If <var>child</var> is non-null:
+
+  </p>
+      <ol>
+       <li>
+        <p>For each <a data-link-type="dfn" href="#concept-live-range" id="ref-for-concept-live-range">live range</a> whose <a data-link-type="dfn" href="#concept-range-start-node" id="ref-for-concept-range-start-node">start node</a> is <var>parent</var> and
+   <a data-link-type="dfn" href="#concept-range-start-offset" id="ref-for-concept-range-start-offset">start offset</a> is greater than <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index">index</a>: increase
+   its <a data-link-type="dfn" href="#concept-range-start-offset" id="ref-for-concept-range-start-offset①">start offset</a> by <var>count</var>.
+
+   </p>
+       </li><li>
+        <p>For each <a data-link-type="dfn" href="#concept-live-range" id="ref-for-concept-live-range①">live range</a> whose <a data-link-type="dfn" href="#concept-range-end-node" id="ref-for-concept-range-end-node">end node</a> is <var>parent</var> and
+   <a data-link-type="dfn" href="#concept-range-end-offset" id="ref-for-concept-range-end-offset">end offset</a> is greater than <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index①">index</a>: increase
+   its <a data-link-type="dfn" href="#concept-range-end-offset" id="ref-for-concept-range-end-offset①">end offset</a> by <var>count</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>Let <var>previousSibling</var> be <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-previous-sibling" id="ref-for-concept-tree-previous-sibling">previous sibling</a> or
+ <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-last-child" id="ref-for-concept-tree-last-child">last child</a> if <var>child</var> is null.
+
+ </p>
+     </li><li>
+      <p>For each <var>node</var> in <var>nodes</var>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order①①">tree order</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p><a data-link-type="dfn" href="#concept-node-adopt" id="ref-for-concept-node-adopt">Adopt</a> <var>node</var> into <var>parent</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document④">node document</a>.
+
+   </p>
+       </li><li>
+        <p>If <var>child</var> is null, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑦">append</a> <var>node</var> to
+   <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②②">children</a>.
+
+   </p>
+       </li><li>
+        <p>Otherwise, <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-insert" id="ref-for-list-insert">insert</a> <var>node</var> into <var>parent</var>’s
+   <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②③">children</a> before <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index②">index</a>.
+
+   </p>
+       </li><li>
+        <p>If <var>parent</var> is a <a data-link-type="dfn" href="#element-shadow-host" id="ref-for-element-shadow-host">shadow host</a> whose <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①②">shadow root</a>’s
+   <a data-link-type="dfn" href="#shadowroot-slot-assignment" id="ref-for-shadowroot-slot-assignment②">slot assignment</a> is "<code>named</code>" and <var>node</var> is a
+   <a data-link-type="dfn" href="#concept-slotable" id="ref-for-concept-slotable①⑥">slottable</a>, then <a data-link-type="dfn" href="#assign-a-slot" id="ref-for-assign-a-slot①">assign a slot</a> for <var>node</var>.
+
+   </p>
+       </li><li>
+        <p>If <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-root" id="ref-for-concept-tree-root①⑤">root</a> is a <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①③">shadow root</a>, and
+   <var>parent</var> is a <a data-link-type="dfn" href="#concept-slot" id="ref-for-concept-slot②⓪">slot</a> whose <a data-link-type="dfn" href="#slot-assigned-nodes" id="ref-for-slot-assigned-nodes②">assigned nodes</a> is the empty list,
+   then run <a data-link-type="dfn" href="#signal-a-slot-change" id="ref-for-signal-a-slot-change①">signal a slot change</a> for <var>parent</var>.
+
+   </p>
+       </li><li>
+        <p>Run <a data-link-type="dfn" href="#assign-slotables-for-a-tree" id="ref-for-assign-slotables-for-a-tree①">assign slottables for a tree</a> with <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-root" id="ref-for-concept-tree-root①⑥">root</a>.
+
+   </p>
+       </li><li>
+        <p>For each <a data-link-type="dfn" href="#concept-shadow-including-inclusive-descendant" id="ref-for-concept-shadow-including-inclusive-descendant">shadow-including inclusive descendant</a> <var>inclusiveDescendant</var> of
+    <var>node</var>, in <a data-link-type="dfn" href="#concept-shadow-including-tree-order" id="ref-for-concept-shadow-including-tree-order">shadow-including tree order</a>:
+
+    </p>
+        <ol>
+         <li>
+          <p>Run the <a data-link-type="dfn" href="#concept-node-insert-ext" id="ref-for-concept-node-insert-ext③">insertion steps</a> with <var>inclusiveDescendant</var>.
+
+     </p>
+         </li><li>
+          <p>If <var>inclusiveDescendant</var> is not <a data-link-type="dfn" href="#connected" id="ref-for-connected">connected</a>, then
+     <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#iteration-continue" id="ref-for-iteration-continue⑤">continue</a>.
+
+     </p>
+         </li><li>
+          <p>If <var>inclusiveDescendant</var> is an <a data-link-type="dfn" href="#concept-element" id="ref-for-concept-element①③">element</a> and
+      <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry">custom element registry</a> is non-null:
+
+      </p>
+          <ol>
+           <li>
+            <p>If <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry①">custom element registry</a>’s
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#is-scoped" id="ref-for-is-scoped">is scoped</a> is true, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑧">append</a>
+       <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document⑤">node document</a> to
+       <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry②">custom element registry</a>’s
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#scoped-document-set" id="ref-for-scoped-document-set">scoped document set</a>.
+
+       </p>
+           </li><li>
+            <p>If <var>inclusiveDescendant</var> is <a data-link-type="dfn" href="#concept-element-custom" id="ref-for-concept-element-custom">custom</a>, then
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-callback-reaction" id="ref-for-enqueue-a-custom-element-callback-reaction">enqueue a custom element callback reaction</a> with <var>inclusiveDescendant</var>,
+       callback name "<code>connectedCallback</code>", and « ».
+
+       </p>
+           </li><li>
+            <p>Otherwise, <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-try-upgrade" id="ref-for-concept-try-upgrade">try to upgrade</a>
+        <var>inclusiveDescendant</var>.
+
+        </p>
+            <p class="note" role="note">If this successfully upgrades <var>inclusiveDescendant</var>, its
+        <code>connectedCallback</code> will be enqueued automatically during the
+        <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-upgrade-an-element" id="ref-for-concept-upgrade-an-element">upgrade an element</a> algorithm.
+      </p>
+          </li></ol>
+         </li><li>
+          <p>Otherwise, if <var>inclusiveDescendant</var> is a <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①④">shadow root</a>,
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry">custom element registry</a> is non-null, and
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry①">custom element registry</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#is-scoped" id="ref-for-is-scoped①">is scoped</a> is true, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑨">append</a>
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document⑥">node document</a> to
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry②">custom element registry</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#scoped-document-set" id="ref-for-scoped-document-set①">scoped document set</a>.
+    </p>
+        </li></ol>
+      </li></ol>
+     </li><li>
+      <p>If <var>suppressObservers</var> is false, then <a data-link-type="dfn" href="#queue-a-tree-mutation-record" id="ref-for-queue-a-tree-mutation-record①">queue a tree mutation record</a> for
+ <var>parent</var> with <var>nodes</var>, « », <var>previousSibling</var>, and <var>child</var>.
+
+ </p>
+     </li><li>
+      <p>Run the <a data-link-type="dfn" href="#concept-node-children-changed-ext" id="ref-for-concept-node-children-changed-ext">children changed steps</a> for <var>parent</var>.
+
+ </p>
+     </li><li>
+      <p>Let <var>staticNodeList</var> be a <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list" id="ref-for-list①②">list</a> of <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑧">nodes</a>, initially « ».
+
+  </p>
+      <p class="note" role="note">We collect all <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑨">nodes</a> <em>before</em> calling the
+  <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext②">post-connection steps</a> on any one of them, instead of calling the
+  <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext③">post-connection steps</a> <em>while</em> we’re traversing the <a data-link-type="dfn" href="#concept-node-tree" id="ref-for-concept-node-tree①①">node tree</a>. This is because
+  the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext④">post-connection steps</a> can modify the tree’s structure, making live traversal unsafe,
+  possibly leading to the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext⑤">post-connection steps</a> being called multiple times on the same
+  <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑥⓪">node</a>.
+ </p>
+     </li><li>
+      <p>For each <var>node</var> of <var>nodes</var>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order①②">tree order</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p>For each <a data-link-type="dfn" href="#concept-shadow-including-inclusive-descendant" id="ref-for-concept-shadow-including-inclusive-descendant①">shadow-including inclusive descendant</a> <var>inclusiveDescendant</var> of
+   <var>node</var>, in <a data-link-type="dfn" href="#concept-shadow-including-tree-order" id="ref-for-concept-shadow-including-tree-order①">shadow-including tree order</a>: <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-append" id="ref-for-list-append①⓪">append</a>
+   <var>inclusiveDescendant</var> to <var>staticNodeList</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-iterate" id="ref-for-list-iterate①⑤">For each</a> <var>node</var> of <var>staticNodeList</var>: if <var>node</var> is
+ <a data-link-type="dfn" href="#connected" id="ref-for-connected①">connected</a>, then run the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext⑥">post-connection steps</a> with <var>node</var>.
+</p>
+    </li></ol>
+   </div>
+</body></html>

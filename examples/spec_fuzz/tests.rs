@@ -11,9 +11,14 @@ use webspec_index::effects::model::EffectsOptions;
 use webspec_index::effects::service::{publish, PublishMode};
 use webspec_index::model::ParsedSection;
 
+use webspec_index::state::slice::select::{slice as slice_fn, ViewRequest};
+use webspec_index::state::slice::SliceIndex;
+use webspec_index::state::testing::slice_index;
+
 use crate::check::{self, SpecInput, SpecResult};
 use crate::invariants::{
-    self, check_e1, check_e2, check_e3, query, Ctx, Invariant, Outcome, SectionCtx, SpecCtx,
+    self, check_e1, check_e2, check_e3, query, slice as inv_slice, Ctx, Invariant, Outcome,
+    SectionCtx, SpecCtx,
 };
 use crate::oracle::{self, Shape};
 
@@ -746,5 +751,100 @@ fn e3_fails_after_replacing_summary_payload() {
     assert!(
         matches!(check_e3(&conn, "DOM"), Outcome::Fail(_)),
         "E3 should detect a corrupted summary payload (wrong digest)"
+    );
+}
+
+// ── 7. Slice invariants L1–L3 ───────────────────────────────────────────────────────────────────
+
+const SLICE_OK: &str = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given a <var>foo</var>:</p><ol>
+<li><p>Let <var>a</var> be <var>foo</var>.</p></li>
+<li><p><a href="#rm">Remove</a> it with <a href="#rm-so"><var>foo</var></a> set to true.</p></li>
+<li><p>If <var>a</var> is null:</p><ol><li><p>Return.</p></li></ol></li>
+</ol></div><p><dfn id="rm">remove</dfn> <dfn id="rm-so">so</dfn></p>"##;
+
+fn src(path: &str, vars: &[&str], text: &str) -> inv_slice::SourceStep {
+    inv_slice::SourceStep {
+        path: path.into(),
+        own_vars: vars.iter().map(|v| v.to_string()).collect(),
+        own_text: text.into(),
+    }
+}
+
+fn view(index: &SliceIndex, var: &str) -> webspec_index::state::slice::select::Slice {
+    slice_fn(
+        index,
+        &ViewRequest {
+            involving: vec![var.into()],
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+fn source_steps_of(c: &SpecCtx, anchor: &str) -> Vec<inv_slice::SourceStep> {
+    let section = c.section(anchor).expect("section");
+    let sctx = SectionCtx::new(c, section).expect("locatable");
+    inv_slice::source_steps(&sctx)
+}
+
+#[test]
+fn slice_invariants_l1_to_l3_are_quiet_on_a_clean_algorithm() {
+    let c = ctx(SLICE_OK);
+    for id in ["L1", "L2", "L3"] {
+        assert!(matches!(check_anchor(&c, "go", id), Outcome::Pass), "{id}");
+    }
+}
+
+#[test]
+fn l1_ignores_named_argument_labels() {
+    let c = ctx(SLICE_OK);
+    let steps = source_steps_of(&c, "go");
+    assert_eq!(
+        steps[1].own_vars,
+        Vec::<String>::new(),
+        "the label <a><var>foo</var></a> in step 2 is not a mention"
+    );
+}
+
+#[test]
+fn uncovered_reports_a_source_var_the_index_does_not_mention() {
+    let index = slice_index("go", &[("1", &["a"]), ("2", &["foo"])], &[], &[]);
+    let source = [
+        src("1", &["a", "foo"], "Let a be foo."),
+        src("2", &["foo"], "Return foo."),
+    ];
+    assert_eq!(inv_slice::uncovered(&index, &source), ["missing:1"]);
+    let good = slice_index("go", &[("1", &["a", "foo"]), ("2", &["foo"])], &[], &[]);
+    assert!(inv_slice::uncovered(&good, &source).is_empty());
+}
+
+#[test]
+fn conservation_gap_reports_a_dropped_run() {
+    let index = slice_index("go", &[("1", &["x"]), ("2", &[]), ("3", &["x"])], &[], &[]);
+    let mut s = view(&index, "x");
+    assert_eq!(inv_slice::conservation_gap(&s, 3), None);
+    s.omitted.clear();
+    assert_eq!(
+        inv_slice::conservation_gap(&s, 3).as_deref(),
+        Some("count:2+0!=3")
+    );
+}
+
+#[test]
+fn open_prefixes_reports_a_kept_path_without_its_prefix() {
+    let index = slice_index(
+        "go",
+        &[("1", &[]), ("1.1", &["x"]), ("2", &[]), ("2.1", &[])],
+        &[],
+        &[],
+    );
+    let mut s = view(&index, "x");
+    assert!(inv_slice::open_prefixes(&s).is_empty());
+    s.steps.retain(|k| k.path != "1");
+    s.omitted[0].parent = Some("9".into());
+    let gaps = inv_slice::open_prefixes(&s);
+    assert!(
+        gaps.contains(&"1.1".to_string()) && gaps.contains(&"run-parent:9".to_string()),
+        "{gaps:?}"
     );
 }

@@ -1,0 +1,11 @@
+{
+  "name": "slice-l1-named-argument-label",
+  "spec": "DOM",
+  "base_url": "https://dom.spec.whatwg.org",
+  "anchor": "concept-node-insert",
+  "invariant": "L1",
+  "status": "fixed",
+  "bug": "spec §6.1: a <var> that is exactly one link is a callee's parameter label, not a mention; insert 4.1 is kept by --involving node only as an inherited step",
+  "signature": "L1|algorithm/algo-div|named-argument-label",
+  "expected": {"variable": "suppressObservers", "paths": ["8"]}
+}

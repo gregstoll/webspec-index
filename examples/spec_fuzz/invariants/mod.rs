@@ -4,10 +4,11 @@ mod content;
 pub mod effects;
 mod freshness;
 pub mod query;
+pub mod slice;
 mod structure;
 
 use std::cell::OnceCell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use rusqlite::Connection;
 use scraper::ElementRef;
@@ -15,6 +16,7 @@ use serde::Serialize;
 use webspec_index::model::{ParsedSection, ParsedSpec, SectionType};
 use webspec_index::parse::steps::{StructuralAlgorithm, StructuralSpec};
 use webspec_index::spec_registry::SpecRegistry;
+use webspec_index::state::slice::SliceIndex;
 
 use crate::index::Stored;
 use crate::oracle::{self, Md, Region, SourceDoc, SrcText, N};
@@ -142,6 +144,9 @@ pub fn all() -> Vec<&'static dyn Invariant> {
         &query::A1,
         &structure::T1,
         &content::O1,
+        &slice::L1,
+        &slice::L2,
+        &slice::L3,
     ]
 }
 
@@ -170,6 +175,8 @@ pub struct SpecCtx {
     pub registry: SpecRegistry,
     pub db: Option<DbView>,
     pub stored: Option<Stored>,
+    /// Lazily built per-spec slice indexes, keyed by anchor. Populated when no `DbView` is present.
+    pub(crate) slice_indexes: OnceCell<BTreeMap<String, SliceIndex>>,
     /// Cross-spec `SPEC#anchor` existence, cached for A1.
     pub exists_cache: std::cell::RefCell<HashMap<(String, String), bool>>,
 }
@@ -244,6 +251,7 @@ impl SpecCtx {
             registry: SpecRegistry::new(),
             db,
             stored,
+            slice_indexes: OnceCell::new(),
             exists_cache: Default::default(),
         }
     }
