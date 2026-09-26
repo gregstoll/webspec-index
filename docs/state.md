@@ -63,6 +63,45 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
 webspec-index state Document --format markdown
 ```
 
+```
+## Document (idl:Document)
+Anchors: DOM#concept-document (concept alias), DOM#document (defining), HTML#document (partial), …
+Supertypes: Node → EventTarget
+Includes: NonElementParentNode, DocumentOrShadowRoot, ParentNode, XPathEvaluatorBase (DOM); GlobalEventHandlers (HTML)
+
+### Fields (declared)
+| Field | Type | Initial | Basis | Writes | Inits |
+|---|---|---|---|---:|---:|
+| DOM#document-allow-declarative-shadow-roots allow declarative shadow roots | boolean | — | dfn-for | 0 | 0 |
+| DOM#concept-document-content-type content type | string | — | dfn-for | 1 | 5 |
+| DOM#document-custom-element-registry custom element registry | null or ⟦L0⟧ object | — | dfn-for | 2 | 2 |
+| DOM#concept-document-encoding encoding | encoding | — | dfn-for | 2 | 0 |
+| DOM#concept-document-mode mode | — | — | dfn-for | 4 | 1 |
+| DOM#concept-document-origin origin | origin | — | dfn-for | 1 | 5 |
+| DOM#concept-document-type type | — | — | dfn-for | 2 | 2 |
+| DOM#concept-document-url URL | URL | — | dfn-for | 2 | 2 |
+| HTML#concept-document-about-base-url about base URL | URL or null | null | sentence | 0 | 2 |
+| HTML#active-parser-was-aborted active parser was aborted | boolean | false | sentence | 1 | 0 |
+| HTML#active-sandboxing-flag-set active sandboxing flag set | sandboxing flag set | — | dfn-for | 0 | 2 |
+| HTML#autofocus-candidates autofocus candidates | — | empty | sentence | 4 | 0 |
+| HTML#current-document-readiness current document readiness | string | " | sentence | 1 | 1 |
+| HTML#design-mode-enabled design mode enabled | boolean | false | sentence | 2 | 0 |
+| HTML#is-initial-about:blank is initial `about:blank` | boolean | false | sentence | 1 | 1 |
+| HTML#latest-entry latest entry | session history entry or null | — | sentence | 2 | 0 |
+| HTML#concept-document-coop opener policy | n ⟦L0⟧ | a new opener policy | sentence | 1 | 1 |
+| HTML#page-showing page showing | boolean | true | sentence | 3 | 0 |
+| HTML#concept-document-policy-container policy container | policy container | a new policy container | dfn-for | 1 | 1 |
+| HTML#concept-document-salvageable salvageable | — | true | sentence | 4 | 0 |
+… (trimmed — 47 more declared fields, plus inherited from Node, EventTarget, and concept-tree)
+
+### Fields with `data-dfn-for` but no recognized declaration
+| Field | Type | Initial | Basis | Writes | Inits |
+|---|---|---|---|---:|---:|
+| HTML#concept-document-bc `Document`'s browsing context | — | null | dfn-for | 1 | 2 |
+
+Coverage: may · partial — 7 unclassified in own fields.
+```
+
 The output lists declared fields, `data-dfn-for` fields without a recognized declaration,
 and inherited fields from each supertype, each in its own table. Pass `--limit N` to cap
 rows per table.
@@ -100,10 +139,97 @@ instead of fields:
 webspec-index state HTML#sandboxing-flag-set --format markdown
 ```
 
+```
+## sandboxing flag set (HTML#sandboxing-flag-set)
+Anchors: HTML#sandboxing-flag-set (defining)
+
+### Members
+| Member | Adds | Removes |
+|---|---:|---:|
+| HTML#one-permitted-sandboxed-navigator one permitted sandboxed navigator | 1 | 0 |
+| HTML#sandbox-propagates-to-auxiliary-browsing-contexts-flag sandbox propagates to auxiliary browsing contexts flag | 0 | 0 |
+| HTML#sandboxed-automatic-features-browsing-context-flag sandboxed automatic features browsing context flag | 0 | 0 |
+| HTML#sandboxed-auxiliary-navigation-browsing-context-flag sandboxed auxiliary navigation browsing context flag | 0 | 0 |
+| HTML#sandboxed-custom-protocols-navigation-browsing-context-flag sandboxed custom protocols navigation browsing context flag | 0 | 0 |
+| HTML#sandboxed-document.domain-browsing-context-flag sandboxed document.domain browsing context flag | 0 | 0 |
+| HTML#sandboxed-downloads-browsing-context-flag sandboxed downloads browsing context flag | 0 | 0 |
+| HTML#sandboxed-forms-browsing-context-flag sandboxed forms browsing context flag | 0 | 0 |
+| HTML#sandboxed-modals-flag sandboxed modals flag | 0 | 0 |
+| HTML#sandboxed-navigation-browsing-context-flag sandboxed navigation browsing context flag | 0 | 0 |
+| HTML#sandboxed-origin-browsing-context-flag sandboxed origin browsing context flag | 0 | 0 |
+| HTML#sandboxed-scripts-browsing-context-flag sandboxed scripts browsing context flag | 0 | 0 |
+| HTML#sandboxed-top-level-navigation-with-user-activation-browsing-context-flag sandboxed top-level navigation with user activation browsing context flag | 0 | 0 |
+| HTML#sandboxed-top-level-navigation-without-user-activation-browsing-context-flag sandboxed top-level navigation without user activation browsing context flag | 0 | 0 |
+
+Coverage: may · complete — 0 unclassified in own fields.
+```
+
 ## Coverage view
 
 ```sh
 webspec-index state --coverage HTML --format markdown
+```
+
+```
+## State coverage — HTML
+
+| Rule | Concept dfns |
+|---|---:|
+| declaration_sentence | 284 |
+| dfn_for | 212 |
+| override | 72 |
+| property_list | 44 |
+| struct_items | 94 |
+
+| Written fields | Count |
+|---|---:|
+| Total | 450 |
+| declaration_sentence | 197 |
+| dfn_for | 91 |
+| override | 72 |
+| property_list | 18 |
+| struct_items | 43 |
+
+Resolved: 421 / 450 (93.6%)
+
+| Form | Count |
+|---|---:|
+| init:dl_entries | 283 |
+| init:whose_list | 48 |
+| let | 1898 |
+| mutate:append:field:var | 27 |
+| mutate:append:var | 118 |
+| mutate:map_set:var_subscript | 63 |
+| opaque:pronoun_root:set | 35 |
+| opaque:unsupported_form:add | 102 |
+| opaque:unsupported_form:append | 183 |
+| set:to:field:var | 633 |
+| set:to:var | 615 |
+… (trimmed — 57 more form rows)
+
+Set statements with a structured target: 1051 / 1697 (61.9%)
+
+| Class | Count |
+|---|---:|
+| init | 269 |
+| read | 2212 |
+| read_path | 76 |
+| unclassified | 76 |
+| write | 907 |
+
+Unclassified: 13.0%
+
+| Prose | Count |
+|---|---:|
+| Sources | 719 |
+| Callouts excluded | 32 |
+| Mentions | 32703 |
+
+### Unclassified review (527)
+- HTML#rules-for-parsing-a-list-of-dimensions:5.7.2 — INFRA#ascii-whitespace — Remove all ASCII whitespace in *s*.
+- HTML#start-intersection-observing-a-lazy-loading-element:2 — INTERSECTIONOBSERVER#intersectionobserver — If *doc*'s lazy load intersection observer is null, set it to a new `IntersectionObserver` instance, initialized as follows:
+- HTML#update-the-image-data:7.4.1 — HTML#ignore-higher-layer-caching — Set the ignore higher-layer caching flag for that entry.
+… (trimmed — 524 more unclassified entries)
 ```
 
 Prints the stored counters for one spec: owner inference by rule, statement forms,
