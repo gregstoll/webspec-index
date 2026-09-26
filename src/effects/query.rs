@@ -131,7 +131,8 @@ pub async fn query_section_with_effects(
         },
         _ => EffectsRefresh::Off,
     };
-    let (query, outcome) = crate::query_section_refreshed(spec_anchor, pr, effects).await?;
+    let (query, outcome) =
+        crate::query_section_refreshed(spec_anchor, pr, effects, &options).await?;
     if options.mode == EffectsMode::Off {
         return Ok(QueryWithEffects {
             query,

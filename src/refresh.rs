@@ -648,6 +648,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn publication_for_custom_options_is_current_for_matching_query() {
+        let (dir, stub) = indexed_corpus_with_stub(&MULTI).await;
+        let conn = open(&dir);
+        let custom = EffectsOptions {
+            environment: "generic".into(),
+            ..EffectsOptions::default()
+        };
+        let publish = RefreshOptions {
+            effects_options: custom.clone(),
+            ..test_options(&stub, EffectsRefresh::Always)
+        };
+        let report = refresh_for_query(&conn, "DOM", &publish).await.unwrap();
+        assert_eq!(report.effects, EffectsOutcome::Rebuilt);
+
+        let query = RefreshOptions {
+            effects_options: custom,
+            ..test_options(
+                &stub,
+                EffectsRefresh::Inline {
+                    budget: Duration::from_secs(60),
+                },
+            )
+        };
+        let report = refresh_for_query(&conn, "DOM", &query).await.unwrap();
+        assert!(report.parsed.is_empty() && report.fragments_built.is_empty());
+        assert_eq!(report.effects, EffectsOutcome::Current);
+    }
+
+    #[tokio::test]
     async fn changed_callee_is_reparsed_with_the_query_spec() {
         let (dir, stub) = indexed_corpus_with_stub(&MULTI).await;
         stub.put(
