@@ -111,13 +111,21 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
     let src = dir.path().join("index.db");
     {
         let (conn, html_snap) = seeded_db(&src);
-        db::state::store_state(
+        let state = webspec_index::state::testing::extract_html(
+            webspec_index::state::testing::MINI,
+            "HTML",
+        );
+        db::state::store_state(&conn, html_snap, &state).unwrap();
+        let structure = webspec_index::parse::steps::extract_step_structure(
+            webspec_index::state::testing::MINI,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "hash:aaaa",
+        );
+        db::state::store_slice_indexes(
             &conn,
             html_snap,
-            &webspec_index::state::testing::extract_html(
-                webspec_index::state::testing::MINI,
-                "HTML",
-            ),
+            &webspec_index::state::slice::build_slice_indexes(&structure, &state),
         )
         .unwrap();
         publish_effects(&conn);
@@ -171,6 +179,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         "state_sites",
         "state_occurrence_counts",
         "state_coverage",
+        "state_slices",
     ] {
         let rows: i64 = conn
             .query_row(&format!("SELECT COUNT(*) FROM {kept}"), [], |r| r.get(0))

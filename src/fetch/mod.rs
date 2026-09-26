@@ -318,6 +318,7 @@ pub(crate) fn write_parsed_html(
         parsed,
         structure_json,
         state,
+        slices,
         memo,
         fragment,
     } = prepared;
@@ -356,6 +357,7 @@ pub(crate) fn write_parsed_html(
             &structure_json,
         )?;
         crate::db::state::store_state(conn, snapshot_id, &state)?;
+        crate::db::state::store_slice_indexes(conn, snapshot_id, &slices)?;
         write::store_memo(conn, snapshot_id, &memo)?;
         if let Some(fragment) = fragment {
             crate::db::effects::store_fragment(
@@ -1342,6 +1344,42 @@ mod tests {
         conn.execute("DELETE FROM state_models", []).unwrap();
         assert!(!crate::db::state::has_state_model(&conn, snapshot, &version).unwrap());
         assert!(!snapshot_is_reusable(&conn, snapshot).unwrap());
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn slice_rows_are_written_with_state_and_old_models_reparse() {
+        let conn = crate::db::open_test_db().unwrap();
+        let html = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given <var>foo</var>:</p><ol><li><p>Let <var>a</var> be <var>foo</var>.</p></li></ol></div>"##.to_string();
+        let snapshot = index_html(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+            html,
+        )
+        .unwrap();
+        assert!(crate::db::state::load_slice_index(&conn, snapshot, "go")
+            .unwrap()
+            .is_some());
+        assert!(snapshot_is_reusable(&conn, snapshot).unwrap());
+        let current = crate::state::extract::bundled_representation_version();
+        let version = crate::state::STATE_VERSION;
+        let old = format!("{}", version.parse::<u32>().unwrap() - 1);
+        let stale = current.replacen(version, &old, 1);
+        assert!(
+            stale.starts_with(&old) && stale[old.len()..] == current[version.len()..],
+            "only the version component differs: {stale}"
+        );
+        conn.execute(
+            "UPDATE state_models SET representation_version = ?1",
+            [&stale],
+        )
+        .unwrap();
+        assert!(
+            !snapshot_is_reusable(&conn, snapshot).unwrap(),
+            "a model from the previous STATE_VERSION forces a re-parse"
+        );
     }
 
     #[cfg(feature = "native")]

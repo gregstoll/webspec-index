@@ -40,6 +40,7 @@ pub(crate) struct ParsedHtml {
     pub parsed: ParsedSpec,
     pub structure_json: String,
     pub state: crate::state::StateSpec,
+    pub slices: Vec<crate::state::slice::SliceIndex>,
     pub memo: Vec<u8>,
     pub fragment: Option<BuiltFragment>,
 }
@@ -96,7 +97,7 @@ pub(crate) fn chunk_len(threads: usize) -> usize {
 /// Parse one document on two workers, each with its own `Html`: the first
 /// extracts sections, references and IDL (through the markdown memo), the
 /// second extracts the step structure, then takes the first worker's sections
-/// and IDL to extract state on its own document and, when effects are on, to
+/// and IDL to extract state and slice indexes on its own document and, when effects are on, to
 /// build the effects fragment beside it.
 pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
     #[cfg(test)]
@@ -134,7 +135,12 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
             let _ = tx.send(parsed.clone());
             Ok((parsed, encode_memo(&memo)))
         },
-        move || -> anyhow::Result<(String, crate::state::StateSpec, Option<BuiltFragment>)> {
+        move || -> anyhow::Result<(
+            String,
+            crate::state::StateSpec,
+            Vec<crate::state::slice::SliceIndex>,
+            Option<BuiltFragment>,
+        )> {
             let document = scraper::Html::parse_document(&html);
             let structure = crate::parse::steps::extract_step_structure_from_document(
                 &document,
@@ -195,11 +201,12 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
                     body_nodes: Some(body_nodes),
                 })
             });
-            Ok((serde_json::to_string(&structure)?, state, fragment))
+            let slices = crate::state::slice::build_slice_indexes(&structure, &state);
+            Ok((serde_json::to_string(&structure)?, state, slices, fragment))
         },
     );
     let (parsed, memo) = sections?;
-    let (structure_json, state, fragment) = structure_and_state?;
+    let (structure_json, state, slices, fragment) = structure_and_state?;
     let parsed =
         Arc::try_unwrap(parsed).map_err(|_| anyhow::anyhow!("parsed spec still shared"))?;
     Ok(ParsedHtml {
@@ -207,6 +214,7 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
         parsed,
         structure_json,
         state,
+        slices,
         memo,
         fragment,
     })
@@ -258,6 +266,7 @@ mod tests {
             assert_eq!(format!("{:?}", p.parsed), format!("{:?}", s.parsed));
             assert_eq!(p.structure_json, s.structure_json);
             assert_eq!(p.state, s.state);
+            assert_eq!(p.slices, s.slices);
             assert_eq!(p.memo, s.memo);
         }
     }

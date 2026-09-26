@@ -1,11 +1,12 @@
 //! Per-snapshot state model rows (spec §9.2).
+use crate::state::slice::SliceIndex;
 use crate::state::{derive_occurrence_counts, derive_sites, Owner, StateSpec};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Every per-snapshot state table (spec §9.2). The purge, child-delete and
 /// export-prune lists iterate this; none of these tables reference each other.
-pub const STATE_TABLES: [&str; 9] = [
+pub const STATE_TABLES: [&str; 10] = [
     "state_models",
     "state_types",
     "state_type_edges",
@@ -15,6 +16,7 @@ pub const STATE_TABLES: [&str; 9] = [
     "state_sites",
     "state_occurrence_counts",
     "state_coverage",
+    "state_slices",
 ];
 
 /// Create state tables and indexes if they do not yet exist (spec §9.2, §16.1).
@@ -116,7 +118,8 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS state_coverage (
             snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
             coverage_json TEXT NOT NULL
-        );",
+        );
+        CREATE TABLE IF NOT EXISTS state_slices (snapshot_id INTEGER NOT NULL REFERENCES snapshots(id), anchor TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (snapshot_id, anchor));",
     )?;
 
     // §16.1: add amendment columns to state_sites in case the table was
@@ -172,6 +175,55 @@ pub fn load_state_model(conn: &Connection, snapshot_id: i64) -> Result<Option<St
         )
         .optional()?;
     Ok(result.map(|json| serde_json::from_str(&json)).transpose()?)
+}
+
+/// Replace the slice rows of `snapshot_id` (spec §10). Call after `store_state`, which clears
+/// every `STATE_TABLES` row of the snapshot.
+pub fn store_slice_indexes(
+    conn: &Connection,
+    snapshot_id: i64,
+    indexes: &[SliceIndex],
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM state_slices WHERE snapshot_id=?1",
+        params![snapshot_id],
+    )?;
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO state_slices(snapshot_id, anchor, payload) VALUES (?1, ?2, ?3)",
+    )?;
+    for index in indexes {
+        stmt.execute(params![
+            snapshot_id,
+            &index.anchor,
+            serde_json::to_string(index)?
+        ])?;
+    }
+    Ok(())
+}
+
+/// The slice index of the algorithm at `anchor` in `snapshot_id`, if one is stored.
+pub fn load_slice_index(
+    conn: &Connection,
+    snapshot_id: i64,
+    anchor: &str,
+) -> Result<Option<SliceIndex>> {
+    let payload: Option<String> = conn
+        .query_row(
+            "SELECT payload FROM state_slices WHERE snapshot_id=?1 AND anchor=?2",
+            params![snapshot_id, anchor],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(payload.map(|p| serde_json::from_str(&p)).transpose()?)
+}
+
+/// Whether `snapshot_id` has any slice rows.
+pub fn has_slice_rows(conn: &Connection, snapshot_id: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM state_slices WHERE snapshot_id=?1)",
+        params![snapshot_id],
+        |r| r.get(0),
+    )?)
 }
 
 /// Delete and re-insert every state row for `snapshot_id` (spec §9.3).
@@ -966,6 +1018,42 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "table {table} missing");
         }
+    }
+
+    #[test]
+    fn slice_rows_round_trip_replace_and_are_deleted_with_the_snapshot() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let html = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given <var>foo</var>:</p><ol><li><p>Let <var>a</var> be <var>foo</var>.</p></li></ol></div>"##;
+        let snapshot = crate::state::testing::index_offline(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            html,
+        )
+        .unwrap();
+        assert!(has_slice_rows(&conn, snapshot).unwrap());
+        let index = load_slice_index(&conn, snapshot, "go").unwrap().unwrap();
+        assert_eq!(index.vars, ["a", "foo"]);
+        assert_eq!(load_slice_index(&conn, snapshot, "nope").unwrap(), None);
+        store_slice_indexes(&conn, snapshot, std::slice::from_ref(&index)).unwrap();
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM state_slices WHERE snapshot_id=?1",
+                [snapshot],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 1, "store replaces, never duplicates");
+        assert!(STATE_TABLES.contains(&"state_slices"));
+        let spec_id: i64 = conn
+            .query_row(
+                "SELECT spec_id FROM snapshots WHERE id=?1",
+                [snapshot],
+                |r| r.get(0),
+            )
+            .unwrap();
+        crate::db::write::delete_spec_data(&conn, spec_id).unwrap();
+        assert!(!has_slice_rows(&conn, snapshot).unwrap());
     }
 
     #[test]

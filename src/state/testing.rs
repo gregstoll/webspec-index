@@ -106,6 +106,11 @@ pub fn index_offline_with(
     let snapshot = crate::db::write::insert_snapshot(conn, spec_id, &sha, "2026-09-25")?;
     crate::db::write::insert_sections_bulk(conn, snapshot, &parsed.sections)?;
     crate::db::state::store_state(conn, snapshot, &state)?;
+    crate::db::state::store_slice_indexes(
+        conn,
+        snapshot,
+        &crate::state::slice::build_slice_indexes(&structure, &state),
+    )?;
     Ok(snapshot)
 }
 
