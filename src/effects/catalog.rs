@@ -199,6 +199,11 @@ impl Catalog {
     }
 }
 
+/// Returns true if `path`'s first component is `state` (belongs to the state loader).
+fn is_state_file(path: &str) -> bool {
+    path == "state" || path.starts_with("state/")
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawFile {
@@ -212,6 +217,13 @@ struct RawFile {
     summaries: Vec<RawSummary>,
     #[serde(default)]
     implementations: Vec<RawImplementation>,
+}
+
+/// Lenient schema+package reader for state files, which may have fields unknown to effects.
+#[derive(Debug, Deserialize)]
+struct RawFileMeta {
+    schema: u32,
+    package: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,16 +361,18 @@ pub(crate) fn catalog_digest_of(packages: &[(String, String)]) -> Result<String,
     canonical_json_sha256(&digest_value).map_err(|error| CatalogError::new(error.to_string()))
 }
 
-/// `(package id, content digest)` of a package's `(path, YAML)` files, without
-/// compiling its declarations.
+/// `(package id, content digest)` of a package's `(path, YAML)` effects files, without
+/// compiling its declarations. State files (first component `state/`) are excluded from
+/// the digest, consistent with `load_owned_files`.
 pub(crate) fn package_digest(files: &[(&str, &str)]) -> Result<(String, String), CatalogError> {
-    let mut files: Vec<(String, String)> = files
+    let mut effects_files: Vec<(String, String)> = files
         .iter()
+        .filter(|(path, _)| !is_state_file(path))
         .map(|(path, content)| ((*path).to_owned(), (*content).to_owned()))
         .collect();
-    files.sort_by(|left, right| left.0.cmp(&right.0));
-    let digest = files_digest(&files)?;
-    let (path, content) = &files[0];
+    effects_files.sort_by(|left, right| left.0.cmp(&right.0));
+    let digest = files_digest(&effects_files)?;
+    let (path, content) = &effects_files[0];
     let package_id = parse_yaml_file::<RawFile>(path, content)?.package;
     validate_id(&package_id, "package identifier", path)?;
     Ok((package_id, digest))
@@ -449,9 +463,50 @@ fn collect_yaml_files(
 
 fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, CatalogError> {
     files.sort_by(|left, right| left.0.cmp(&right.0));
-    let content_digest = files_digest(&files)?;
-    let mut raws = Vec::with_capacity(files.len());
-    for (path, content) in &files {
+    // Partition: state/ files belong to the state loader; effects files are the rest.
+    let (effects_files, state_files): (Vec<_>, Vec<_>) = files
+        .into_iter()
+        .partition(|(path, _)| !is_state_file(path));
+
+    // content_digest covers effects files only.
+    let content_digest = if effects_files.is_empty() {
+        canonical_json_sha256(&serde_json::Value::Array(vec![]))
+            .map_err(|e| CatalogError::new(e.to_string()))?
+    } else {
+        files_digest(&effects_files)?
+    };
+
+    // State-only package: read id from the first state file, return an empty effects package.
+    if effects_files.is_empty() {
+        if state_files.is_empty() {
+            return Err(CatalogError::new("catalog package contains no YAML files"));
+        }
+        let (path, content) = &state_files[0];
+        let meta = parse_yaml_file::<RawFileMeta>(path, content)?;
+        if meta.schema != EFFECTS_SCHEMA_VERSION {
+            return Err(CatalogError::file(
+                path,
+                format!(
+                    "unsupported catalog schema {}; expected {}",
+                    meta.schema, EFFECTS_SCHEMA_VERSION
+                ),
+            ));
+        }
+        validate_id(&meta.package, "package identifier", path)?;
+        return Ok(Package {
+            schema: EFFECTS_SCHEMA_VERSION,
+            id: meta.package,
+            effects: BTreeMap::new(),
+            rules: Vec::new(),
+            summaries: Vec::new(),
+            implementations: Vec::new(),
+            content_digest,
+            files: Vec::new(),
+        });
+    }
+
+    let mut raws = Vec::with_capacity(effects_files.len());
+    for (path, content) in &effects_files {
         raws.push((path.clone(), parse_yaml_file::<RawFile>(path, content)?));
     }
     let package_id = raws[0].1.package.clone();
@@ -541,7 +596,7 @@ fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, Catalog
         summaries,
         implementations,
         content_digest,
-        files: files.into_iter().map(|(path, _)| path).collect(),
+        files: effects_files.into_iter().map(|(path, _)| path).collect(),
     })
 }
 
@@ -890,5 +945,19 @@ rules:
         assert!(message.contains("rules/events.yaml"));
         assert!(message.contains("example/fire-event"));
         assert!(message.contains("unknown parameter missing"));
+    }
+
+    #[test]
+    fn state_files_are_ignored_by_the_effects_loader() {
+        let effects = "schema: 1\npackage: p\neffects:\n  x.y:\n    category: c\n    label: l\n    parameters: {}\n";
+        let state = "schema: 1\npackage: p\nfields:\n  - id: f\n    field: HTML#f\n    owner: [HTML#o]\n    expect_text: 'x'\n    reason: r\n";
+        let with_state =
+            load_package_files(&[("effects/a.yaml", effects), ("state/b.yaml", state)]).unwrap();
+        let without = load_package_files(&[("effects/a.yaml", effects)]).unwrap();
+        assert_eq!(with_state.content_digest, without.content_digest);
+        assert_eq!(with_state.files, ["effects/a.yaml"]);
+        let only_state = load_package_files(&[("state/b.yaml", state)]).unwrap();
+        assert_eq!(only_state.id, "p");
+        assert!(only_state.rules.is_empty());
     }
 }

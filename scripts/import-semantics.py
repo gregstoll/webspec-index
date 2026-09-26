@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import a maintained webspec-semantics checkout as a runtime artifact.
 
-Only effects/*.yaml (or *.yml) are copied. Acceptance HTML/JSON is intentionally
+Only effects/*.yaml and state/*.yaml are copied. Acceptance HTML/JSON is intentionally
 left out of data/semantics so installed consumers do not ship the corpus.
 """
 
@@ -47,11 +47,16 @@ def runtime_files(root: Path) -> list[tuple[Path, str, bytes]]:
     effects = root / "effects"
     if not effects.is_dir():
         raise ValueError(f"catalog has no effects directory: {effects}")
-    files = sorted(
+    effects_paths = sorted(
         path for path in effects.rglob("*") if path.is_file() and path.suffix in {".yaml", ".yml"}
     )
-    if not files:
+    if not effects_paths:
         raise ValueError(f"catalog has no runtime YAML files: {effects}")
+    state = root / "state"
+    state_paths = sorted(
+        path for path in state.rglob("*") if path.is_file() and path.suffix in {".yaml", ".yml"}
+    ) if state.is_dir() else []
+    files = effects_paths + state_paths
     package = None
     entries = []
     for path in files:
