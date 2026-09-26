@@ -1,10 +1,13 @@
 // Fetch orchestration: coordinate HTML fetching, parsing, and database writes
+pub mod freshness;
 pub mod github;
 pub mod itu;
 mod pipeline;
 pub mod pr;
 pub mod snapshot;
 pub mod tc39_pr;
+#[doc(hidden)]
+pub mod testing;
 pub mod whatpr;
 
 use crate::db::snapshot_diff::{self, SnapshotRows};
@@ -13,18 +16,19 @@ use crate::parse;
 use crate::parse::markdown::{decode_memo, MarkdownMemo};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use freshness::{check_batch, effective_url, fetch_origin, Candidate, Freshness, FreshnessOptions};
 use pipeline::{ParseJob, ParsedHtml};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
-#[cfg(feature = "native")]
-use std::collections::BTreeMap;
-#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const CHECK_INTERVAL_HOURS: i64 = 24;
-#[cfg(feature = "native")]
-const UPDATE_PARALLELISM: usize = 8;
+/// Specs planned, checked and parsed together by `update`; bounds the fetched
+/// documents held in memory at once.
+const UPDATE_WINDOW: usize = 64;
+const UPDATE_MAX_IN_FLIGHT: usize = 16;
+const USER_AGENT: &str = concat!("webspec-index/", env!("CARGO_PKG_VERSION"));
 
 // ── HTML cache ────────────────────────────────────────────────────────────────
 
@@ -42,58 +46,35 @@ pub(crate) fn sanitize_for_fs(name: &str) -> String {
         .collect()
 }
 
-/// Base directory for HTML cache files: `<db_dir>/html/`.
-#[cfg(feature = "native")]
-pub(crate) fn html_cache_dir(db_dir: &Path) -> PathBuf {
-    db_dir.join("html")
+/// `<db file dir>/html` from `conn.path()`; `None` for in-memory connections,
+/// which never touch a cache.
+pub(crate) fn html_cache_dir_for(conn: &Connection) -> Option<PathBuf> {
+    let path = conn.path().filter(|path| !path.is_empty())?;
+    Some(Path::new(path).parent()?.join("html"))
 }
 
-/// Path for a cached HTML snapshot:
-/// `<db_dir>/html/<sanitized_spec>/<identity>.html`
+/// Path for a cached HTML snapshot under the HTML cache directory
+/// `cache_dir`: `<cache_dir>/<sanitized_spec>/<identity>.html`
 ///
 /// `identity` is the upstream identity string (commit sha or `hash:<hex>`).
 /// The portion after the last `:` is used so `hash:abc123` becomes `abc123.html`.
-#[cfg(feature = "native")]
-pub fn html_cache_path(db_dir: &Path, spec_name: &str, identity: &str) -> PathBuf {
-    let dir = html_cache_dir(db_dir).join(sanitize_for_fs(spec_name));
+pub fn html_cache_path(cache_dir: &Path, spec_name: &str, identity: &str) -> PathBuf {
+    let dir = cache_dir.join(sanitize_for_fs(spec_name));
     let file_stem = identity.rsplit(':').next().unwrap_or(identity);
     dir.join(format!("{}.html", sanitize_for_fs(file_stem)))
-}
-
-/// Decision made by the cache gate before a live fetch.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum CacheDecision {
-    /// The cached file is valid; parse from it instead of downloading.
-    Cached,
-    /// No valid cache; proceed with a live download.
-    Download,
-}
-
-/// Pure logic: decide whether to serve from cache.
-///
-/// `cache_exists` — the cache file is present on disk.
-/// `sha_matches`  — the stored identity equals the upstream identity.
-/// `refetch`      — the caller passed `--refetch`; always forces a download.
-pub(crate) fn decide_cache(cache_exists: bool, sha_matches: bool, refetch: bool) -> CacheDecision {
-    if !refetch && cache_exists && sha_matches {
-        CacheDecision::Cached
-    } else {
-        CacheDecision::Download
-    }
 }
 
 /// Write HTML to the on-disk cache for `spec_name` with the given identity,
 /// deleting any previous snapshot file in that spec's cache directory first
 /// (one file per spec).
-#[cfg(feature = "native")]
 pub(crate) fn write_html_cache(
-    db_dir: &Path,
+    cache_dir: &Path,
     spec_name: &str,
     identity: &str,
     html: &str,
 ) -> anyhow::Result<()> {
     use std::fs;
-    let spec_dir = html_cache_dir(db_dir).join(sanitize_for_fs(spec_name));
+    let spec_dir = cache_dir.join(sanitize_for_fs(spec_name));
     fs::create_dir_all(&spec_dir)?;
     // Delete old snapshots for this spec.
     for entry in fs::read_dir(&spec_dir)? {
@@ -102,26 +83,30 @@ pub(crate) fn write_html_cache(
             let _ = fs::remove_file(entry.path());
         }
     }
-    let target = html_cache_path(db_dir, spec_name, identity);
+    let target = html_cache_path(cache_dir, spec_name, identity);
     fs::write(&target, html)?;
     Ok(())
 }
 
 /// Read cached HTML for the given spec and identity. Returns `None` when the
 /// file does not exist.
-#[cfg(feature = "native")]
-pub(crate) fn read_html_cache(db_dir: &Path, spec_name: &str, identity: &str) -> Option<String> {
-    let path = html_cache_path(db_dir, spec_name, identity);
+pub(crate) fn read_html_cache(cache_dir: &Path, spec_name: &str, identity: &str) -> Option<String> {
+    let path = html_cache_path(cache_dir, spec_name, identity);
     std::fs::read_to_string(&path).ok()
 }
 
-/// Return the db directory (parent of `index.db`).
-#[cfg(feature = "native")]
-pub(crate) fn db_dir() -> PathBuf {
-    crate::db::get_db_path()
-        .parent()
-        .expect("db path has no parent")
-        .to_path_buf()
+/// The cached HTML of `spec_name` stored under `content_hash` in `conn`'s cache.
+fn cached_html_for(conn: &Connection, spec_name: &str, content_hash: &str) -> Option<String> {
+    read_html_cache(&html_cache_dir_for(conn)?, spec_name, content_hash)
+}
+
+fn cache_html_for(conn: &Connection, spec_name: &str, content_hash: &str, html: &str) {
+    let Some(cache_dir) = html_cache_dir_for(conn) else {
+        return;
+    };
+    if let Err(e) = write_html_cache(&cache_dir, spec_name, content_hash, html) {
+        eprintln!("warning: {spec_name}: could not write HTML cache: {e}");
+    }
 }
 
 fn is_fresh(last_checked: &DateTime<Utc>, now: &DateTime<Utc>) -> bool {
@@ -151,22 +136,47 @@ fn hash_html(html: &str) -> String {
     hash_bytes(html.as_bytes())
 }
 
+/// What the last response said about the source document: its HTTP validators
+/// and the hash of its body.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct SourceValidators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub source_hash: Option<String>,
+}
+
+impl SourceValidators {
+    fn stored(state: Option<&queries::UpdateCheckState>) -> Self {
+        state.map_or_else(Self::default, |state| Self {
+            etag: state.etag.clone(),
+            last_modified: state.last_modified.clone(),
+            source_hash: state.source_hash.clone(),
+        })
+    }
+}
+
 fn store_update_check(
     conn: &Connection,
     spec_id: i64,
     now: &DateTime<Utc>,
     last_indexed: Option<&DateTime<Utc>>,
     content_hash: Option<&str>,
+    validators: &SourceValidators,
 ) -> Result<()> {
     let checked = now.to_rfc3339();
     let indexed = last_indexed.map(|t| t.to_rfc3339());
     write::record_update_check(
         conn,
         spec_id,
-        &checked,
-        indexed.as_deref(),
-        content_hash,
-        Some(parse::INDEX_VERSION),
+        &write::UpdateCheckRecord {
+            last_checked: &checked,
+            last_indexed: indexed.as_deref(),
+            content_hash,
+            index_version: Some(parse::INDEX_VERSION),
+            etag: validators.etag.as_deref(),
+            last_modified: validators.last_modified.as_deref(),
+            source_hash: validators.source_hash.as_deref(),
+        },
     )
 }
 
@@ -182,6 +192,7 @@ fn sync_from_html(
     state: Option<queries::UpdateCheckState>,
     now: &DateTime<Utc>,
     force: bool,
+    validators: &SourceValidators,
 ) -> Result<(i64, bool)> {
     let content_hash = hash_html(&html);
 
@@ -200,6 +211,7 @@ fn sync_from_html(
                 now,
                 state.last_indexed.as_ref(),
                 Some(&content_hash),
+                validators,
             )?;
             return Ok((snapshot_id, false));
         }
@@ -221,6 +233,7 @@ fn sync_from_html(
         provider_name,
         prepared,
         now,
+        validators,
     )
 }
 
@@ -255,7 +268,6 @@ fn snapshot_is_reusable(conn: &Connection, snapshot_id: i64) -> Result<bool> {
 
 /// Parse, index and store one HTML document into `conn`, returning the snapshot
 /// id. Used by tests and examples that already hold the HTML string.
-#[cfg(feature = "native")]
 pub fn index_html(
     conn: &Connection,
     spec_name: &str,
@@ -273,8 +285,16 @@ pub fn index_html(
     })?;
     let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
     let now = Utc::now();
-    let (snapshot_id, _) =
-        write_parsed_html(conn, spec_id, spec_name, base_url, provider, prepared, &now)?;
+    let (snapshot_id, _) = write_parsed_html(
+        conn,
+        spec_id,
+        spec_name,
+        base_url,
+        provider,
+        prepared,
+        &now,
+        &SourceValidators::default(),
+    )?;
     Ok(snapshot_id)
 }
 
@@ -287,6 +307,7 @@ fn write_parsed_html(
     provider_name: &str,
     prepared: ParsedHtml,
     now: &DateTime<Utc>,
+    validators: &SourceValidators,
 ) -> Result<(i64, bool)> {
     let ParsedHtml {
         content_hash,
@@ -349,7 +370,14 @@ fn write_parsed_html(
             )?;
         }
 
-        store_update_check(conn, spec_id, now, Some(now), Some(&content_hash))?;
+        store_update_check(
+            conn,
+            spec_id,
+            now,
+            Some(now),
+            Some(&content_hash),
+            validators,
+        )?;
         Ok((snapshot_id, true))
     })
 }
@@ -358,12 +386,12 @@ fn is_respec_source(html: &str) -> bool {
     html.contains("respec-w3c") || html.contains("respec.js") || html.contains("/respec/")
 }
 
-async fn render_via_spec_generator(url: &str) -> Result<String> {
+async fn render_via_spec_generator(url: &str, origin: Option<&str>) -> Result<String> {
     let api_url = format!(
         "https://www.w3.org/publications/spec-generator/?type=respec&url={}",
         url::form_urlencoded::byte_serialize(url.as_bytes()).collect::<String>()
     );
-    let html = fetch_raw_html(&api_url).await?;
+    let html = fetch_text(&api_url, origin).await?;
     if html.trim_start().starts_with('{') {
         anyhow::bail!(
             "spec-generator returned error: {}",
@@ -373,15 +401,20 @@ async fn render_via_spec_generator(url: &str) -> Result<String> {
     Ok(html)
 }
 
-pub(crate) async fn fetch_raw_html(url: &str) -> Result<String> {
+fn http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    let client = CLIENT.get_or_init(reqwest::Client::new);
-    let response = client
-        .get(url)
-        .header(
-            "User-Agent",
-            concat!("webspec-index/", env!("CARGO_PKG_VERSION")),
-        )
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
+/// GET `url`, from the `WEBSPEC_FETCH_ORIGIN` override when set.
+pub(crate) async fn fetch_raw_html(url: &str) -> Result<String> {
+    fetch_text(url, fetch_origin().as_deref()).await
+}
+
+async fn fetch_text(url: &str, origin: Option<&str>) -> Result<String> {
+    let response = http_client()
+        .get(effective_url(url, origin))
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
         .send()
         .await?;
     if !response.status().is_success() {
@@ -390,65 +423,171 @@ pub(crate) async fn fetch_raw_html(url: &str) -> Result<String> {
     Ok(response.text().await?)
 }
 
-async fn fetch_live_html(base_url: &str) -> Result<String> {
-    let url = if base_url.ends_with(".html") || base_url.ends_with(".txt") {
+/// The URL of a spec's document: `.html`/`.txt` URLs as given, anything else
+/// as a directory.
+fn document_url(base_url: &str) -> String {
+    if base_url.ends_with(".html") || base_url.ends_with(".txt") {
         base_url.to_string()
     } else {
         format!("{}/", base_url.trim_end_matches('/'))
-    };
-    let html = fetch_raw_html(&url).await?;
+    }
+}
 
-    if is_respec_source(&html) {
-        eprintln!(
-            "note: {} is a live ReSpec document; rendering via W3C spec-generator",
-            url
-        );
-        match render_via_spec_generator(&url).await {
-            Ok(rendered) => return Ok(rendered),
-            Err(e) => eprintln!("warning: spec-generator failed ({}), using raw HTML", e),
+/// The freshness check for a spec. `conditional` sends the stored validators
+/// and source hash, so an unchanged source costs a `304` or a hash compare;
+/// without it the document is downloaded unconditionally.
+fn candidate_for(
+    spec_id: i64,
+    spec_name: &str,
+    base_url: &str,
+    provider: &str,
+    state: Option<&queries::UpdateCheckState>,
+    conditional: bool,
+) -> Candidate {
+    let validators = if conditional {
+        SourceValidators::stored(state)
+    } else {
+        SourceValidators::default()
+    };
+    Candidate {
+        spec_id,
+        spec_name: spec_name.to_owned(),
+        base_url: base_url.to_owned(),
+        provider: provider.to_owned(),
+        etag: validators.etag,
+        last_modified: validators.last_modified,
+        source_hash: validators.source_hash,
+    }
+}
+
+/// A fetched document to parse, already written to the HTML cache.
+pub(crate) struct ChangedHtml {
+    pub html: String,
+    pub content_hash: String,
+    pub validators: SourceValidators,
+}
+
+/// A note about a freshness result, for stderr.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RefreshNote {
+    pub spec: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for RefreshNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: freshness check failed ({}); serving the cached snapshot",
+            self.spec, self.message
+        )
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AppliedFreshness {
+    /// Set when the document changed and must be parsed.
+    pub changed: Option<ChangedHtml>,
+    pub notes: Vec<RefreshNote>,
+}
+
+impl AppliedFreshness {
+    /// Print the notes to stderr and keep the changed document.
+    fn print_notes(self) -> Option<ChangedHtml> {
+        for note in &self.notes {
+            eprintln!("note: {note}");
+        }
+        self.changed
+    }
+}
+
+/// Store a freshness result. An unchanged source bumps `last_checked` and
+/// stores the new validators; a changed one is written to the HTML cache and
+/// returned for parsing; a failed check changes nothing and notes that the
+/// cached snapshot is served, or is an error when there is none.
+pub(crate) fn apply_freshness(
+    conn: &Connection,
+    candidate: &Candidate,
+    result: Freshness,
+    now: &DateTime<Utc>,
+) -> Result<AppliedFreshness> {
+    match result {
+        Freshness::NotModified {
+            etag,
+            last_modified,
+        }
+        | Freshness::SameContent {
+            etag,
+            last_modified,
+        } => {
+            let state = queries::get_update_check(conn, candidate.spec_id)?;
+            let state = state.as_ref();
+            let validators = SourceValidators {
+                etag,
+                last_modified,
+                source_hash: state.and_then(|state| state.source_hash.clone()),
+            };
+            store_update_check(
+                conn,
+                candidate.spec_id,
+                now,
+                state.and_then(|state| state.last_indexed.as_ref()),
+                state.and_then(|state| state.content_hash.as_deref()),
+                &validators,
+            )?;
+            Ok(AppliedFreshness::default())
+        }
+        Freshness::Changed {
+            html,
+            content_hash,
+            source_hash,
+            etag,
+            last_modified,
+        } => {
+            cache_html_for(conn, &candidate.spec_name, &content_hash, &html);
+            Ok(AppliedFreshness {
+                changed: Some(ChangedHtml {
+                    html,
+                    content_hash,
+                    validators: SourceValidators {
+                        etag,
+                        last_modified,
+                        source_hash: Some(source_hash),
+                    },
+                }),
+                notes: Vec::new(),
+            })
+        }
+        Freshness::Failed(message) => {
+            if queries::get_snapshot(conn, &candidate.spec_name)?.is_none() {
+                anyhow::bail!("Failed to fetch {}: {message}", candidate.base_url);
+            }
+            Ok(AppliedFreshness {
+                changed: None,
+                notes: vec![RefreshNote {
+                    spec: candidate.spec_name.clone(),
+                    message,
+                }],
+            })
         }
     }
-
-    Ok(html)
 }
 
-/// Outcome of a live-fetch attempt during a sync.
-enum FetchOutcome {
-    /// Fresh HTML that should be (re)parsed.
-    Fresh(String),
-    /// The fetch failed but a cached snapshot exists; serve it instead of failing.
-    ServeCached(i64),
-}
-
-/// Decide how to proceed after attempting a live fetch. On failure, fall back to
-/// the cached snapshot only when `allow_fallback` is set (best-effort refresh)
-/// and a cached snapshot exists; otherwise propagate the fetch error. A forced
-/// refresh disallows the fallback so failures surface instead of silently
-/// serving stale data.
-fn resolve_fetch(
-    fetched: Result<String>,
-    previous_snapshot_id: Option<i64>,
-    allow_fallback: bool,
-) -> Result<FetchOutcome> {
-    match fetched {
-        Ok(html) => Ok(FetchOutcome::Fresh(html)),
-        Err(e) => match previous_snapshot_id {
-            Some(snapshot_id) if allow_fallback => Ok(FetchOutcome::ServeCached(snapshot_id)),
-            _ => Err(e),
-        },
-    }
+/// Whether a failed freshness check may serve the cached snapshot: only when
+/// one exists, the caller allows it (the query path) and the refresh is not
+/// forced. The `update` command disallows it so a failed fetch is reported
+/// rather than hidden, and `--force` always surfaces failures.
+fn may_serve_cached(previous_snapshot_id: Option<i64>, allow_fallback: bool, force: bool) -> bool {
+    previous_snapshot_id.is_some() && allow_fallback && !force
 }
 
 /// Sync a spec, optionally falling back to the cached snapshot when the live
-/// fetch fails. `allow_fallback` is the caller's policy: the query path
-/// (`ensure_indexed`) sets it so a stale-but-cached spec is still served when
-/// offline, while the explicit `update` command clears it so fetch failures are
-/// reported rather than masquerading as success. A forced refresh never falls
-/// back regardless, so `--force` always surfaces failures.
+/// fetch fails (see [`may_serve_cached`]).
 ///
 /// `refetch` bypasses the on-disk HTML cache even when `force` is set. When
 /// `force` is true and `refetch` is false, a cached HTML file for the stored
 /// content hash is used to re-parse without a network round-trip.
+#[allow(clippy::too_many_arguments)]
 async fn sync_known_spec(
     conn: &Connection,
     spec_name: &str,
@@ -457,6 +596,7 @@ async fn sync_known_spec(
     force: bool,
     allow_fallback: bool,
     refetch: bool,
+    options: &FreshnessOptions,
 ) -> Result<(i64, bool)> {
     if provider_name == "itu" {
         return itu::sync_known_spec_pdf(conn, spec_name, base_url, force, allow_fallback).await;
@@ -466,109 +606,74 @@ async fn sync_known_spec(
     let previous_snapshot_id = queries::get_snapshot(conn, spec_name)?;
     let state = queries::get_update_check(conn, spec_id)?;
     let now = Utc::now();
+    let is_reusable = match previous_snapshot_id {
+        Some(snapshot_id) => snapshot_is_reusable(conn, snapshot_id)?,
+        None => false,
+    };
 
-    if !force {
-        if let (Some(snapshot_id), Some(sync_state)) = (previous_snapshot_id, state.as_ref()) {
-            if cache_is_current(sync_state, &now) && snapshot_is_reusable(conn, snapshot_id)? {
-                return Ok((snapshot_id, false));
-            }
+    if !force && is_reusable && state.as_ref().is_some_and(|s| cache_is_current(s, &now)) {
+        if let Some(snapshot_id) = previous_snapshot_id {
+            return Ok((snapshot_id, false));
         }
     }
 
-    // When force-updating, check the on-disk HTML cache before hitting the
-    // network. If the cache file for the stored content hash is present and
-    // --refetch was not requested, re-parse from disk rather than downloading.
-    #[cfg(feature = "native")]
     if force && !refetch {
-        if let Some(ref sync_state) = state {
-            if let Some(ref stored_hash) = sync_state.content_hash {
-                let d = db_dir();
-                let cache_exists = html_cache_path(&d, spec_name, stored_hash).exists();
-                if decide_cache(cache_exists, true, false) == CacheDecision::Cached {
-                    eprintln!("note: {spec_name}: re-parsing from on-disk cache (use --refetch to download fresh)");
-                    let html = read_html_cache(&d, spec_name, stored_hash)
-                        .ok_or_else(|| anyhow::anyhow!("cache file disappeared unexpectedly"))?;
-                    return sync_from_html(
-                        conn,
-                        spec_id,
-                        spec_name,
-                        base_url,
-                        provider_name,
-                        html,
-                        previous_snapshot_id,
-                        state,
-                        &now,
-                        force,
-                    );
-                }
+        if let Some(stored_hash) = state.as_ref().and_then(|s| s.content_hash.as_deref()) {
+            if let Some(html) = cached_html_for(conn, spec_name, stored_hash) {
+                eprintln!("note: {spec_name}: re-parsing from on-disk cache (use --refetch to download fresh)");
+                let validators = SourceValidators::stored(state.as_ref());
+                return sync_from_html(
+                    conn,
+                    spec_id,
+                    spec_name,
+                    base_url,
+                    provider_name,
+                    html,
+                    previous_snapshot_id,
+                    state,
+                    &now,
+                    force,
+                    &validators,
+                );
             }
         }
     }
 
-    let fetched = fetch_live_html(base_url).await;
-
-    // After a successful download, persist the HTML to the on-disk cache so
-    // future forced re-indexes can skip the network.
-    #[cfg(feature = "native")]
-    let fetched = fetched.inspect(|html| {
-        let d = db_dir();
-        let hash = hash_html(html);
-        if let Err(e) = write_html_cache(&d, spec_name, &hash, html) {
-            eprintln!("warning: {spec_name}: could not write HTML cache: {e}");
-        }
-    });
-
-    apply_fetch(
-        conn,
+    let conditional = !force && is_reusable && state.as_ref().is_some_and(index_is_current);
+    let candidate = candidate_for(
         spec_id,
         spec_name,
         base_url,
         provider_name,
-        fetched,
-        previous_snapshot_id,
-        state,
-        allow_fallback,
-        force,
-        &now,
-    )
-}
-
-/// Turn a live-fetch result into a synced snapshot, applying the caller's
-/// offline-fallback policy. Fall back to the cached snapshot on fetch failure
-/// only when the caller allows it (the query path) AND this is not a forced
-/// refresh — the `update` command disallows fallback so a failed fetch is
-/// reported rather than hidden, and `--force` always surfaces failures.
-///
-/// Split out of [`sync_known_spec`] so the fetch-failure branches are testable
-/// without hitting the network.
-#[allow(clippy::too_many_arguments)]
-fn apply_fetch(
-    conn: &Connection,
-    spec_id: i64,
-    spec_name: &str,
-    base_url: &str,
-    provider_name: &str,
-    fetched: Result<String>,
-    previous_snapshot_id: Option<i64>,
-    state: Option<queries::UpdateCheckState>,
-    allow_fallback: bool,
-    force: bool,
-    now: &DateTime<Utc>,
-) -> Result<(i64, bool)> {
-    match resolve_fetch(fetched, previous_snapshot_id, allow_fallback && !force)? {
-        FetchOutcome::ServeCached(snapshot_id) => Ok((snapshot_id, false)),
-        FetchOutcome::Fresh(html) => sync_from_html(
+        state.as_ref(),
+        conditional,
+    );
+    let result = check_batch(std::slice::from_ref(&candidate), options)
+        .await
+        .pop()
+        .expect("one result per candidate");
+    if let Freshness::Failed(message) = &result {
+        if !may_serve_cached(previous_snapshot_id, allow_fallback, force) {
+            anyhow::bail!("Failed to fetch {base_url}: {message}");
+        }
+    }
+    match apply_freshness(conn, &candidate, result, &now)?.print_notes() {
+        Some(changed) => sync_from_html(
             conn,
             spec_id,
             spec_name,
             base_url,
             provider_name,
-            html,
+            changed.html,
             previous_snapshot_id,
             state,
-            now,
+            &now,
             force,
+            &changed.validators,
         ),
+        None => previous_snapshot_id
+            .map(|snapshot_id| (snapshot_id, false))
+            .ok_or_else(|| anyhow::anyhow!("{spec_name}: no snapshot to serve")),
     }
 }
 
@@ -589,6 +694,7 @@ async fn sync_dynamic_spec(
         force,
         allow_fallback,
         false,
+        &FreshnessOptions::default(),
     )
     .await
 }
@@ -608,15 +714,25 @@ pub async fn ensure_indexed_dynamic(
 /// Ensure a spec is indexed and reasonably fresh.
 ///
 /// Uses a 24h freshness window based on `update_checks.last_checked`.
-/// When refreshing, fetches live HTML and re-indexes only if content hash changed.
+/// When refreshing, checks the source conditionally and re-indexes only if
+/// its content changed.
 pub async fn ensure_indexed(
     conn: &Connection,
     spec_name: &str,
     base_url: &str,
     provider_name: &str,
 ) -> Result<i64> {
-    let (snapshot_id, _) =
-        sync_known_spec(conn, spec_name, base_url, provider_name, false, true, false).await?;
+    let (snapshot_id, _) = sync_known_spec(
+        conn,
+        spec_name,
+        base_url,
+        provider_name,
+        false,
+        true,
+        false,
+        &FreshnessOptions::default(),
+    )
+    .await?;
     Ok(snapshot_id)
 }
 
@@ -641,6 +757,7 @@ pub async fn update_if_needed(
         force,
         false,
         refetch,
+        &FreshnessOptions::default(),
     )
     .await?;
     Ok(updated.then_some(snapshot_id))
@@ -648,100 +765,138 @@ pub async fn update_if_needed(
 
 /// Update all specs in the registry.
 /// Returns vector of (spec_name, Option<snapshot_id>) pairs.
+///
+/// Unforced, the specs outside the freshness window are checked with one
+/// concurrent conditional-GET batch per window; a failed check keeps the
+/// cached snapshot. `force` re-parses from the HTML cache, or downloads
+/// unconditionally with `refetch` or when the cache is missing, and surfaces
+/// failures.
 pub async fn update_all_specs(
     conn: &Connection,
     specs: &[(String, String, String)], // (name, base_url, provider)
     force: bool,
     refetch: bool,
 ) -> Vec<(String, Result<Option<i64>>)> {
+    let options = FreshnessOptions {
+        max_in_flight: UPDATE_MAX_IN_FLIGHT,
+        ..FreshnessOptions::default()
+    };
+    update_specs_with(conn, specs, force, refetch, &options).await
+}
+
+async fn update_specs_with(
+    conn: &Connection,
+    specs: &[(String, String, String)],
+    force: bool,
+    refetch: bool,
+    options: &FreshnessOptions,
+) -> Vec<(String, Result<Option<i64>>)> {
     let threads = pipeline::parse_threads();
-    let mut results = Vec::with_capacity(specs.len());
-    let mut cursor = 0;
-    while cursor < specs.len() {
-        // The PDF path has a separate parser and cache policy. Keep it on its
-        // existing path, between bounded HTML batches.
-        if specs[cursor].2 == "itu" {
-            let (name, base_url, provider) = &specs[cursor];
-            let result = update_if_needed(conn, name, base_url, provider, force, refetch).await;
-            results.push((name.clone(), result));
-            cursor += 1;
-            continue;
+    let mut results: Vec<Option<Result<Option<i64>>>> = specs.iter().map(|_| None).collect();
+    let mut html_specs = Vec::new();
+    for (index, (name, base_url, provider)) in specs.iter().enumerate() {
+        // The PDF path has a separate parser and cache policy.
+        if provider == "itu" {
+            results[index] =
+                Some(update_if_needed(conn, name, base_url, provider, force, refetch).await);
+        } else {
+            html_specs.push(index);
         }
+    }
 
-        let end = (cursor + UPDATE_PARALLELISM).min(specs.len());
-        let end = (cursor..end).find(|&i| specs[i].2 == "itu").unwrap_or(end);
-        let batch = &specs[cursor..end];
-        let mut fetches = Vec::new();
-        let mut prepared = BTreeMap::new();
-
-        for (index, (name, base_url, provider)) in batch.iter().enumerate() {
+    for window in html_specs.chunks(UPDATE_WINDOW) {
+        let mut cached = Vec::new();
+        let mut to_check = Vec::new();
+        for &index in window {
+            let (name, base_url, provider) = &specs[index];
             match plan_html_update(conn, name, base_url, provider, force, refetch) {
-                Ok(HtmlUpdatePlan::Current) => {
-                    prepared.insert(index, Ok(None));
+                Ok(HtmlUpdatePlan::Current) => results[index] = Some(Ok(None)),
+                Ok(HtmlUpdatePlan::NeedsWork(plan)) if plan.cached_html.is_some() => {
+                    cached.push((index, plan));
                 }
-                Ok(HtmlUpdatePlan::NeedsWork(plan)) => {
-                    let handle = tokio::spawn(async move {
-                        let mut plan = plan;
-                        let result = fetch_html_update(&mut plan).await;
-                        (plan, result)
-                    });
-                    fetches.push((index, handle));
-                }
-                Err(e) => {
-                    prepared.insert(index, Err(e));
-                }
+                Ok(HtmlUpdatePlan::NeedsWork(plan)) => to_check.push((index, plan)),
+                Err(e) => results[index] = Some(Err(e)),
             }
         }
 
-        let mut fetched = Vec::with_capacity(fetches.len());
-        for (index, handle) in fetches {
-            match handle.await {
-                Ok((plan, result)) => fetched.push((index, plan, result)),
-                Err(e) => {
-                    prepared.insert(index, Err(anyhow::anyhow!("update worker failed: {e}")));
-                }
-            }
+        let candidates: Vec<_> = to_check.iter().map(|(_, plan)| plan.candidate()).collect();
+        let checked = check_batch(&candidates, options).await;
+        let mut ready = Vec::with_capacity(cached.len() + to_check.len());
+        for (index, mut plan) in cached {
+            let html = plan.cached_html.take().expect("partitioned on cached_html");
+            let validators = SourceValidators::stored(plan.state.as_ref());
+            let content_hash = hash_html(&html);
+            let prepared = prepare_html_update(&mut plan, html, content_hash, validators);
+            ready.push((index, plan, prepared));
         }
-        let mut fetched = fetched.into_iter().peekable();
-        while fetched.peek().is_some() {
+        for (((index, mut plan), candidate), result) in
+            to_check.into_iter().zip(&candidates).zip(checked)
+        {
+            let outcome = if plan.force {
+                match result {
+                    Freshness::Failed(message) => Err(anyhow::anyhow!(
+                        "Failed to fetch {}: {message}",
+                        plan.base_url
+                    )),
+                    result => apply_freshness(conn, candidate, result, &plan.now),
+                }
+            } else {
+                apply_freshness(conn, candidate, result, &plan.now)
+            };
+            let prepared = match outcome.map(AppliedFreshness::print_notes) {
+                Ok(Some(changed)) => prepare_html_update(
+                    &mut plan,
+                    changed.html,
+                    changed.content_hash,
+                    changed.validators,
+                ),
+                Ok(None) => PreparedHtml::Done(Ok(None)),
+                Err(e) => PreparedHtml::Done(Err(e)),
+            };
+            ready.push((index, plan, prepared));
+        }
+
+        let mut ready = ready.into_iter().peekable();
+        while ready.peek().is_some() {
             let mut jobs = Vec::new();
             let mut pending = Vec::new();
-            for (index, plan, result) in fetched.by_ref().take(pipeline::chunk_len(threads)) {
-                let ready = match result {
-                    Ok(FetchedHtml::Changed(job)) => {
+            for (index, plan, prepared) in ready.by_ref().take(pipeline::chunk_len(threads)) {
+                let prepared = match prepared {
+                    PreparedHtml::Parse(job, validators) => {
                         jobs.push(job);
-                        None
+                        PreparedHtml::Parsing(validators)
                     }
-                    Ok(FetchedHtml::Unchanged(hash)) => {
-                        Some(Ok(PreparedHtmlUpdate::Unchanged(hash)))
-                    }
-                    Err(e) => Some(Err(e)),
+                    other => other,
                 };
-                pending.push((index, plan, ready));
+                pending.push((index, plan, prepared));
             }
             let mut parsed = parse_chunk(jobs, threads).await.into_iter();
-            for (index, plan, ready) in pending {
-                let update = ready.unwrap_or_else(|| {
-                    parsed
+            for (index, plan, prepared) in pending {
+                results[index] = Some(match prepared {
+                    PreparedHtml::Done(result) => result,
+                    PreparedHtml::Unchanged(content_hash, validators) => {
+                        commit_unchanged(conn, &plan, &content_hash, &validators)
+                    }
+                    PreparedHtml::Parsing(validators) => parsed
                         .next()
                         .expect("one parse result per job")
-                        .map(|parsed| PreparedHtmlUpdate::Parsed(Box::new(parsed)))
+                        .and_then(|parsed| commit_parsed(conn, &plan, parsed, &validators)),
+                    PreparedHtml::Parse(..) => unreachable!("queued for parsing above"),
                 });
-                prepared.insert(
-                    index,
-                    update.and_then(|update| commit_html_update(conn, *plan, update)),
-                );
             }
         }
-        for (index, (name, _, _)) in batch.iter().enumerate() {
-            let result = prepared
-                .remove(&index)
-                .expect("every spec has an update result");
-            results.push((name.clone(), result));
-        }
-        cursor = end;
     }
-    results
+
+    specs
+        .iter()
+        .zip(results)
+        .map(|((name, _, _), result)| {
+            (
+                name.clone(),
+                result.expect("every spec has an update result"),
+            )
+        })
+        .collect()
 }
 
 struct HtmlUpdateWork {
@@ -758,19 +913,38 @@ struct HtmlUpdateWork {
     previous_memo: Option<Vec<u8>>,
 }
 
+impl HtmlUpdateWork {
+    /// Whether the stored snapshot may stand when the fetched content hash
+    /// equals the stored one.
+    fn unchanged_content_reusable(&self) -> bool {
+        !self.force
+            && self.can_reuse_unchanged
+            && self.previous_snapshot_id.is_some()
+            && self.state.as_ref().is_some_and(index_is_current)
+    }
+
+    fn candidate(&self) -> Candidate {
+        candidate_for(
+            self.spec_id,
+            &self.spec_name,
+            &self.base_url,
+            &self.provider_name,
+            self.state.as_ref(),
+            self.unchanged_content_reusable(),
+        )
+    }
+}
+
 enum HtmlUpdatePlan {
     Current,
     NeedsWork(Box<HtmlUpdateWork>),
 }
 
-enum FetchedHtml {
-    Unchanged(String),
-    Changed(ParseJob),
-}
-
-enum PreparedHtmlUpdate {
-    Unchanged(String),
-    Parsed(Box<ParsedHtml>),
+enum PreparedHtml {
+    Done(Result<Option<i64>>),
+    Unchanged(String, SourceValidators),
+    Parse(ParseJob, SourceValidators),
+    Parsing(SourceValidators),
 }
 
 /// Parse `jobs` off the async runtime. Results are in job order.
@@ -816,16 +990,10 @@ fn plan_html_update(
     }
 
     let cached_html = if force && !refetch {
-        match state
+        state
             .as_ref()
             .and_then(|state| state.content_hash.as_deref())
-        {
-            Some(hash) if html_cache_path(&db_dir(), spec_name, hash).exists() => Some(
-                read_html_cache(&db_dir(), spec_name, hash)
-                    .ok_or_else(|| anyhow::anyhow!("cache file disappeared unexpectedly"))?,
-            ),
-            _ => None,
-        }
+            .and_then(|hash| cached_html_for(conn, spec_name, hash))
     } else {
         None
     };
@@ -853,71 +1021,71 @@ fn plan_html_update(
     })))
 }
 
-async fn fetch_html_update(plan: &mut HtmlUpdateWork) -> Result<FetchedHtml> {
-    let html = if let Some(html) = plan.cached_html.take() {
-        html
-    } else {
-        let html = fetch_live_html(&plan.base_url).await?;
-        let hash = hash_html(&html);
-        if let Err(e) = write_html_cache(&db_dir(), &plan.spec_name, &hash, &html) {
-            eprintln!(
-                "warning: {}: could not write HTML cache: {e}",
-                plan.spec_name
-            );
-        }
-        html
-    };
-    let content_hash = hash_html(&html);
-    if !plan.force
-        && plan.can_reuse_unchanged
-        && plan.previous_snapshot_id.is_some()
-        && plan.state.as_ref().is_some_and(|state| {
-            state.content_hash.as_deref() == Some(content_hash.as_str()) && index_is_current(state)
-        })
+/// Decide whether `html` (hashing to `content_hash`) needs a parse: content
+/// equal to the stored snapshot's only refreshes the update check.
+fn prepare_html_update(
+    plan: &mut HtmlUpdateWork,
+    html: String,
+    content_hash: String,
+    validators: SourceValidators,
+) -> PreparedHtml {
+    if plan.unchanged_content_reusable()
+        && plan
+            .state
+            .as_ref()
+            .is_some_and(|state| state.content_hash.as_deref() == Some(content_hash.as_str()))
     {
-        return Ok(FetchedHtml::Unchanged(content_hash));
+        return PreparedHtml::Unchanged(content_hash, validators);
     }
-    Ok(FetchedHtml::Changed(ParseJob {
-        spec_name: plan.spec_name.clone(),
-        base_url: plan.base_url.clone(),
-        html: Arc::new(html),
-        content_hash,
-        previous_memo: decode_stored_memo(plan.previous_memo.take()),
-        fragment: None,
-    }))
+    PreparedHtml::Parse(
+        ParseJob {
+            spec_name: plan.spec_name.clone(),
+            base_url: plan.base_url.clone(),
+            html: Arc::new(html),
+            content_hash,
+            previous_memo: decode_stored_memo(plan.previous_memo.take()),
+            fragment: None,
+        },
+        validators,
+    )
 }
 
-fn commit_html_update(
+fn commit_unchanged(
     conn: &Connection,
-    plan: HtmlUpdateWork,
-    update: PreparedHtmlUpdate,
+    plan: &HtmlUpdateWork,
+    content_hash: &str,
+    validators: &SourceValidators,
 ) -> Result<Option<i64>> {
-    match update {
-        PreparedHtmlUpdate::Unchanged(content_hash) => {
-            store_update_check(
-                conn,
-                plan.spec_id,
-                &plan.now,
-                plan.state
-                    .as_ref()
-                    .and_then(|state| state.last_indexed.as_ref()),
-                Some(&content_hash),
-            )?;
-            Ok(None)
-        }
-        PreparedHtmlUpdate::Parsed(parsed) => {
-            let (snapshot_id, _) = write_parsed_html(
-                conn,
-                plan.spec_id,
-                &plan.spec_name,
-                &plan.base_url,
-                &plan.provider_name,
-                *parsed,
-                &plan.now,
-            )?;
-            Ok(Some(snapshot_id))
-        }
-    }
+    store_update_check(
+        conn,
+        plan.spec_id,
+        &plan.now,
+        plan.state
+            .as_ref()
+            .and_then(|state| state.last_indexed.as_ref()),
+        Some(content_hash),
+        validators,
+    )?;
+    Ok(None)
+}
+
+fn commit_parsed(
+    conn: &Connection,
+    plan: &HtmlUpdateWork,
+    parsed: ParsedHtml,
+    validators: &SourceValidators,
+) -> Result<Option<i64>> {
+    let (snapshot_id, _) = write_parsed_html(
+        conn,
+        plan.spec_id,
+        &plan.spec_name,
+        &plan.base_url,
+        &plan.provider_name,
+        parsed,
+        &plan.now,
+        validators,
+    )?;
+    Ok(Some(snapshot_id))
 }
 
 /// Re-parse one or all indexed specs from the on-disk HTML cache, writing
@@ -926,7 +1094,6 @@ fn commit_html_update(
 /// Specs that have no cached HTML file are reported to stderr and skipped.
 /// `spec` filters to a single spec; `providers` filters by provider name
 /// (empty = all). Returns `(spec_name, Option<snapshot_id>)` pairs.
-#[cfg(feature = "native")]
 pub async fn reparse_specs(
     conn: &Connection,
     spec: Option<&str>,
@@ -942,15 +1109,15 @@ pub async fn reparse_specs(
             spec_ok && prov_ok
         })
         .collect();
-    reparse_cached(conn, &db_dir(), &filtered).await
+    reparse_cached(conn, html_cache_dir_for(conn).as_deref(), &filtered).await
 }
 
-/// Re-parse `specs` from the HTML cache under `cache_dir`, parsing each chunk
-/// in parallel and writing its results in spec order before reading the next.
-#[cfg(feature = "native")]
+/// Re-parse `specs` from the HTML cache directory `cache_dir`, parsing each
+/// chunk in parallel and writing its results in spec order before reading the
+/// next.
 async fn reparse_cached(
     conn: &Connection,
-    cache_dir: &Path,
+    cache_dir: Option<&Path>,
     specs: &[(String, String, String)],
 ) -> Result<Vec<(String, Option<i64>)>> {
     let now = Utc::now();
@@ -964,7 +1131,7 @@ async fn reparse_cached(
             let spec_id = write::insert_or_get_spec(conn, name, base_url, provider)?;
             let state = queries::get_update_check(conn, spec_id)?;
             let html = match state.as_ref().and_then(|s| s.content_hash.as_deref()) {
-                Some(hash) => match read_html_cache(cache_dir, name, hash) {
+                Some(hash) => match cache_dir.and_then(|dir| read_html_cache(dir, name, hash)) {
                     Some(html) => html,
                     None => {
                         eprintln!("reparse: {name}: no cache file found, skipping");
@@ -996,12 +1163,12 @@ async fn reparse_cached(
                 previous_memo: memo,
                 fragment: None,
             });
-            pending.push(Some(spec_id));
+            pending.push(Some((spec_id, SourceValidators::stored(state.as_ref()))));
         }
 
         let mut parsed = parse_chunk(jobs, threads).await.into_iter();
         for ((name, base_url, provider), spec_id) in chunk.iter().zip(pending) {
-            let Some(spec_id) = spec_id else {
+            let Some((spec_id, validators)) = spec_id else {
                 results.push((name.clone(), None));
                 continue;
             };
@@ -1009,7 +1176,16 @@ async fn reparse_cached(
                 .next()
                 .expect("one parse result per job")
                 .and_then(|prepared| {
-                    write_parsed_html(conn, spec_id, name, base_url, provider, prepared, &now)
+                    write_parsed_html(
+                        conn,
+                        spec_id,
+                        name,
+                        base_url,
+                        provider,
+                        prepared,
+                        &now,
+                        &validators,
+                    )
                 });
             match written {
                 Ok((snapshot_id, _)) => results.push((name.clone(), Some(snapshot_id))),
@@ -1109,12 +1285,17 @@ mod tests {
             can_reuse_unchanged: false,
             previous_memo: None,
         };
-        let FetchedHtml::Changed(job) = fetch_html_update(&mut plan).await.unwrap() else {
+        let html = plan.cached_html.take().unwrap();
+        let content_hash = hash_html(&html);
+        let PreparedHtml::Parse(job, validators) =
+            prepare_html_update(&mut plan, html, content_hash, SourceValidators::default())
+        else {
             panic!("a forced update parses");
         };
         let parsed = parse_chunk(vec![job], 1).await.pop().unwrap().unwrap();
-        let update = PreparedHtmlUpdate::Parsed(Box::new(parsed));
-        let snapshot_id = commit_html_update(&conn, plan, update).unwrap().unwrap();
+        let snapshot_id = commit_parsed(&conn, &plan, parsed, &validators)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             queries::get_snapshot(&conn, "PREPARED").unwrap(),
             Some(snapshot_id)
@@ -1193,44 +1374,6 @@ mod tests {
         assert_eq!(new_heading, 1);
     }
 
-    // ── cache decision ────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_decide_cache_all_present_no_refetch() {
-        assert_eq!(
-            decide_cache(true, true, false),
-            CacheDecision::Cached,
-            "file present, sha matches, no refetch → serve cache"
-        );
-    }
-
-    #[test]
-    fn test_decide_cache_refetch_overrides() {
-        assert_eq!(
-            decide_cache(true, true, true),
-            CacheDecision::Download,
-            "--refetch forces download even when cache is valid"
-        );
-    }
-
-    #[test]
-    fn test_decide_cache_no_file() {
-        assert_eq!(
-            decide_cache(false, true, false),
-            CacheDecision::Download,
-            "no cache file → download"
-        );
-    }
-
-    #[test]
-    fn test_decide_cache_sha_mismatch() {
-        assert_eq!(
-            decide_cache(true, false, false),
-            CacheDecision::Download,
-            "sha mismatch → download"
-        );
-    }
-
     // ── filesystem cache helpers ──────────────────────────────────────────────
 
     #[cfg(feature = "native")]
@@ -1287,70 +1430,20 @@ mod tests {
             last_indexed: None,
             content_hash: Some("hash".to_string()),
             index_version: index_version.map(str::to_string),
+            etag: None,
+            last_modified: None,
+            source_hash: None,
         }
     }
 
-    // On fetch failure, resolve_fetch falls back to a cached snapshot only when
-    // fallback is allowed and a snapshot exists; otherwise it propagates the error.
+    // A failed check serves the cached snapshot only on the query path
+    // (fallback allowed, not forced) and only when a snapshot exists.
     #[test]
-    fn test_resolve_fetch() {
-        // Success -> parse the fresh HTML regardless of cache/fallback state.
-        match resolve_fetch(Ok("<html></html>".to_string()), None, true).unwrap() {
-            FetchOutcome::Fresh(html) => assert_eq!(html, "<html></html>"),
-            FetchOutcome::ServeCached(_) => panic!("expected Fresh on success"),
-        }
-
-        // Failure, fallback allowed, cached snapshot present -> serve the cache.
-        match resolve_fetch(Err(anyhow::anyhow!("offline")), Some(42), true).unwrap() {
-            FetchOutcome::ServeCached(id) => assert_eq!(id, 42),
-            FetchOutcome::Fresh(_) => panic!("expected ServeCached on failure with cache"),
-        }
-
-        // Failure with no cached snapshot -> propagate the error.
-        assert!(resolve_fetch(Err(anyhow::anyhow!("offline")), None, true).is_err());
-
-        // Failure with a cache but fallback disallowed (e.g. --force) -> propagate.
-        assert!(resolve_fetch(Err(anyhow::anyhow!("offline")), Some(42), false).is_err());
-    }
-
-    // apply_fetch encodes the caller's fallback policy (`allow_fallback && !force`)
-    // over a real cached snapshot: the query path serves the cache when offline,
-    // while `update` (no fallback) and any `--force` refresh surface the failure.
-    #[test]
-    fn test_apply_fetch_fallback_policy() {
-        let conn = db::open_test_db().unwrap();
-        let spec_id =
-            write::insert_or_get_spec(&conn, "TEST", "https://example.test", "test").unwrap();
-        let cached =
-            write::insert_snapshot(&conn, spec_id, "hash:cached", "2026-01-01T00:00:00Z").unwrap();
-        let now = fixed_now();
-
-        let run = |allow_fallback: bool, force: bool| {
-            apply_fetch(
-                &conn,
-                spec_id,
-                "TEST",
-                "https://example.test",
-                "test",
-                Err(anyhow::anyhow!("offline")),
-                Some(cached),
-                None,
-                allow_fallback,
-                force,
-                &now,
-            )
-        };
-
-        // Query path (fallback allowed, not forced) -> serve the cached snapshot.
-        let (id, updated) = run(true, false).unwrap();
-        assert_eq!(id, cached);
-        assert!(!updated);
-
-        // update command (fallback disallowed) -> surface the fetch failure.
-        assert!(run(false, false).is_err());
-
-        // Forced refresh always surfaces the failure, even on the query path.
-        assert!(run(true, true).is_err());
+    fn failed_check_serves_the_cache_only_on_the_unforced_query_path() {
+        assert!(may_serve_cached(Some(42), true, false));
+        assert!(!may_serve_cached(None, true, false));
+        assert!(!may_serve_cached(Some(42), false, false));
+        assert!(!may_serve_cached(Some(42), true, true));
     }
 
     #[test]
@@ -1370,6 +1463,7 @@ mod tests {
             None,
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         conn.execute_batch("CREATE TRIGGER reject_replacement BEFORE INSERT ON sections
@@ -1385,6 +1479,7 @@ mod tests {
             queries::get_update_check(&conn, spec_id).unwrap(),
             &now,
             true,
+            &SourceValidators::default(),
         );
         assert!(result.is_err());
         let old_sections: i64 = conn
@@ -1451,6 +1546,7 @@ mod tests {
             None,
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(updated1, "first index should parse");
@@ -1473,6 +1569,7 @@ mod tests {
             state,
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(!updated2, "unchanged content + current parser should skip");
@@ -1493,6 +1590,7 @@ mod tests {
             Some(stale),
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(
@@ -1523,6 +1621,7 @@ mod tests {
             None,
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
 
@@ -1538,6 +1637,7 @@ mod tests {
             state.clone(),
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(!updated_unforced, "unforced sync still skips");
@@ -1553,6 +1653,7 @@ mod tests {
             state,
             &now,
             true,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(
@@ -1569,9 +1670,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_dir: PathBuf = dir.path().to_path_buf();
 
-        // Override SPEC_INDEX_TEST_DB so db_dir() returns our temp dir's db.
-        // We can't easily override db_dir(), so we call reparse_specs directly
-        // with a connection rather than through the public API.
         let conn = db::open_test_db().unwrap();
         let spec_id =
             write::insert_or_get_spec(&conn, "REPARSE-TEST", "https://example.test", "test")
@@ -1591,6 +1689,7 @@ mod tests {
             None,
             &now,
             false,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(snap1 > 0);
@@ -1622,6 +1721,7 @@ mod tests {
             state,
             &now,
             true,
+            &SourceValidators::default(),
         )
         .unwrap();
         assert!(updated, "force=true should cause re-index");
@@ -1678,7 +1778,7 @@ mod tests {
             })
             .collect();
 
-        let results = reparse_cached(&reparsed, cache.path(), &listed)
+        let results = reparse_cached(&reparsed, Some(cache.path()), &listed)
             .await
             .unwrap();
 
@@ -1697,5 +1797,198 @@ mod tests {
             assert!(!rows.is_empty());
             assert_eq!(rows, logical_rows(&expected, want), "{spec}");
         }
+    }
+
+    fn seeded_candidate(conn: &Connection) -> Candidate {
+        let html = "<h2 id=\"seed\">Seed</h2>".to_string();
+        index_html(conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg", html).unwrap();
+        let spec_id =
+            write::insert_or_get_spec(conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
+                .unwrap();
+        candidate_for(
+            spec_id,
+            "DOM",
+            "https://dom.spec.whatwg.org/",
+            "whatwg",
+            queries::get_update_check(conn, spec_id).unwrap().as_ref(),
+            true,
+        )
+    }
+
+    #[test]
+    fn failed_freshness_changes_nothing_and_notes_the_cached_snapshot() {
+        let conn = db::open_test_db().unwrap();
+        let candidate = seeded_candidate(&conn);
+        let before = queries::get_update_check(&conn, candidate.spec_id)
+            .unwrap()
+            .unwrap();
+
+        let applied = apply_freshness(
+            &conn,
+            &candidate,
+            Freshness::Failed("HTTP 503".into()),
+            &Utc::now(),
+        )
+        .unwrap();
+
+        assert!(applied.changed.is_none());
+        assert_eq!(
+            applied.notes,
+            vec![RefreshNote {
+                spec: "DOM".into(),
+                message: "HTTP 503".into()
+            }]
+        );
+        assert_eq!(
+            applied.notes[0].to_string(),
+            "DOM: freshness check failed (HTTP 503); serving the cached snapshot"
+        );
+        let after = queries::get_update_check(&conn, candidate.spec_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.last_checked, before.last_checked);
+    }
+
+    #[test]
+    fn failed_freshness_without_a_snapshot_is_an_error() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")
+                .unwrap();
+        let candidate = candidate_for(
+            spec_id,
+            "DOM",
+            "https://dom.spec.whatwg.org/",
+            "whatwg",
+            None,
+            false,
+        );
+        let result = apply_freshness(
+            &conn,
+            &candidate,
+            Freshness::Failed("HTTP 503".into()),
+            &Utc::now(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn not_modified_bumps_last_checked_and_stores_validators() {
+        let conn = db::open_test_db().unwrap();
+        let candidate = seeded_candidate(&conn);
+        let before = queries::get_update_check(&conn, candidate.spec_id)
+            .unwrap()
+            .unwrap();
+        let later = before.last_checked + chrono::Duration::hours(25);
+
+        let applied = apply_freshness(
+            &conn,
+            &candidate,
+            Freshness::NotModified {
+                etag: Some("W/\"1\"".into()),
+                last_modified: None,
+            },
+            &later,
+        )
+        .unwrap();
+
+        assert!(applied.changed.is_none());
+        let after = queries::get_update_check(&conn, candidate.spec_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.last_checked, later);
+        assert_eq!(after.etag.as_deref(), Some("W/\"1\""));
+        assert_eq!(after.content_hash, before.content_hash);
+        assert_eq!(after.last_indexed, before.last_indexed);
+    }
+
+    #[test]
+    fn html_cache_follows_the_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open_db_at(&dir.path().join("index.db")).unwrap();
+        assert_eq!(html_cache_dir_for(&conn), Some(dir.path().join("html")));
+        let candidate = seeded_candidate(&conn);
+        let changed = Freshness::Changed {
+            html: "<p>new</p>".into(),
+            content_hash: "abc".into(),
+            source_hash: "abc".into(),
+            etag: None,
+            last_modified: None,
+        };
+        apply_freshness(&conn, &candidate, changed, &Utc::now()).unwrap();
+        assert!(html_cache_path(&dir.path().join("html"), "DOM", "abc").exists());
+
+        let memory = db::open_test_db().unwrap();
+        assert_eq!(html_cache_dir_for(&memory), None);
+        let candidate = seeded_candidate(&memory);
+        let changed = Freshness::Changed {
+            html: "<p>new</p>".into(),
+            content_hash: "abc".into(),
+            source_hash: "abc".into(),
+            etag: None,
+            last_modified: None,
+        };
+        let applied = apply_freshness(&memory, &candidate, changed, &Utc::now()).unwrap();
+        assert!(applied.changed.is_some(), "the document still gets parsed");
+    }
+
+    #[tokio::test]
+    async fn update_checks_stale_specs_conditionally_and_parses_only_changes() {
+        let stub = testing::HttpStub::start();
+        let conn = db::open_test_db().unwrap();
+        let specs: Vec<_> = ["dom", "infra"]
+            .iter()
+            .map(|host| {
+                (
+                    host.to_uppercase(),
+                    format!("https://{host}.spec.whatwg.org/"),
+                    "whatwg".to_string(),
+                )
+            })
+            .collect();
+        stub.put(
+            "dom.spec.whatwg.org/",
+            "<h2 id=\"d\">D</h2>",
+            Some("\"d1\""),
+            None,
+        );
+        stub.put(
+            "infra.spec.whatwg.org/",
+            "<h2 id=\"i\">I</h2>",
+            Some("\"i1\""),
+            None,
+        );
+        let options = FreshnessOptions {
+            timeout: std::time::Duration::from_secs(2),
+            max_in_flight: 4,
+            origin: Some(stub.origin()),
+        };
+        let first = update_specs_with(&conn, &specs, false, false, &options).await;
+        assert!(first.iter().all(|(_, r)| matches!(r, Ok(Some(_)))));
+
+        conn.execute(
+            "UPDATE update_checks SET last_checked = '2000-01-01T00:00:00+00:00'",
+            [],
+        )
+        .unwrap();
+        stub.put(
+            "infra.spec.whatwg.org/",
+            "<h2 id=\"i2\">I2</h2>",
+            Some("\"i2\""),
+            None,
+        );
+        let second = update_specs_with(&conn, &specs, false, false, &options).await;
+
+        assert!(matches!(second[0].1, Ok(None)), "DOM answered 304");
+        assert!(matches!(second[1].1, Ok(Some(_))), "INFRA changed");
+        let requests = stub.requests();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[2..]
+            .iter()
+            .all(|(_, if_none_match, _)| if_none_match.is_some()));
+        let dom = write::insert_or_get_spec(&conn, "DOM", &specs[0].1, "whatwg").unwrap();
+        let state = queries::get_update_check(&conn, dom).unwrap().unwrap();
+        assert!(state.last_checked.timestamp() > 946_684_800);
+        assert_eq!(state.etag.as_deref(), Some("\"d1\""));
     }
 }

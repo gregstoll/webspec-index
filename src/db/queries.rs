@@ -11,6 +11,9 @@ pub struct UpdateCheckState {
     pub last_indexed: Option<DateTime<Utc>>,
     pub content_hash: Option<String>,
     pub index_version: Option<String>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub source_hash: Option<String>,
 }
 
 pub type PrSnapshotRow = (String, i64, String, String, i64);
@@ -176,7 +179,8 @@ pub fn list_specs(conn: &Connection) -> Result<Vec<(String, String, String)>> {
 /// Get sync metadata for a spec from update_checks.
 pub fn get_update_check(conn: &Connection, spec_id: i64) -> Result<Option<UpdateCheckState>> {
     let row = conn.query_row(
-        "SELECT last_checked, last_indexed, content_hash, index_version
+        "SELECT last_checked, last_indexed, content_hash, index_version,
+                etag, last_modified, source_hash
          FROM update_checks
          WHERE spec_id = ?1",
         [spec_id],
@@ -195,12 +199,15 @@ pub fn get_update_check(conn: &Connection, spec_id: i64) -> Result<Option<Update
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 index_version,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         },
     );
 
     match row {
-        Ok((checked, indexed, content_hash, index_version)) => {
+        Ok((checked, indexed, content_hash, index_version, etag, last_modified, source_hash)) => {
             let last_checked = DateTime::parse_from_rfc3339(&checked)
                 .map(|d| d.with_timezone(&Utc))
                 .map_err(|e| {
@@ -231,6 +238,9 @@ pub fn get_update_check(conn: &Connection, spec_id: i64) -> Result<Option<Update
                 last_indexed,
                 content_hash,
                 index_version,
+                etag,
+                last_modified,
+                source_hash,
             }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1001,10 +1011,15 @@ mod tests {
         write::record_update_check(
             &conn,
             spec_id,
-            "2026-01-01T00:00:00Z",
-            Some("2026-01-01T00:00:00Z"),
-            Some("abc123"),
-            Some("0.9.9"),
+            &write::UpdateCheckRecord {
+                last_checked: "2026-01-01T00:00:00Z",
+                last_indexed: Some("2026-01-01T00:00:00Z"),
+                content_hash: Some("abc123"),
+                index_version: Some("0.9.9"),
+                etag: Some("W/\"1\""),
+                last_modified: Some("Fri, 25 Sep 2026 10:00:00 GMT"),
+                source_hash: Some("def456"),
+            },
         )
         .unwrap();
 
@@ -1016,6 +1031,12 @@ mod tests {
         );
         assert_eq!(state.content_hash.as_deref(), Some("abc123"));
         assert_eq!(state.index_version.as_deref(), Some("0.9.9"));
+        assert_eq!(state.etag.as_deref(), Some("W/\"1\""));
+        assert_eq!(
+            state.last_modified.as_deref(),
+            Some("Fri, 25 Sep 2026 10:00:00 GMT")
+        );
+        assert_eq!(state.source_hash.as_deref(), Some("def456"));
     }
 
     #[test]

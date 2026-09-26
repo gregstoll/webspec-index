@@ -254,10 +254,13 @@ fn seed_spec(conn: &Connection, name: &str, base_url: &str, html: &str) {
     webspec_index::db::write::record_update_check(
         conn,
         spec_id,
-        &now,
-        Some(&now),
-        Some("lsp-fixture"),
-        Some(webspec_index::parse::INDEX_VERSION),
+        &webspec_index::db::write::UpdateCheckRecord {
+            last_checked: &now,
+            last_indexed: Some(&now),
+            content_hash: Some("lsp-fixture"),
+            index_version: Some(webspec_index::parse::INDEX_VERSION),
+            ..Default::default()
+        },
     )
     .unwrap();
 }

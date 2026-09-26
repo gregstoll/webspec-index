@@ -134,10 +134,13 @@ async fn main() -> Result<()> {
         db::write::record_update_check(
             &tx,
             id,
-            &now,
-            Some(&now),
-            Some(&hash),
-            Some(parse::INDEX_VERSION),
+            &db::write::UpdateCheckRecord {
+                last_checked: &now,
+                last_indexed: Some(&now),
+                content_hash: Some(&hash),
+                index_version: Some(parse::INDEX_VERSION),
+                ..Default::default()
+            },
         )?;
         tx.commit()?;
         eprintln!("indexed {spec} ({base})");

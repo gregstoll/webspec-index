@@ -341,25 +341,41 @@ pub fn load_memo(conn: &Connection, snapshot_id: i64) -> Result<Option<Vec<u8>>>
         .optional()?)
 }
 
+/// One `update_checks` row: when a spec was last checked and indexed, the
+/// hashes of what was indexed, and the HTTP validators of the last response.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UpdateCheckRecord<'a> {
+    pub last_checked: &'a str,
+    pub last_indexed: Option<&'a str>,
+    pub content_hash: Option<&'a str>,
+    pub index_version: Option<&'a str>,
+    pub etag: Option<&'a str>,
+    pub last_modified: Option<&'a str>,
+    /// Hash of the fetched body; differs from `content_hash` only for ReSpec
+    /// sources, whose content hash is the rendered document's.
+    pub source_hash: Option<&'a str>,
+}
+
 /// Record spec sync metadata for freshness/content-hash based updates.
 pub fn record_update_check(
     conn: &Connection,
     spec_id: i64,
-    last_checked: &str,
-    last_indexed: Option<&str>,
-    content_hash: Option<&str>,
-    index_version: Option<&str>,
+    record: &UpdateCheckRecord,
 ) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO update_checks \
-         (spec_id, last_checked, last_indexed, content_hash, index_version)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         (spec_id, last_checked, last_indexed, content_hash, index_version,
+          etag, last_modified, source_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         (
             spec_id,
-            last_checked,
-            last_indexed,
-            content_hash,
-            index_version,
+            record.last_checked,
+            record.last_indexed,
+            record.content_hash,
+            record.index_version,
+            record.etag,
+            record.last_modified,
+            record.source_hash,
         ),
     )?;
 
@@ -872,10 +888,13 @@ mod tests {
         record_update_check(
             &conn,
             spec_id,
-            "2026-01-01T00:00:00Z",
-            Some("2026-01-01T00:00:00Z"),
-            Some("deadbeef"),
-            Some("0.1.0"),
+            &UpdateCheckRecord {
+                last_checked: "2026-01-01T00:00:00Z",
+                last_indexed: Some("2026-01-01T00:00:00Z"),
+                content_hash: Some("deadbeef"),
+                index_version: Some("0.1.0"),
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -893,10 +912,12 @@ mod tests {
         record_update_check(
             &conn,
             spec_id,
-            "2026-01-02T00:00:00Z",
-            None,
-            Some("beadfeed"),
-            Some("0.2.0"),
+            &UpdateCheckRecord {
+                last_checked: "2026-01-02T00:00:00Z",
+                content_hash: Some("beadfeed"),
+                index_version: Some("0.2.0"),
+                ..Default::default()
+            },
         )
         .unwrap();
 

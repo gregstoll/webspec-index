@@ -8,7 +8,7 @@ pub mod write;
 use anyhow::Result;
 use rusqlite::Connection;
 #[cfg(feature = "native")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Guard steps are stored as a JSON array so that step text containing any
 /// separator character round-trips intact.
@@ -40,20 +40,24 @@ pub fn get_db_path() -> PathBuf {
     }
 }
 
-/// Open or create the database, applying schema if needed.
+/// Open or create the database at [`get_db_path`].
+#[cfg(feature = "native")]
+pub fn open_or_create_db() -> Result<Connection> {
+    open_db_at(&get_db_path())
+}
+
+/// Open or create the database at `path`, applying schema and migrations.
+/// The HTML cache follows the connection into `<path's dir>/html`.
 ///
 /// On first creation (or after `clear-db`), seeds the spec list so that
 /// `webspec-index specs` returns all known specs immediately.
 #[cfg(feature = "native")]
-pub fn open_or_create_db() -> Result<Connection> {
-    let db_path = get_db_path();
-
-    // Create parent directory if it doesn't exist
-    if let Some(parent) = db_path.parent() {
+pub fn open_db_at(path: &Path) -> Result<Connection> {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let conn = Connection::open(&db_path)?;
+    let conn = Connection::open(path)?;
     schema::initialize_schema(&conn)?;
     schema::run_migrations(&conn)?;
 

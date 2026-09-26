@@ -191,7 +191,7 @@ pub fn census(conn: &Connection, db_dir: &Path) -> Result<Census> {
             ));
             continue;
         }
-        let cache_path = webspec_index::fetch::html_cache_path(db_dir, &name, &sha);
+        let cache_path = webspec_index::fetch::html_cache_path(&db_dir.join("html"), &name, &sha);
         if !cache_path.exists() {
             out.untestable
                 .push(untestable("G2 cache file missing".into(), true));

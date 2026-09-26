@@ -53,10 +53,13 @@ fn sync_from_pdf(
             write::record_update_check(
                 conn,
                 spec_id,
-                &checked,
-                indexed.as_deref(),
-                Some(&content_hash),
-                Some(parse::INDEX_VERSION),
+                &write::UpdateCheckRecord {
+                    last_checked: &checked,
+                    last_indexed: indexed.as_deref(),
+                    content_hash: Some(&content_hash),
+                    index_version: Some(parse::INDEX_VERSION),
+                    ..Default::default()
+                },
             )?;
             return Ok((snapshot_id, false));
         }
@@ -80,10 +83,13 @@ fn sync_from_pdf(
         write::record_update_check(
             conn,
             spec_id_reloaded,
-            &checked,
-            Some(&checked),
-            Some(&content_hash),
-            Some(parse::INDEX_VERSION),
+            &write::UpdateCheckRecord {
+                last_checked: &checked,
+                last_indexed: Some(&checked),
+                content_hash: Some(&content_hash),
+                index_version: Some(parse::INDEX_VERSION),
+                ..Default::default()
+            },
         )?;
         Ok((snapshot_id, true))
     })
