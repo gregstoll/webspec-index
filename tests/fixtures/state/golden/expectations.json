@@ -6,7 +6,9 @@
     {"field": "DOM#concept-node-document",
      "writes": ["DOM#clone-a-single-node:8", "DOM#concept-node-adopt:3.1", "DOM#concept-node-adopt:3.3.1",
                 "DOM#concept-element-attributes-append:3", "DOM#concept-element-attributes-replace:4",
-                "DOM#dom-processinginstruction-processinginstruction:1"],
+                "DOM#dom-processinginstruction-processinginstruction:1",
+                "DOM#dom-documentfragment-documentfragment (constructor)", "DOM#dom-text-text (constructor)",
+                "DOM#dom-comment-comment (constructor)"],
      "inits": ["DOM#create-a-node:2", "HTML#rendered-text-fragment:4.2"],
      "unclassified": ["HTML#dialog-setup-steps:4"],
      "negatives": {"HTML#show-a-modal-dialog:14": "read_path", "HTML#update-the-image-data:20": "read"}},
@@ -17,7 +19,7 @@
      "writes": ["HTML#make-document-unsalvageable:3", "HTML#unload-a-document:9", "HTML#destroy-a-document:3", "HTML#abort-a-document-and-its-descendants:3.2"],
      "inits": [], "negatives": {"HTML#abort-a-document-and-its-descendants:3.2": "read", "HTML#unload-a-document:12": "read", "HTML#unload-a-document:20": "read"}},
     {"field": "DOM#stop-propagation-flag",
-     "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10"],
-     "inits": [], "negatives": {}}
+     "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10", "DOM#dom-event-stoppropagation (method)"],
+     "inits": [], "unclassified": ["DOM#dom-event-stopimmediatepropagation (method)"], "negatives": {}}
   ]
 }

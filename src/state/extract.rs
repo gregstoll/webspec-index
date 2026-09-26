@@ -18,7 +18,7 @@ use crate::state::model::{
     CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
     ReviewItem, Site, SiteClass, StateCatalog, StateSpec, TypeKey, TypeRef,
 };
-use crate::state::{classify, types};
+use crate::state::{classify, prose, types};
 
 /// Everything `extract_state` reads. The caller parses the document once and
 /// shares it with the section and structural extraction.
@@ -71,7 +71,16 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         reflections: vec![],
     };
 
-    let (sources, mut branch_inits) = algorithm_sources(structure);
+    let (mut sources, mut branch_inits) = algorithm_sources(structure);
+    let prose = prose::prose_sources(
+        document,
+        spec,
+        base_url,
+        inputs.snapshot_sha,
+        inputs.sections,
+    );
+    let prose_sources = prose.sources.len() as u32;
+    sources.extend(prose.sources);
     let mut statements = Vec::new();
     let mut occurrences = Vec::new();
     for (index, source) in sources.iter().enumerate() {
@@ -90,6 +99,9 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         owner_candidates: counters.owner_candidates,
         owner_resolved: counters.owner_resolved,
         set_members: counters.set_members,
+        prose_sources,
+        prose_callouts_excluded: prose.callouts_excluded,
+        prose_mentions: prose.mentions.values().sum(),
         ..CoverageCounters::default()
     };
     count_statements(&statements, &mut coverage);
@@ -111,7 +123,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         sources,
         statements,
         occurrences,
-        prose_mentions: BTreeMap::new(),
+        prose_mentions: prose.mentions,
         coverage,
         issues: declared.issues,
     }
@@ -388,8 +400,13 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         .iter()
         .map(|s| (s.id.as_str(), s))
         .collect();
+    let mut first_clause: HashMap<&str, usize> = HashMap::new();
     let mut opaque_by_source: HashMap<&str, Vec<&Statement>> = HashMap::new();
     for statement in &state.statements {
+        first_clause
+            .entry(statement.source_id.as_str())
+            .and_modify(|start| *start = (*start).min(statement.span.start))
+            .or_insert(statement.span.start);
         if matches!(statement.kind, StatementKind::Opaque { verb: Some(_), .. }) {
             opaque_by_source
                 .entry(statement.source_id.as_str())
@@ -438,6 +455,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         };
         let mut row = site(
             source,
+            site_text(source, &first_clause),
             site_id(&source.id, &link.id, class),
             class,
             Some(target.clone()),
@@ -485,6 +503,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         };
         sites.push(site(
             source,
+            site_text(source, &first_clause),
             site_id(&source.id, &statement.id, class),
             class,
             None,
@@ -496,8 +515,28 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
     sites
 }
 
+/// A prose source's text from the start of its first statement's clause to
+/// the end of that sentence, `… `-prefixed when that is not the start; any
+/// other source's whole text.
+fn site_text(source: &StatementSource, first_clause: &HashMap<&str, usize>) -> String {
+    let (SourceContext::Prose { .. }, Some(&start)) =
+        (&source.context, first_clause.get(source.id.as_str()))
+    else {
+        return source.text.clone();
+    };
+    let rest = &source.text[start..];
+    let sentence = rest.find(". ").map_or(rest, |end| &rest[..=end]);
+    if start == 0 {
+        sentence.to_string()
+    } else {
+        format!("… {sentence}")
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn site(
     source: &StatementSource,
+    text: String,
     site_id: String,
     class: SiteClass,
     target: Option<AnchorTarget>,
@@ -540,7 +579,7 @@ fn site(
         receiver: parts.receiver.to_string(),
         target_text: parts.target_text,
         value_text: parts.value_text,
-        text: source.text.clone(),
+        text,
         basis: basis.to_string(),
         segment_id,
         body_id,

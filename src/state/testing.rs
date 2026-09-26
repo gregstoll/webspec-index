@@ -48,6 +48,19 @@ pub const DL_HTML: &str = r##"<pre><code class="idl">partial interface <dfn data
       <li><p>Let <var>document</var> be a new <code><a href="#document">Document</a></code>, with:</p>
       <dl class="props"><dt><a href="#is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd></dl></li></ol></div>"##;
 
+/// `Event` prose: method, getter and setter steps plus callouts (spec §12.2
+/// fixture 13).
+pub const PROSE_DOM: &str = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="event">Event</dfn> {};</pre>
+<p>An <dfn data-dfn-type="dfn" id="concept-event">event</dfn>.</p>
+<p>Each <a href="#concept-event">event</a> has the following associated flags that are all initially unset:</p>
+<ul><li><dfn data-dfn-for="Event" data-dfn-type="dfn" id="stop-propagation-flag">stop propagation flag</dfn></li></ul>
+<h3 id="interface-event">Interface Event</h3>
+<p>The <dfn data-dfn-for="Event" data-dfn-type="method" id="dom-event-stoppropagation"><code>stopPropagation()</code></dfn> method steps are to set <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#stop-propagation-flag">stop propagation flag</a>.</p>
+<p>The <a href="#dom-event-cancelbubble"><code>cancelBubble</code></a> getter steps are to return true if <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#stop-propagation-flag">stop propagation flag</a> is set; otherwise false.</p>
+<p>The <a href="#dom-event-cancelbubble"><code>cancelBubble</code></a> setter steps are to set <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#stop-propagation-flag">stop propagation flag</a> if the given value is true; otherwise do nothing.</p>
+<div class="note"><p>Set the <a href="#stop-propagation-flag">stop propagation flag</a> only from author code.</p></div>
+<dl class="domintro"><dt>x</dt><dd><p>Set the <a href="#stop-propagation-flag">stop propagation flag</a>.</p></dd></dl>"##;
+
 /// Parse, extract and store one spec snapshot without network or fetch state.
 pub fn index_offline_with(
     conn: &rusqlite::Connection,

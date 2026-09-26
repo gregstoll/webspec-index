@@ -479,8 +479,10 @@ impl Encoded {
             })
     }
 
-    /// Clause starts (§7.3 `CLAUSE`) with their lexicon verb.
-    fn clause_starts(&self) -> Vec<(usize, Option<String>)> {
+    /// Clause starts (§7.3 `CLAUSE`) with their lexicon verb. Prose (§7.5)
+    /// also starts a clause after its lead-ins, case-insensitively.
+    fn clause_starts(&self, prose: bool) -> Vec<(usize, Option<String>)> {
+        const PROSE_LEAD_INS: [&str; 3] = ["steps are to ", "must ", "the user agent must "];
         let bytes = self.text.as_bytes();
         let mut starts = std::collections::BTreeSet::from([0]);
         for (index, _) in self.text.char_indices() {
@@ -494,6 +496,16 @@ impl Encoded {
                 for word in ["then ", "and ", "otherwise ", "otherwise, "] {
                     if self.text[index..].starts_with(word) {
                         starts.insert(index + word.len());
+                    }
+                }
+                if prose {
+                    for lead_in in PROSE_LEAD_INS {
+                        if bytes[index..]
+                            .get(..lead_in.len())
+                            .is_some_and(|word| word.eq_ignore_ascii_case(lead_in.as_bytes()))
+                        {
+                            starts.insert(index + lead_in.len());
+                        }
                     }
                 }
             }
@@ -531,7 +543,7 @@ pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
     let enc = Encoded::new(source);
     let mut p = Parser::new(&enc, source);
     p.inits = p.parse_initializers();
-    for (at, verb) in enc.clause_starts() {
+    for (at, verb) in enc.clause_starts(is_prose(source)) {
         // An Infra-linked operation is spelled by its link text ("Append").
         let verb = verb.or_else(|| {
             p.infra_op(at)
@@ -554,6 +566,20 @@ pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
         }
     }
     p.out
+}
+
+fn is_prose(source: &StatementSource) -> bool {
+    matches!(source.context, SourceContext::Prose { .. })
+}
+
+/// Whether some clause of `source` starts with a lexicon verb or an Infra
+/// mutation link, or is a `PASSIVE` set (§7.5 statement source test).
+pub(crate) fn has_mutation_clause(source: &StatementSource) -> bool {
+    let enc = Encoded::new(source);
+    let mut p = Parser::new(&enc, source);
+    enc.clause_starts(is_prose(source))
+        .into_iter()
+        .any(|(at, verb)| verb.is_some() || p.infra_op(at).is_some() || p.try_passive(at))
 }
 
 /// The constructed type of a segment that introduces a `<dl>` initializer

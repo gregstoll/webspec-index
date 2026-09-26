@@ -9,6 +9,7 @@ pub mod extract;
 pub mod ir;
 pub mod lookup;
 pub mod model;
+pub(crate) mod prose;
 pub mod query;
 pub mod render;
 #[cfg(feature = "native")]

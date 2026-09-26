@@ -369,7 +369,6 @@ pub fn extract_step_structure_from_document(
 
 /// Identity of an inline rendering outside structural algorithms. `anchor`
 /// scopes generated link ids exactly as a structural algorithm anchor does.
-#[allow(dead_code)]
 pub(crate) struct InlineContext<'a> {
     pub spec: &'a str,
     pub base_url: &'a str,
@@ -379,7 +378,6 @@ pub(crate) struct InlineContext<'a> {
 
 /// Canonical text, tokens and links of one block, in segment encoding. Nested
 /// lists and callouts are skipped: they are their own blocks.
-#[allow(dead_code)]
 pub(crate) fn canonical_inline(
     element: &ElementRef<'_>,
     ctx: &InlineContext<'_>,
@@ -404,13 +402,11 @@ pub(crate) fn canonical_inline(
 }
 
 /// Resolve a link `href` to its canonical anchor target.
-#[allow(dead_code)]
 pub(crate) fn resolve_href(href: &str, spec: &str, base_url: &str) -> Option<AnchorTarget> {
     resolve_target(href, spec, base_url)
 }
 
 /// Node ids of every `<ol>`/`emu-alg` that is a structural algorithm body.
-#[allow(dead_code)]
 pub(crate) fn structural_body_nodes(document: &Html) -> HashSet<ego_tree::NodeId> {
     find_algorithm_candidates(document)
         .into_iter()
