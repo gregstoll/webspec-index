@@ -174,6 +174,96 @@ pub fn site_key(spec: &str, subject: &str, step_path: Option<&str>, role: Option
     }
 }
 
+/// Hand-built slice index for query-time tests. `steps`: `(path, mentioned names)` in document
+/// order; `edges`: `(step path, kind, defined or root name, used names)`; `loops`: `(step path,
+/// loop-bound name)`. Names are interned in first-mention order over steps, then edges, then loops;
+/// `mentions` and `uses` are sorted var indexes, as `build_slice_indexes` produces them.
+/// `Store` edges get the target `*{name}*'s field`.
+pub fn slice_index(
+    anchor: &str,
+    steps: &[(&str, &[&str])],
+    edges: &[(&str, crate::state::slice::DefKind, Option<&str>, &[&str])],
+    loops: &[(&str, &str)],
+) -> crate::state::slice::SliceIndex {
+    use crate::state::slice::index::derive_parents;
+    use crate::state::slice::{DefEdge, DefKind, SliceIndex, SliceStep};
+
+    fn intern(vars: &mut Vec<String>, name: &str) -> u32 {
+        if let Some(pos) = vars.iter().position(|v| v == name) {
+            return pos as u32;
+        }
+        vars.push(name.to_owned());
+        (vars.len() - 1) as u32
+    }
+
+    let mut vars: Vec<String> = Vec::new();
+
+    let mut slice_steps: Vec<SliceStep> = Vec::with_capacity(steps.len());
+    for (path, names) in steps {
+        let mut mentions: Vec<u32> = names.iter().map(|n| intern(&mut vars, n)).collect();
+        mentions.sort_unstable();
+        mentions.dedup();
+        slice_steps.push(SliceStep {
+            path: path.to_string(),
+            parent: None,
+            mentions,
+            loop_binds: vec![],
+        });
+    }
+
+    let paths: Vec<String> = slice_steps.iter().map(|s| s.path.clone()).collect();
+    let parents = derive_parents(&paths);
+    for (step, parent) in slice_steps.iter_mut().zip(parents) {
+        step.parent = parent;
+    }
+
+    let step_paths: Vec<&str> = slice_steps.iter().map(|s| s.path.as_str()).collect();
+    let find_step = |path: &str| -> usize {
+        step_paths
+            .iter()
+            .position(|p| *p == path)
+            .expect("step path not found")
+    };
+
+    let mut slice_edges: Vec<DefEdge> = Vec::with_capacity(edges.len());
+    for (step_path, kind, name, used_names) in edges {
+        let step = find_step(step_path) as u32;
+        let var = name.map(|n| intern(&mut vars, n));
+        let mut uses: Vec<u32> = used_names.iter().map(|n| intern(&mut vars, n)).collect();
+        uses.sort_unstable();
+        uses.dedup();
+        let target = if *kind == DefKind::Store {
+            name.map(|n| format!("*{n}*'s field"))
+        } else {
+            None
+        };
+        slice_edges.push(DefEdge {
+            step,
+            kind: *kind,
+            var,
+            uses,
+            target,
+        });
+    }
+
+    let loop_assignments: Vec<(usize, &str)> = loops
+        .iter()
+        .map(|(path, name)| (find_step(path), *name))
+        .collect();
+    drop(step_paths);
+    for (idx, loop_name) in loop_assignments {
+        let var_idx = intern(&mut vars, loop_name);
+        slice_steps[idx].loop_binds.push(var_idx);
+    }
+
+    SliceIndex {
+        anchor: anchor.to_owned(),
+        vars,
+        steps: slice_steps,
+        edges: slice_edges,
+    }
+}
+
 /// Classes (snake_case) of the occurrences of `field_selector` (`SPEC#anchor`) in the
 /// sources whose [`site_key`] is `site`, across every current snapshot's state model.
 pub fn occurrence_classes(

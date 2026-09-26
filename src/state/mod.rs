@@ -17,6 +17,7 @@ pub mod render;
 pub(crate) mod rules;
 #[cfg(feature = "native")]
 pub mod service;
+pub mod slice;
 pub mod testing;
 pub(crate) mod typeexpr;
 pub(crate) mod types;
