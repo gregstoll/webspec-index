@@ -1,12 +1,12 @@
-//! Markdown renderings of state query results (§10.2–§10.4).
+//! Markdown renderings of state query results (§10.2–§10.5).
 use crate::state::model::{
     AnchorRole, InfraKind, InitialValue, OwnerBasis, Primitive, StateIssueCode, TypeExpr, TypeKey,
     TypeRef,
 };
 use crate::state::query::{
     Coverage, FieldListEntry, FieldRow, FoundOn, InheritedFields, MemberRow, OwnerInfo, SiteInfo,
-    StateFieldListResult, StateFieldResult, StateMemberResult, StateResponse, StateStatus,
-    StateTypeResult,
+    StateCoverageResult, StateFieldListResult, StateFieldResult, StateMemberResult, StateResponse,
+    StateStatus, StateTypeResult,
 };
 use std::fmt::Write;
 
@@ -109,7 +109,7 @@ fn field(result: &StateFieldResult) -> String {
     let _ = writeln!(
         out,
         "Coverage: may · {} — {} unclassified, {} possible unlinked writes. Reads are not listed\n({} occurrences).",
-        coverage(&result.status),
+        coverage_label(&result.status),
         counts.unclassified,
         counts.possible_unlinked,
         counts.reads
@@ -144,7 +144,7 @@ fn member(result: &StateMemberResult) -> String {
     let _ = writeln!(
         out,
         "Coverage: may · {} — {} unclassified. Reads are not listed\n({} occurrences).",
-        coverage(&result.status),
+        coverage_label(&result.status),
         result.status.counts.unclassified,
         result.status.counts.reads
     );
@@ -229,7 +229,7 @@ fn type_view(result: &StateTypeResult) -> String {
     let _ = writeln!(
         out,
         "\nCoverage: may · {} — {} unclassified in own fields.",
-        coverage(&result.status),
+        coverage_label(&result.status),
         result.status.counts.unclassified
     );
     out
@@ -255,7 +255,7 @@ fn field_list(result: &StateFieldListResult) -> String {
     let _ = writeln!(
         out,
         "\nCoverage: may · {} — {} unclassified in listed fields.",
-        coverage(&result.status),
+        coverage_label(&result.status),
         counts.unclassified
     );
     out
@@ -414,11 +414,107 @@ fn role_label(role: &AnchorRole) -> &'static str {
     }
 }
 
-fn coverage(status: &StateStatus) -> &'static str {
+fn coverage_label(status: &StateStatus) -> &'static str {
     match status.coverage {
         Coverage::Complete => "complete",
         Coverage::Partial => "partial",
     }
+}
+
+/// Render the §10.5 coverage view for one spec's snapshot.
+pub fn coverage(result: &StateCoverageResult) -> String {
+    let c = &result.counters;
+    let mut out = format!("## State coverage — {}\n\n", result.spec);
+
+    out.push_str("| Rule | Concept dfns |\n|---|---:|\n");
+    for (rule, count) in &c.owner_by_rule {
+        let _ = writeln!(out, "| {rule} | {count} |");
+    }
+    out.push('\n');
+
+    out.push_str("| Written fields | Count |\n|---|---:|\n");
+    let _ = writeln!(out, "| Total | {} |", c.written_fields);
+    for (basis, count) in &c.written_fields_owned {
+        let _ = writeln!(out, "| {} | {count} |", basis);
+    }
+    let resolved = c
+        .written_fields
+        .saturating_sub(c.written_fields_unresolved.len() as u32);
+    if c.written_fields > 0 {
+        let pct = resolved as f64 / c.written_fields as f64 * 100.0;
+        let _ = writeln!(
+            out,
+            "\nResolved: {resolved} / {} ({pct:.1}%)",
+            c.written_fields
+        );
+    }
+    out.push('\n');
+
+    out.push_str("| Form | Count |\n|---|---:|\n");
+    for (form, count) in &c.statements {
+        let _ = writeln!(out, "| {form} | {count} |");
+    }
+    let set_total: u32 = c
+        .statements
+        .iter()
+        .filter(|(k, _)| k.starts_with("set:to:") || k.starts_with("mutate:map_set:"))
+        .map(|(_, v)| *v)
+        .sum();
+    let set_structured: u32 = c
+        .statements
+        .iter()
+        .filter(|(k, _)| {
+            (k.starts_with("set:to:field:") || k.starts_with("mutate:map_set:"))
+                && !k.contains(":pronoun:")
+        })
+        .map(|(_, v)| *v)
+        .sum();
+    let set_pct = if set_total > 0 {
+        set_structured as f64 / set_total as f64 * 100.0
+    } else {
+        0.0
+    };
+    let _ = writeln!(
+        out,
+        "\nSet statements with a structured target: {set_structured} / {set_total} ({set_pct:.1}%)"
+    );
+    out.push('\n');
+
+    out.push_str("| Class | Count |\n|---|---:|\n");
+    let classified_total: u32 = c.occurrences.values().sum();
+    for (class, count) in &c.occurrences {
+        let _ = writeln!(out, "| {class} | {count} |");
+    }
+    let unclassified_n = c.unclassified_review.len() as u32;
+    let total_with_unclassified = classified_total + unclassified_n;
+    if total_with_unclassified > 0 {
+        let pct = unclassified_n as f64 / total_with_unclassified as f64 * 100.0;
+        let _ = writeln!(out, "\nUnclassified: {pct:.1}%");
+    }
+    out.push('\n');
+
+    out.push_str("| Prose | Count |\n|---|---:|\n");
+    let _ = writeln!(out, "| Sources | {} |", c.prose_sources);
+    let _ = writeln!(out, "| Callouts excluded | {} |", c.prose_callouts_excluded);
+    let _ = writeln!(out, "| Mentions | {} |", c.prose_mentions);
+    out.push('\n');
+
+    let n = c.unclassified_review.len();
+    let _ = writeln!(out, "### Unclassified review ({n})");
+    for item in &c.unclassified_review {
+        let step = item
+            .step_path
+            .as_deref()
+            .map(|s| format!(":{s}"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "- {}{} — {} — {}",
+            item.subject, step, item.target, item.text
+        );
+    }
+
+    out
 }
 
 /// `full` adds the type key to nominal types; tables show the text only.
@@ -743,5 +839,25 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
             "{md}"
         );
         assert!(!md.contains("### Declared writes"), "{md}");
+    }
+
+    #[test]
+    fn coverage_view_renders_the_section_5_tables() {
+        let conn = crate::state::testing::query_fixture_db();
+        let c = crate::state::query::coverage(&conn, "HTML").unwrap();
+        let md = coverage(&c);
+        assert!(md.starts_with("## State coverage — HTML\n"), "{md}");
+        assert!(md.contains("| Rule | Concept dfns |\n|---|---:|\n"), "{md}");
+        assert!(
+            md.contains("Set statements with a structured target: 2 / 2 (100.0%)"),
+            "{md}"
+        );
+        assert!(md.contains("### Unclassified review (2)"), "{md}");
+        assert_eq!(
+            crate::state::query::coverage(&conn, "NOPE")
+                .unwrap_err()
+                .code,
+            crate::state::query::StateErrorCode::SpecNotIndexed
+        );
     }
 }

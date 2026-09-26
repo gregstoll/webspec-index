@@ -561,7 +561,8 @@ enum Command {
     )]
     State {
         /// Field, type, or glob selector
-        selector: String,
+        #[arg(required_unless_present = "coverage")]
+        selector: Option<String>,
         #[arg(long, help = "Hide the initializations group")]
         no_inits: bool,
         #[arg(
@@ -577,6 +578,13 @@ enum Command {
         limit: Option<u32>,
         #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
         rules: Vec<String>,
+        #[arg(
+            long,
+            value_name = "SPEC",
+            conflicts_with = "selector",
+            help = "Show coverage metrics for SPEC"
+        )]
+        coverage: Option<String>,
     },
 
     /// Update specifications to latest versions
@@ -840,6 +848,7 @@ lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
 flow <SPEC#anchor|URL> [--flow-format json|mermaid]
 idl <Q|SPEC#anchor|URL> [-s SPEC] [-l N(20)] [--pr N] [--format json|markdown]
+state <SELECTOR> | --coverage SPEC [--no-inits] [--unclassified] [-l N] [--rules PATH] [--format json|markdown]
 SPEC#anchor examples: HTML#navigate, DOM#concept-tree, CSS-GRID#grid-container
 Full URL also works: https://html.spec.whatwg.org/#navigate
 --pr N: query against a PR preview (WHATWG specs or TC39 proposals); --diff: show diff vs merge base (requires --pr; #anchor optional with --diff)
@@ -1200,23 +1209,39 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             unclassified,
             limit,
             rules,
+            coverage,
         } => {
-            let options = webspec_index::state::query::StateQueryOptions {
-                include_inits: !no_inits,
-                unclassified,
-                limit,
-            };
-            match webspec_index::state::service::state(&selector, &options, &rules).await? {
-                Ok(result) => {
-                    print_output(&cli.format, &result, webspec_index::state::render::response);
-                    Ok(ExitCode::SUCCESS)
-                }
-                Err(error) => {
-                    eprintln!("Error: {}", error.message);
-                    for candidate in &error.candidates {
-                        eprintln!("  {candidate}");
+            if let Some(spec) = coverage {
+                match webspec_index::state::service::coverage(&spec).await? {
+                    Ok(result) => {
+                        print_output(&cli.format, &result, webspec_index::state::render::coverage);
+                        Ok(ExitCode::SUCCESS)
                     }
-                    Ok(ExitCode::FAILURE)
+                    Err(error) => {
+                        eprintln!("Error: {}", error.message);
+                        Ok(ExitCode::FAILURE)
+                    }
+                }
+            } else {
+                let selector =
+                    selector.expect("clap ensures selector is Some when coverage is None");
+                let options = webspec_index::state::query::StateQueryOptions {
+                    include_inits: !no_inits,
+                    unclassified,
+                    limit,
+                };
+                match webspec_index::state::service::state(&selector, &options, &rules).await? {
+                    Ok(result) => {
+                        print_output(&cli.format, &result, webspec_index::state::render::response);
+                        Ok(ExitCode::SUCCESS)
+                    }
+                    Err(error) => {
+                        eprintln!("Error: {}", error.message);
+                        for candidate in &error.candidates {
+                            eprintln!("  {candidate}");
+                        }
+                        Ok(ExitCode::FAILURE)
+                    }
                 }
             }
         }

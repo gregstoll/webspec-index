@@ -2,7 +2,8 @@
 //! indexed, then query.
 use crate::state::catalog::{self, StateCatalog};
 use crate::state::query::{
-    query_with_rules, StateError, StateErrorCode, StateQueryOptions, StateResponse,
+    coverage as query_coverage, query_with_rules, StateCoverageResult, StateError, StateErrorCode,
+    StateQueryOptions, StateResponse,
 };
 
 pub async fn state(
@@ -20,6 +21,15 @@ pub async fn state(
         crate::ensure_indexed_for_spec_name(&conn, &registry, &spec, None).await?;
     }
     Ok(query_with_rules(&conn, selector, options, &extra))
+}
+
+/// Ensure `spec` is indexed, then return its coverage counters (§10.5).
+pub async fn coverage(spec: &str) -> anyhow::Result<Result<StateCoverageResult, StateError>> {
+    let conn = crate::db::open_or_create_db()?;
+    let spec_upper = spec.trim().to_uppercase();
+    let registry = crate::spec_registry::SpecRegistry::new();
+    crate::ensure_indexed_for_spec_name(&conn, &registry, &spec_upper, None).await?;
+    Ok(query_coverage(&conn, &spec_upper))
 }
 
 /// The rules of every `--rules` package directory; a package that declares

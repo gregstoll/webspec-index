@@ -7,9 +7,9 @@ use crate::state::catalog::StateRule;
 use crate::state::ir::StatementSource;
 use crate::state::lookup::{fold_name, FieldEntry, Lookup, TypeIndex, TypeNode};
 use crate::state::model::{
-    AnchorRole, AnchorTarget, ConceptAliasBasis, FieldBasis, InitialValue, OwnerBasis, OwnerRef,
-    OwnerVia, Site, StateCatalog, StateIssueCode, StateSpec, SuperBasis, SuperEdge, TypeExpr,
-    TypeKey, TypeKind,
+    AnchorRole, AnchorTarget, ConceptAliasBasis, CoverageCounters, FieldBasis, InitialValue,
+    OwnerBasis, OwnerRef, OwnerVia, Site, StateCatalog, StateIssueCode, StateSpec, SuperBasis,
+    SuperEdge, TypeExpr, TypeKey, TypeKind,
 };
 use crate::state::{classify, extract, ir, rules};
 use rusqlite::Connection;
@@ -86,6 +86,50 @@ impl From<anyhow::Error> for StateError {
             StateErrorCode::SpecNotIndexed,
             format!("state tables unreadable ({error:#}); run `webspec-index update`"),
         )
+    }
+}
+
+/// The §5 coverage counters for one spec's current snapshot (§10.5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateCoverageResult {
+    pub spec: String,
+    pub snapshot_sha: String,
+    pub counters: CoverageCounters,
+}
+
+/// Load the coverage counters for the current snapshot of `spec` (§10.5).
+/// Returns `StateErrorCode::SpecNotIndexed` when `spec` has no indexed snapshot
+/// with a state model.
+pub fn coverage(conn: &Connection, spec: &str) -> Result<StateCoverageResult, StateError> {
+    use rusqlite::OptionalExtension;
+    let spec = spec.trim().to_uppercase();
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT s.sha, c.coverage_json \
+             FROM snapshots s \
+             JOIN specs sp ON sp.id = s.spec_id \
+             JOIN state_coverage c ON c.snapshot_id = s.id \
+             WHERE sp.name = ?1 AND s.pr_number IS NULL AND s.sha LIKE 'hash:%' \
+             ORDER BY s.id DESC LIMIT 1",
+            [&spec],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| StateError::from(anyhow::anyhow!(e)))?;
+    match row {
+        Some((snapshot_sha, coverage_json)) => {
+            let counters: CoverageCounters = serde_json::from_str(&coverage_json)
+                .map_err(|e| StateError::from(anyhow::anyhow!(e)))?;
+            Ok(StateCoverageResult {
+                spec,
+                snapshot_sha,
+                counters,
+            })
+        }
+        None => Err(StateError::new(
+            StateErrorCode::SpecNotIndexed,
+            format!("spec {spec} is not indexed; run `webspec-index update`"),
+        )),
     }
 }
 
