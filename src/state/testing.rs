@@ -41,6 +41,13 @@ pub const MINI: &str = r##"<pre><code class="idl">partial interface <dfn data-lt
 <li><p>If <var>document</var>'s <a href="#is-initial-about:blank">is initial <code>about:blank</code></a> is true, then return.</p></li>
 <li><p>Add <var>x</var> to <var>document</var>'s <a href="#is-initial-about:blank">is initial <code>about:blank</code></a>.</p></li></ol></div>"##;
 
+/// A `Document` initializer whose entries are a `<dl>` (spec §12.2 fixture 8).
+pub const DL_HTML: &str = r##"<pre><code class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</code></pre>
+      <p>Each <code><a href="#document">Document</a></code> has an <dfn id="is-initial-about:blank">is initial <code>about:blank</code></dfn>, which is a boolean, initially false.</p>
+      <div data-algorithm=""><p>To <dfn id="creating-a-new-browsing-context">create a new browsing context</dfn>:</p><ol>
+      <li><p>Let <var>document</var> be a new <code><a href="#document">Document</a></code>, with:</p>
+      <dl class="props"><dt><a href="#is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd></dl></li></ol></div>"##;
+
 /// Parse, extract and store one spec snapshot without network or fetch state.
 pub fn index_offline_with(
     conn: &rusqlite::Connection,

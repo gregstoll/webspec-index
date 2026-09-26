@@ -1,7 +1,9 @@
 //! Minimal statement IR (§7.1 sources, §7.2 statements and expressions) and
 //! its grammar (§7.3).
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -31,11 +33,16 @@ pub enum SourceContext {
         step_path: Option<String>,
         body_id: String,
     },
+    /// A `<dt>` entry of a `<dl>` initializer. `segment_id` is the segment
+    /// introducing the initializer, `value_segment_id` the branch's first
+    /// segment, which holds the entry value.
     BranchLabel {
         branch_id: String,
         step_id: String,
         step_path: String,
         segment_id: String,
+        #[serde(default)]
+        value_segment_id: Option<String>,
     },
     Prose {
         node_id: String,
@@ -522,14 +529,7 @@ impl Encoded {
 /// gets an `Opaque` statement.
 pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
     let enc = Encoded::new(source);
-    let mut p = Parser {
-        enc: &enc,
-        source,
-        out: ParsedSource::default(),
-        opaque_clauses: Vec::new(),
-        covered_until: 0,
-        inits: BTreeMap::new(),
-    };
+    let mut p = Parser::new(&enc, source);
     p.inits = p.parse_initializers();
     for (at, verb) in enc.clause_starts() {
         // An Infra-linked operation is spelled by its link text ("Append").
@@ -554,6 +554,75 @@ pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
         }
     }
     p.out
+}
+
+/// The constructed type of a segment that introduces a `<dl>` initializer
+/// ("… a new ⟦Document⟧, with:"); `None` if the segment introduces none. The
+/// inner `None` is a type link without a target.
+pub(crate) fn initializer_intro(source: &StatementSource) -> Option<Option<TypeRef>> {
+    static INTRO: OnceLock<Regex> = OnceLock::new();
+    let intro = INTRO.get_or_init(|| {
+        Regex::new(
+            r"(?:a|an) new (?P<ty>⟦L\d+⟧|`[A-Za-z_]\w*`)(?: (?:node|object|element))?,? with:?$",
+        )
+        .expect("valid regex")
+    });
+    let enc = Encoded::new(source);
+    let ty = intro.captures(&enc.text)?.name("ty")?.start();
+    Some(Parser::new(&enc, source).new_type(ty))
+}
+
+/// The whole source as one `VALUE`.
+pub(crate) fn parse_value(source: &StatementSource) -> Expr {
+    let enc = Encoded::new(source);
+    let p = Parser::new(&enc, source);
+    p.expr(0, p.value_end(0, None))
+}
+
+/// A `<dl>` initializer entry (§7.3): the label's first link is the field,
+/// `value` the entry value. The other label links are reads.
+pub(crate) fn parse_branch_label(
+    source: &StatementSource,
+    constructed: Option<TypeRef>,
+    value: Expr,
+) -> ParsedSource {
+    let mut out = ParsedSource::default();
+    let Some(field) = source.links.first() else {
+        return out;
+    };
+    let span = TextSpan {
+        start: 0,
+        end: source.text.len(),
+    };
+    let id = statement_id(&source.id, "init", span);
+    out.statements.push(Statement {
+        id: id.clone(),
+        source_id: source.id.clone(),
+        span,
+        kind: StatementKind::Init {
+            constructed,
+            entries: vec![InitEntry {
+                field: Hop::Field {
+                    link_id: field.id.clone(),
+                    target: field.target.clone(),
+                    visible_text: field.visible_text.clone(),
+                },
+                value,
+            }],
+            form: InitForm::DlEntries,
+        },
+    });
+    out.link_roles = (0..source.links.len())
+        .map(|index| {
+            let class = if index == 0 {
+                OccurrenceClass::Init
+            } else {
+                OccurrenceClass::Read
+            };
+            (index, (class, id.clone()))
+        })
+        .collect();
+    out
 }
 
 /// A parsed `PATH` with the link positions its statement assigns roles to.
@@ -596,7 +665,18 @@ struct Parser<'a> {
     inits: BTreeMap<usize, String>,
 }
 
-impl Parser<'_> {
+impl<'a> Parser<'a> {
+    fn new(enc: &'a Encoded, source: &'a StatementSource) -> Self {
+        Self {
+            enc,
+            source,
+            out: ParsedSource::default(),
+            opaque_clauses: Vec::new(),
+            covered_until: 0,
+            inits: BTreeMap::new(),
+        }
+    }
+
     /// A clause starting with a link to an `INFRA_OPS` anchor: `⟦L⟧ OPERAND
     /// PREP PATH`, or `⟦L⟧ PATH` for an operation without prepositions
     /// (`map-set` takes `PATH[key] to VALUE`, `list-extend` an optional
@@ -1692,6 +1772,12 @@ fn literal(text: &str) -> Option<Literal> {
     }
     for (open, close) in [('"', '"'), ('“', '”')] {
         if let Some(inner) = text.strip_prefix(open).and_then(|t| t.strip_suffix(close)) {
+            // A quoted code token ("`html`") is the string it spells.
+            let inner = inner
+                .strip_prefix('`')
+                .and_then(|t| t.strip_suffix('`'))
+                .filter(|t| !t.contains('`'))
+                .unwrap_or(inner);
             return Some(Literal::String(inner.to_string()));
         }
     }
@@ -1714,7 +1800,7 @@ pub(crate) mod tests_support {
         );
         let structure =
             extract_step_structure(&html, "HTML", "https://html.spec.whatwg.org/", "hash:t");
-        crate::state::extract::algorithm_sources(&structure)
+        crate::state::extract::algorithm_sources(&structure).0
     }
 }
 

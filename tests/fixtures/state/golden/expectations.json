@@ -1,7 +1,7 @@
 {
   "fields": [
     {"field": "HTML#is-initial-about:blank",
-     "writes": ["HTML#document-open-steps:13"], "inits": [],
+     "writes": ["HTML#document-open-steps:13"], "inits": ["HTML#creating-a-new-browsing-context:15"],
      "negatives": {"HTML#url-and-history-update-steps:4": "read", "HTML#initialise-the-document-object:6": "read", "HTML#activate-history-entry:3": "read"}},
     {"field": "DOM#concept-node-document",
      "writes": ["DOM#clone-a-single-node:8", "DOM#concept-node-adopt:3.1", "DOM#concept-node-adopt:3.3.1",

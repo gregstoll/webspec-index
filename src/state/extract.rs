@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 use sha2::{Digest, Sha256};
 
 use crate::model::{ParsedIdlDefinition, ParsedSection};
-use crate::parse::steps::{AnchorTarget, InlineTokenKind, LinkSpan, StructuralSpec, TextSpan};
+use crate::parse::steps::{
+    AnchorTarget, InlineTokenKind, LinkSpan, StepItem, StructuralBranch, StructuralSpec, TextSpan,
+};
 use crate::state::declare::{self, NameBindings};
 use crate::state::ir::{
     self, Expr, Hop, InitForm, MutationOp, OpaqueReason, Path, ProseRole, Root, SetForm,
@@ -69,11 +71,14 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         reflections: vec![],
     };
 
-    let sources = algorithm_sources(structure);
+    let (sources, mut branch_inits) = algorithm_sources(structure);
     let mut statements = Vec::new();
     let mut occurrences = Vec::new();
-    for source in &sources {
-        let parsed = ir::parse_source(source);
+    for (index, source) in sources.iter().enumerate() {
+        let parsed = match branch_inits.remove(&index) {
+            Some((constructed, value)) => ir::parse_branch_label(source, constructed, value),
+            None => ir::parse_source(source),
+        };
         occurrences.extend(classify::classify(source, &parsed));
         statements.extend(parsed.statements);
     }
@@ -431,7 +436,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
                 value_text: None,
             },
         };
-        sites.push(site(
+        let mut row = site(
             source,
             site_id(&source.id, &link.id, class),
             class,
@@ -439,7 +444,23 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
             parts,
             &occurrence.basis,
             statement.as_ref().map(|s| s.span),
-        ));
+        );
+        if let SourceContext::BranchLabel {
+            segment_id,
+            value_segment_id,
+            ..
+        } = &source.context
+        {
+            if let Some(intro) = sources.get(segment_id.as_str()) {
+                row.text = intro.text.clone();
+            }
+            row.target_text = source.text.clone();
+            row.value_text = value_segment_id
+                .as_deref()
+                .and_then(|id| sources.get(id))
+                .and_then(|value| text(value, 0, value.text.len()));
+        }
+        sites.push(row);
     }
 
     for statement in &state.statements {
@@ -821,9 +842,15 @@ pub fn derive_occurrence_counts(state: &StateSpec) -> Vec<(AnchorTarget, &'stati
         .collect()
 }
 
-/// One source per structural segment, in algorithm and segment order.
-pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> Vec<StatementSource> {
+/// Source index of each `<dl>` initializer entry → the constructed type and
+/// the entry value.
+pub(crate) type BranchInits = HashMap<usize, (Option<TypeRef>, Expr)>;
+
+/// One source per structural segment, in algorithm and segment order, then
+/// per algorithm one source per `<dl>` initializer entry (§7.1).
+pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> (Vec<StatementSource>, BranchInits) {
     let mut sources = Vec::new();
+    let mut inits = BranchInits::new();
     for algorithm in &structure.algorithms {
         let subject = AnchorTarget {
             spec: structure.spec.clone(),
@@ -842,11 +869,13 @@ pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> Vec<StatementSour
                 (step.source.node_id.as_str(), path)
             })
             .collect();
+        let mut segment_sources: HashMap<&str, usize> = HashMap::new();
         for segment in &algorithm.segments {
             let step_path = segment
                 .owner_step_id
                 .as_deref()
                 .and_then(|id| step_paths.get(id).cloned());
+            segment_sources.insert(segment.source.node_id.as_str(), sources.len());
             sources.push(StatementSource {
                 id: segment.source.node_id.clone(),
                 subject: subject.clone(),
@@ -861,14 +890,81 @@ pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> Vec<StatementSour
                 links: segment.links.clone(),
             });
         }
+
+        let branches: HashMap<&str, &StructuralBranch> = algorithm
+            .branches
+            .iter()
+            .map(|branch| (branch.source.node_id.as_str(), branch))
+            .collect();
+        for step in &algorithm.steps {
+            let Some(first_branch) = step
+                .items
+                .iter()
+                .position(|item| matches!(item, StepItem::Branch(_)))
+            else {
+                continue;
+            };
+            let entries: Vec<&StructuralBranch> = step.items[first_branch..]
+                .iter()
+                .filter_map(|item| match item {
+                    StepItem::Branch(id) => branches.get(id.as_str()).copied(),
+                    _ => None,
+                })
+                .filter(|branch| !branch.label_links.is_empty())
+                .collect();
+            let intro = step.items[..first_branch]
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    StepItem::Segment(id) => segment_sources.get_key_value(id.as_str()),
+                    _ => None,
+                });
+            let (Some((&intro_id, &intro_index)), false) = (intro, entries.is_empty()) else {
+                continue;
+            };
+            let Some(constructed) = ir::initializer_intro(&sources[intro_index]) else {
+                continue;
+            };
+            let step_path = step_paths
+                .get(step.source.node_id.as_str())
+                .cloned()
+                .unwrap_or_default();
+            for branch in entries {
+                let value = branch.items.iter().find_map(|item| match item {
+                    StepItem::Segment(id) => segment_sources.get_key_value(id.as_str()),
+                    _ => None,
+                });
+                let value_expr = value.map_or_else(
+                    || Expr::Opaque {
+                        text: String::new(),
+                    },
+                    |(_, &index)| ir::parse_value(&sources[index]),
+                );
+                inits.insert(sources.len(), (constructed.clone(), value_expr));
+                sources.push(StatementSource {
+                    id: branch.source.node_id.clone(),
+                    subject: subject.clone(),
+                    context: SourceContext::BranchLabel {
+                        branch_id: branch.source.node_id.clone(),
+                        step_id: step.source.node_id.clone(),
+                        step_path: step_path.clone(),
+                        segment_id: intro_id.to_string(),
+                        value_segment_id: value.map(|(&id, _)| id.to_string()),
+                    },
+                    text: branch.label_text.clone(),
+                    tokens: branch.label_tokens.clone(),
+                    links: branch.label_links.clone(),
+                });
+            }
+        }
     }
-    sources
+    (sources, inits)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::testing::{extract_html as extract, MINI};
+    use crate::state::testing::{extract_html as extract, DL_HTML, MINI};
     use crate::state::STATE_VERSION;
 
     #[test]
@@ -1014,6 +1110,76 @@ mod tests {
         );
         assert_eq!(init.constructed.as_deref(), Some("HTML#concept-node"));
         assert!(sites.iter().all(|s| s.site_id.starts_with("site-")));
+    }
+
+    #[test]
+    fn dl_entries_are_initializations_with_label_context() {
+        let state = extract(DL_HTML, "HTML");
+        let sites = derive_sites(&state);
+        let init = sites.iter().find(|s| s.class == SiteClass::Init).unwrap();
+        assert_eq!(init.context, "branch_label");
+        assert_eq!(init.step_path.as_deref(), Some("1"));
+        assert_eq!(init.value_text.as_deref(), Some("true"));
+        assert_eq!(init.constructed.as_deref(), Some("idl:Document"));
+        assert_eq!(init.text, "Let *document* be a new `Document`, with:");
+        assert_eq!(init.target_text, "is initial `about:blank`");
+        assert!(state.statements.iter().any(|s| matches!(
+            &s.kind,
+            StatementKind::Init {
+                form: InitForm::DlEntries,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn switch_dl_labels_are_not_initializers() {
+        let html = r##"<div class="algorithm"><p>To <dfn id="a">a</dfn>:</p><ol><li><p>Switch on <var>x</var>:</p><dl class="switch"><dt><a href="#f">f</a></dt><dd>Return.</dd></dl></li></ol></div>"##;
+        let state = extract(html, "HTML");
+        assert!(!state
+            .sources
+            .iter()
+            .any(|s| matches!(s.context, SourceContext::BranchLabel { .. })));
+    }
+
+    #[test]
+    fn dl_entry_values_and_label_roles() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="run">run</dfn>:</p><ol>
+<li><p>Let <var>r</var> be a new <a href="#request">request</a> with</p>
+<dl><dt><a href="#mode">mode</a> of <a href="#client">client</a></dt><dd>"<code>html</code>"</dd>
+<dt><a href="#origin">origin</a></dt><dd><var>o</var></dd></dl></li></ol></div>"##;
+        let state = extract(html, "HTML");
+        let inits: Vec<_> = state
+            .statements
+            .iter()
+            .filter_map(|s| match &s.kind {
+                StatementKind::Init {
+                    form: InitForm::DlEntries,
+                    entries,
+                    constructed,
+                } => Some((entries, constructed)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(inits.len(), 2);
+        assert_eq!(
+            inits[0].0[0].value,
+            Expr::Literal(Literal::String("html".to_string()))
+        );
+        assert_eq!(inits[1].0[0].value, Expr::Var("o".to_string()));
+        assert!(inits
+            .iter()
+            .all(|(_, c)| matches!(c, Some(TypeRef::Unresolved(t)) if t.anchor == "request")));
+        let class_of = |anchor: &str| {
+            state
+                .occurrences
+                .iter()
+                .find(|o| o.target.as_ref().is_some_and(|t| t.anchor == anchor))
+                .map(|o| o.class)
+        };
+        assert_eq!(class_of("mode"), Some(OccurrenceClass::Init));
+        assert_eq!(class_of("client"), Some(OccurrenceClass::Read));
+        assert_eq!(class_of("origin"), Some(OccurrenceClass::Init));
     }
 
     #[test]
