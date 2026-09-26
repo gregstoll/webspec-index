@@ -311,6 +311,226 @@ shows the member view: each member anchor and name, with the count of sites that
 remove it. Individual flag anchors like `HTML#sandboxed-scripts-browsing-context-flag` also
 resolve to the member view.
 
+## Slices and outlines
+
+Four flags of `query` cut a stored algorithm to a focused view. Every omitted step is counted in a
+marker; nothing is dropped silently.
+
+```sh
+webspec-index query HTML#navigate --involving historyHandling --format markdown
+webspec-index query HTML#navigate --feeding 24.9.1 --format markdown
+webspec-index query HTML#navigate --depth 1 --format markdown
+webspec-index query HTML#navigate --steps 24 --format markdown
+```
+
+`--involving`, `--feeding` and `--steps` are mutually exclusive. `--depth N` combines with any of
+them. Plain `query` output is unchanged.
+
+### Forward slice: `--involving VAR[,VAR]`
+
+Answers: "what steps does this variable influence?"
+
+The **seeds** are the given names. Each must be mentioned by some step in the algorithm; if not, the
+query returns `slice_unknown_variable` and lists the algorithm's variables in first-mention order.
+
+**Slice variables** start as the seeds and grow to a fixed point: a definition edge of kind `Let`,
+`Set`, or local `Mutate` whose uses intersect the slice variables adds the variable it defines. The
+closure is flow-insensitive — a variable in the slice is in the slice at every step — matching
+may-semantics. Each derived variable records the edge kind, the step, and which slice variables were
+in its uses.
+
+**Matched steps** are steps whose own text mentions a slice variable. Own text is the step's segments
+and branch labels; child steps and notes are not own text. A step that rebinds a slice variable
+(`Set *historyHandling* to "push"`) is also matched.
+
+**Context steps** are the proper path prefixes of matched steps. Their text is rendered in full; their
+non-kept children are elided.
+
+**Inherited steps** are var-less children of matched steps (steps mentioning no variable at all). They
+can only be read in terms of their matched parent: "Return.", "Abort these steps.", pronoun steps such
+as "Remove its children." A child that mentions other variables is not inherited.
+
+**Stores** — a `Set`/`Mutate` whose target has hops or a non-variable root (`Set *d*'s origin to *v*`)
+is reported under `Stored into object state, not followed` with the step, the target path, and the
+slice variables in its value. The root variable does not join the slice. Use `--involving` from that
+root to follow it.
+
+### Backward slice: `--feeding STEP[:VAR,…]`
+
+Answers: "which earlier steps define the variables that step STEP uses?"
+
+The **target** is the step with the given path; an unknown path returns `slice_unknown_step`. The
+**seeds** are the variables the target mentions, or the given subset (each must be mentioned by the
+target; otherwise `slice_invalid_selector` lists the target's variables).
+
+Kept steps: the target (role `target`), all definition edges of slice variables at steps before the
+target in document order (role `definition`), and the context steps of all kept steps. **Field stores
+into a variable's object** (`Set *documentState*'s origin to`) count as backward definitions — the
+step that built up the object feeds the using step.
+
+Also listed:
+- **Inputs** — slice variables with no definition edge anywhere in the algorithm (parameters, or
+  variables bound by forms the IR does not yet parse: loop variables, named-body parameters).
+- **Later definitions** — definition edges of slice variables at or after the target, listed rather
+  than kept, since they matter only when a loop encloses both.
+
+### Definition edges
+
+The slice index turns statement IR entries into edges, each at the statement's step:
+
+| Statement | Edge |
+|---|---|
+| `Let *x* be V` | defines *x*; uses = variables of V (including `New`/`Init` entry values) |
+| `Set *x* to V` (plain variable target) | defines *x*; uses = variables of V |
+| `Append/prepend/map-set *x*` (Mutate, no hops) | modifies *x*; uses = operand and subscript variables |
+| `Set`/`Mutate` with hops or a non-variable root | Store; root variable tagged (no slice growth) |
+| `Init` | no own edge; its entry values count as uses of the enclosing `Let`/`Set` |
+| `Opaque` | Opaque; uses = variables in the statement span |
+
+`Let *documentState* be a new document state with: origin → *navigable*'s …` links the initializer
+values to *documentState* through the `New` / `Init` pair, so *navigable* is a use of *documentState*
+and the enclosing `Let`.
+
+### Named-argument labels
+
+A `<var>` that is exactly one link (`<a href="…"><var>x</var></a>`) is a callee's parameter name being
+bound by the caller, not a use of the caller's variable *x*. Such tokens are excluded from step
+mentions. A `<var>` inside longer link text ("`[number of days in month *month*](…)`") is a real use.
+
+This is why `DOM#concept-node-insert --involving suppressObservers` returns only step 8: the other
+occurrences of *suppressObservers* in the algorithm are argument labels.
+
+### Not followed
+
+- **Opaque statement.** A matched step has a mutation verb whose target the IR did not parse. Its
+  uses include a slice variable, so it may assign a variable the slice does not follow. Listed under
+  `Not followed: … (opaque statement)`.
+- **Loop binding.** A matched step has a clause-initial `For each *x* (of|in|from)` and *x* is not
+  in the slice. Sub-project 3's `ForEach` edges will replace this marker. Listed under `Not followed:
+  … binds *x* in a loop`.
+
+### Rebound names
+
+Variable identity is the name within one algorithm. When a name is `Let`-bound at more than one step
+(two branches of an `If`/`Otherwise`), it is treated as one variable. The result lists such names
+under `Rebound names treated as one variable: *x* (Let at 3, 9)` in the summary and under `rebound`
+in JSON.
+
+### Markers
+
+Omitted runs are replaced by marker lines:
+
+```
+- [step 15.2 omitted: no use of *historyHandling*]
+- [steps 16–20 omitted (7 steps): no use of *historyHandling*]
+```
+
+A single sibling uses `step P omitted`; several siblings use `steps P–Q omitted` (en dash). `(N
+steps)` appears when the run hides more steps than its visible sibling count (substeps included).
+The reason identifies the selector:
+
+| Selector | Reason |
+|---|---|
+| `--involving a` | `no use of *a*` / `no use of *a* or *b*` / `no use of *a*, *b* or *c*` (seeds only) |
+| `--feeding 24.9.1` | `does not feed step 24.9.1` |
+| `--feeding 24.9.1:historyEntry` | `does not feed *historyEntry* in step 24.9.1` |
+| `--steps 24.8` | `outside 24.8` / `outside 24.8, 3.2` |
+| `--depth 1` | `below depth 1` |
+| `--depth 1` under a slice selector | `below depth 1, 3 in slice` (hidden slice steps) |
+
+Kept steps plus the step counts of all markers equal the algorithm's total step count.
+
+### Summary block
+
+In view mode, `## Content` becomes a titled heading followed by a summary. Example for
+`HTML#navigate --involving historyHandling`:
+
+```
+## Content — steps involving *historyHandling*
+
+Kept 14 of 67 steps: 9 involve the slice variables, 5 enclose them (15, 21, 22, 24, 24.9). 53 omitted
+in 8 markers.
+Slice variables: *historyHandling*; *continue* (Let at 22.4).
+Semantics: may; this algorithm only, callees are not followed.
+```
+
+Optional lines (each only when non-empty): `Inherited (no variables, under a matched step): 4.1`;
+`Stored into object state, not followed: 7.2 *parent*'s children (*node*)`;
+`Not followed: 7.7 binds *inclusiveDescendant* in a loop; 11.1 binds *inclusiveDescendant* in a loop`;
+`Rebound names treated as one variable: *x* (Let at 3, 9)`.
+Backward adds `Inputs: *navigable*, *url*, …` and `Later definitions, not followed: …`.
+
+### JSON `slice` object
+
+With `--format json`, a top-level `slice` object is added to the response. Example for
+`query DOM#concept-node-insert --involving parent`:
+
+```json
+"slice": {
+  "algorithm": "DOM#concept-node-insert",
+  "view": {"involving": ["parent"], "depth": null},
+  "variables": [
+    {"name": "parent", "basis": "seed"},
+    {"name": "previousSibling", "basis": "let", "step": "6", "from": ["parent"]}
+  ],
+  "steps": [
+    {"path": "5", "role": "context"}, {"path": "5.1", "role": "match"}, {"path": "5.2", "role": "match"},
+    {"path": "6", "role": "match"}, {"path": "7", "role": "context"}, {"path": "7.1", "role": "match"},
+    {"path": "7.2", "role": "match"}, {"path": "7.3", "role": "match"}, {"path": "7.4", "role": "match"},
+    {"path": "7.5", "role": "match"}, {"path": "8", "role": "match"}, {"path": "9", "role": "match"}
+  ],
+  "omitted": [
+    {"parent": null, "first": "1", "last": "4", "steps": 6, "reason": "no use of *parent*"},
+    {"parent": "7", "first": "7.6", "last": "7.7", "steps": 9, "reason": "no use of *parent*"},
+    {"parent": null, "first": "10", "last": "12", "steps": 4, "reason": "no use of *parent*"}
+  ],
+  "stores": [], "unfollowed": [], "rebound": [],
+  "status": {
+    "semantics": "may", "scope": "algorithm", "rendering": "aligned",
+    "counts": {"steps": 31, "kept": 12, "matched": 10, "context": 2, "inherited": 0, "omitted": 19},
+    "issues": []
+  }
+}
+```
+
+### May-semantics
+
+Slicing uses may-semantics: a variable in the slice is in the slice at every step (flow-insensitive),
+and only the algorithm itself is analyzed. Callees are not followed — an operation given a slice
+variable may change that variable's object; every view says so in the summary. Sub-projects 4 and 5
+will replace this blanket statement with specific store evidence and cross-algorithm binding.
+
+### Full-content fallback
+
+When the stored markdown's ordered-list numbering differs from the structural step paths, the content
+is printed in full and the summary block says:
+
+```
+Rendering fell back to the full algorithm: the stored content's step numbering differs from the
+structure (M items vs N steps). Steps in the view: 5, 5.1, 6, …
+```
+
+JSON `status.rendering` is `"unaligned"` and `issues` contains `"render_unaligned"`. The `slice`
+object (kept paths, variables) is still computed and returned.
+
+### PR previews and old indexes
+
+PR snapshot sections have no slice index. A view request on a PR snapshot returns error code
+`slice_unavailable`. The same code on a non-PR section means the local index was built before
+slicing was added; re-parse to fix it:
+
+```sh
+webspec-index update -s SPEC
+```
+
+### Receiver-like parameters
+
+A variable that appears in nearly every step (a "receiver" like *navigable* in HTML#navigate) produces
+a forward slice that keeps most of the algorithm. Use `--depth 1` for a compact outline first, then
+drill into the steps that matter with `--steps`. Reserve `--involving` for parameters with a tighter
+footprint — *historyHandling* in HTML#navigate keeps 14 of 67 steps (35% of content), while *navigable*
+keeps 53 of 67.
+
 ## Writing `state/` YAML
 
 State declarations and verb rules supplement the structurally inferred object model. They

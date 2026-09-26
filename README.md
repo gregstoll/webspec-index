@@ -68,6 +68,11 @@ webspec-index state HTML#is-initial-about:blank --format markdown
 webspec-index state "Document.*sandbox*"
 webspec-index state Document
 
+# Views: cut an algorithm to a focused subset — every omitted step is counted in a marker
+webspec-index query HTML#navigate --depth 1 --format markdown          # outline: top-level steps only
+webspec-index query HTML#navigate --involving historyHandling --format markdown  # steps that involve historyHandling and variables derived from it
+webspec-index query HTML#navigate --feeding 24.9.1 --format markdown   # earlier steps that define the variables step 24.9.1 uses
+
 # Query text with compact possible-effect summaries (default: up to 12 groups)
 webspec-index query "HTML#navigate"
 webspec-index query "HTML#navigate" --effects cached
@@ -227,6 +232,7 @@ See [editors/vscode/](editors/vscode/) and [editors/zed/](editors/zed/) for deta
 4. **Refreshes snapshots** on a 24h cadence with content-hash change detection
 5. **PR previews** fetch the PR build and its merge base (WHATWG: rendered pages from whatpr.org + commit-snapshots; TC39 proposals: committed `index.html` from the head/base repos via the GitHub API), storing both as separate snapshots for querying and diffing
 6. **State layer** — at index time, builds an object model (types, fields, owners, member sets) from structural declarations and a statement IR from algorithm step text, then joins them across specs at query time to list who writes each field
+7. **Views** — views cut the stored algorithm markdown at step paths using a per-algorithm slice index built at index time from the step structure and the statement IR; every omitted step is counted in a marker
 
 ## Development
 
