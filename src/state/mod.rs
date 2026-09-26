@@ -9,6 +9,7 @@ pub mod extract;
 pub mod ir;
 pub mod lookup;
 pub mod model;
+pub mod query;
 pub mod testing;
 pub(crate) mod typeexpr;
 pub(crate) mod types;

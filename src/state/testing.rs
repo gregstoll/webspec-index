@@ -71,6 +71,39 @@ pub fn index_offline_with(
     Ok(snapshot)
 }
 
+pub const QUERY_DOM: &str = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-node">Node</dfn> {};
+interface <dfn data-dfn-type="interface" id="interface-element">Element</dfn> : Node {};
+interface <dfn data-dfn-type="interface" id="interface-document">Document</dfn> : Node {};</pre>
+<p>A <dfn data-dfn-type="dfn" id="concept-node">node</dfn>. A <dfn data-dfn-type="dfn" id="concept-document">document</dfn>.</p>
+<h3 id="interface-node-h">Node</h3>
+<p>Each <a href="#concept-node">node</a> has an associated <dfn data-dfn-for="Node" data-dfn-type="dfn" id="concept-node-document">node document</dfn>, set upon creation, that is a <a href="#concept-document">document</a>.</p>
+<div class="algorithm"><p>To <dfn id="concept-node-adopt">adopt</dfn> a <var>node</var> into a <var>document</var>:</p><ol>
+<li><p>Set <var>node</var>’s <a href="#concept-node-document">node document</a> to <var>document</var>.</p></li></ol></div>"##;
+
+pub const QUERY_HTML: &str = r##"<pre><code class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</code></pre>
+<h3 id="the-document-object">The Document object</h3>
+<p>Each <code><a href="#document">Document</a></code> has an <dfn id="is-initial-about:blank">is initial <code>about:blank</code></dfn>, which is a boolean, initially false.</p>
+<div data-algorithm=""><p>The <dfn id="document-open-steps">document open steps</dfn> are:</p><ol>
+<li><p>Set <var>document</var>'s <a href="#is-initial-about:blank">is initial <code>about:blank</code></a> to false.</p></li>
+<li><p>Set <var>d</var>'s <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a> to <var>x</var>.</p></li>
+<li><p>Add <var>s</var> to <var>s</var>'s <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a>'s <a href="#open-dialogs-list">open dialogs list</a>.</p></li></ol></div>"##;
+
+/// In-memory DB holding the given specs, indexed offline with the grammar only
+/// (empty catalog), so query tests do not change when the bundled catalog grows.
+pub fn db_with(specs: &[(&str, &str)]) -> rusqlite::Connection {
+    let conn = crate::db::open_in_memory().expect("in-memory db");
+    for (spec, html) in specs {
+        index_offline_with(&conn, spec, base_url(spec), html, &StateCatalog::default())
+            .expect("index_offline");
+    }
+    conn
+}
+
+/// DOM and HTML query fixtures together.
+pub fn query_fixture_db() -> rusqlite::Connection {
+    db_with(&[("DOM", QUERY_DOM), ("HTML", QUERY_HTML)])
+}
+
 /// Parse, extract and store one spec snapshot using the bundled catalog.
 pub fn index_offline(
     conn: &rusqlite::Connection,
