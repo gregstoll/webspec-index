@@ -25,6 +25,7 @@ pub fn extract_with_catalog(html: &str, spec: &str, catalog: &StateCatalog) -> S
         sections: &parsed.sections,
         idl_definitions: &parsed.idl_definitions,
         catalog,
+        body_nodes: None,
     })
 }
 
@@ -99,6 +100,7 @@ pub fn index_offline_with(
         sections: &parsed.sections,
         idl_definitions: &parsed.idl_definitions,
         catalog,
+        body_nodes: None,
     });
     let spec_id = crate::db::write::insert_or_get_spec(conn, spec, base_url, "offline")?;
     let snapshot = crate::db::write::insert_snapshot(conn, spec_id, &sha, "2026-09-25")?;

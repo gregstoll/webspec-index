@@ -32,6 +32,11 @@ pub struct StateInputs<'a> {
     pub sections: &'a [ParsedSection],
     pub idl_definitions: &'a [ParsedIdlDefinition],
     pub catalog: &'a StateCatalog,
+    /// Pre-computed set of algorithm-body node IDs (from
+    /// `structural_body_nodes`).  When `Some`, passed directly to
+    /// `prose_sources` so `find_algorithm_candidates` is not run a second
+    /// time on the same document.  `None` falls back to computing it inline.
+    pub body_nodes: Option<HashSet<ego_tree::NodeId>>,
 }
 
 const EMBEDDED: &str = include_str!("../../data/semantics/embedded.json");
@@ -92,6 +97,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         base_url,
         inputs.snapshot_sha,
         inputs.sections,
+        inputs.body_nodes.as_ref(),
     );
     let prose_sources = prose.sources.len() as u32;
     sources.extend(prose.sources);

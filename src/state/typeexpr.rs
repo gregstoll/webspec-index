@@ -494,30 +494,28 @@ fn extract_type_phrase(
     tokens: &[BlockToken],
     resolve: &dyn Fn(&AnchorTarget) -> TypeRef,
 ) -> Option<(String, Vec<(String, TypeRef)>)> {
-    static R1: OnceLock<Regex> = OnceLock::new(); // , which is (a|an|either)? T
+    static R1: OnceLock<Regex> = OnceLock::new(); // , which is (an|a|either)? T
     static R2: OnceLock<Regex> = OnceLock::new(); // , (a|an) T
     static R3: OnceLock<Regex> = OnceLock::new(); // (a|an T)
-    static R4: OnceLock<Regex> = OnceLock::new(); // that is (a|an)? T
-    static R5: OnceLock<Regex> = OnceLock::new(); // (null or (a|an)? T)
-
-    let t_end = r"(?:,\s*initially|[,\.;\)]|$)";
-    let t_pat = r"(.+?)";
+    static R4: OnceLock<Regex> = OnceLock::new(); // that is (an|a)? T
+    static R5: OnceLock<Regex> = OnceLock::new(); // (null or (an|a)? T)
 
     // Each regex captures T in group 1.
+    // Articles use `(?:an|a|either)\s+` (longer alternatives first, space required)
+    // so "an" is not mistakenly split into "a" + "n T".
     let patterns: &[(&OnceLock<Regex>, &str)] = &[
         (
             &R1,
-            r"^,\s*which\s+is\s+(?:a|an|either)?\s*(.+?)(?:,\s*initially|[,\.;\)]|$)",
+            r"^,\s*which\s+is\s+(?:(?:an|a|either)\s+)?(.+?)(?:,\s*initially|[,\.;\)]|$)",
         ),
         (&R2, r"^,\s+(?:a|an)\s+(.+?)(?:,\s*initially|[,\.;\)]|$)"),
         (&R3, r"^\s*\((?:a|an)\s+(.+?)\)"),
         (
             &R4,
-            r"\bthat\s+is\s+(?:a|an)?\s*(.+?)(?:,\s*initially|[,\.;\)]|$)",
+            r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|[,\.;\)]|$)",
         ),
-        (&R5, r"^\s*\(null\s+or\s+(?:a|an)?\s*(.+?)\)"),
+        (&R5, r"^\s*\(null\s+or\s+(?:(?:an|a)\s+)?(.+?)\)"),
     ];
-    let _ = (t_end, t_pat); // suppress unused warnings
 
     for (cell, source) in patterns {
         if let Some(caps) = regex(cell, source).captures(post) {
@@ -615,6 +613,29 @@ fn link_to_text_and_ref(
         )),
         _ => None,
     }
+}
+
+// ── Helpers used by declare.rs ───────────────────────────────────────────────
+
+/// Substitute `⟦Cn⟧` placeholders with their code text from `tokens`.
+///
+/// Call this before `initial_value` when the clause may contain quoted code
+/// elements (e.g. `initially "<code>complete</code>"`).  The substitution
+/// lets the initial-value regex match the whole quoted string rather than
+/// stopping at the placeholder boundary.
+pub(crate) fn substitute_code_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(&RE, r"⟦C(\d+)⟧")
+        .replace_all(s, |caps: &regex::Captures<'_>| {
+            let n: usize = caps[1].parse().unwrap_or(usize::MAX);
+            if let Some(&ti) = pat.slots.get(n) {
+                if let BlockToken::Code(text) = &tokens[ti] {
+                    return text.clone();
+                }
+            }
+            caps[0].to_string()
+        })
+        .into_owned()
 }
 
 // ── Helper used by declare.rs ─────────────────────────────────────────────────

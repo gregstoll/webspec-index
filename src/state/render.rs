@@ -129,12 +129,12 @@ fn member(result: &StateMemberResult) -> String {
         "- Member of: `{set_name}` ({}), declared in {}:\n  “{}”\n",
         info.set, info.declaration.section, info.declaration.text
     );
-    site_group(&mut out, "Adds", result.adds.len() as u32, &result.adds);
+    site_group(&mut out, "Adds", result.adds.count, &result.adds.items);
     site_group(
         &mut out,
         "Removes",
-        result.removes.len() as u32,
-        &result.removes,
+        result.removes.count,
+        &result.removes.items,
     );
     unclassified_group(
         &mut out,
@@ -481,14 +481,13 @@ pub fn coverage(result: &StateCoverageResult) -> String {
     out.push('\n');
 
     out.push_str("| Class | Count |\n|---|---:|\n");
-    let classified_total: u32 = c.occurrences.values().sum();
+    let occurrence_total: u32 = c.occurrences.values().sum();
     for (class, count) in &c.occurrences {
         let _ = writeln!(out, "| {class} | {count} |");
     }
-    let unclassified_n = c.unclassified_review.len() as u32;
-    let total_with_unclassified = classified_total + unclassified_n;
-    if total_with_unclassified > 0 {
-        let pct = unclassified_n as f64 / total_with_unclassified as f64 * 100.0;
+    if occurrence_total > 0 {
+        let unclassified_n = c.occurrences.get("unclassified").copied().unwrap_or(0);
+        let pct = unclassified_n as f64 / occurrence_total as f64 * 100.0;
         let _ = writeln!(out, "\nUnclassified: {pct:.1}%");
     }
     out.push('\n');
@@ -500,7 +499,7 @@ pub fn coverage(result: &StateCoverageResult) -> String {
     out.push('\n');
 
     let n = c.unclassified_review.len();
-    let _ = writeln!(out, "### Unclassified review ({n})");
+    let _ = writeln!(out, "### Unclassified review ({n}, all targets)");
     for item in &c.unclassified_review {
         let step = item
             .step_path
@@ -852,7 +851,10 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
             md.contains("Set statements with a structured target: 2 / 2 (100.0%)"),
             "{md}"
         );
-        assert!(md.contains("### Unclassified review (2)"), "{md}");
+        assert!(
+            md.contains("### Unclassified review (2, all targets)"),
+            "{md}"
+        );
         assert_eq!(
             crate::state::query::coverage(&conn, "NOPE")
                 .unwrap_err()

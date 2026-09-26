@@ -196,6 +196,9 @@ Use this first when the task is about API shape or IDL ownership, then use `refs
 webspec-index state 'HTML#is-initial-about:blank' --format markdown
 webspec-index state 'Document' --format markdown
 webspec-index state 'Document.*sandbox*' --format markdown
+webspec-index state 'HTML#*sandbox*' --format markdown
+webspec-index state 'HTML#sandboxing-flag-set' --format markdown
+webspec-index state --coverage HTML --format markdown
 webspec-index state 'SPEC#anchor' | --coverage SPEC [--no-inits] [--unclassified] [-l N] [--rules PATH] [--format json|markdown]
 ```
 
@@ -205,6 +208,8 @@ Answers use **may-semantics** — a listed site may set the field. Reads are cou
 Selector forms:
 - `SPEC#anchor` of a field → field view (writes, inits, owner, type)
 - `SPEC#anchor` of a type → type view (all fields, tables per supertype)
+- `SPEC#GLOB` (e.g. `"HTML#*sandbox*"`) → field list matching anchor glob
+- `SPEC#anchor` of a set → member view (adds/removes per member)
 - `TYPE` (e.g. `Document`) → type view
 - `"TYPE.FIELD"` (e.g. `"Element.node document"`) → field view with inheritance path
 - `"TYPE.GLOB"` (e.g. `"Document.*sandbox*"`) → field list matching name or anchor

@@ -142,6 +142,10 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
                 &base_url,
                 &synthetic_sha,
             );
+            // Compute body-node ids once so prose_sources does not repeat the
+            // find_algorithm_candidates pass that extract_step_structure_from_document
+            // already ran.
+            let body_nodes = crate::parse::steps::structural_body_nodes(&document);
             let parsed = rx
                 .recv()
                 .map_err(|_| anyhow::anyhow!("section worker failed"))?;
@@ -188,6 +192,7 @@ pub(crate) fn parse_one(job: ParseJob) -> anyhow::Result<ParsedHtml> {
                     sections: &parsed.sections,
                     idl_definitions: &parsed.idl_definitions,
                     catalog: crate::state::extract::bundled_catalog(),
+                    body_nodes: Some(body_nodes),
                 })
             });
             Ok((serde_json::to_string(&structure)?, state, fragment))

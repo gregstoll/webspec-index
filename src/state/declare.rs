@@ -10,7 +10,9 @@ use crate::state::model::{
     AnchorTarget, DeclarationSite, FieldBasis, FieldDef, ModelIssue, Owner, OwnerBasis, OwnerRef,
     OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind, TypeRef,
 };
-use crate::state::typeexpr::{declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text};
+use crate::state::typeexpr::{
+    declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text, substitute_code_tokens,
+};
 use crate::state::types::{ConceptDfn, TypeTable};
 use regex::Regex;
 use scraper::{ElementRef, Html, Node, Selector};
@@ -852,9 +854,11 @@ pub(crate) fn declare_fields(
                     dd_text.as_deref(),
                     &resolve_fn,
                 );
+                let clause_text = substitute_code_tokens(&pat.text[clause], &pat, &tokens);
+                let next_sent_text = next_sent.map(|s| substitute_code_tokens(&s, &pat, &tokens));
                 let init = initial_value(
-                    &pat.text[clause],
-                    next_sent.as_deref(),
+                    &clause_text,
+                    next_sent_text.as_deref(),
                     intro_initial.as_deref(),
                 );
                 (ty, init)
@@ -1651,6 +1655,51 @@ mod tests {
         );
         assert!(
             matches!(&f.initial, Some(InitialValue::Opaque { text }) if text == "set upon creation")
+        );
+    }
+
+    #[test]
+    fn which_is_an_article_does_not_bleed_into_type() {
+        // Regression for R1 regex: "a|an" with zero-width \s* caused "an foo"
+        // to be parsed as article "a" + type "n foo".
+        let out = run_declare(
+            r##"<pre class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</pre>
+<p>Each <code><a href="#document">Document</a></code> has an associated <dfn id="concept-document-coop" data-dfn-for="Document">opener policy</dfn>, which is an <a href="#opener-policy">opener policy</a>, initially a new opener policy.</p>"##,
+            "HTML",
+        );
+        let f = field(&out, "concept-document-coop");
+        // The type text must be "opener policy", not "n opener policy".
+        let type_text = match &f.declared_type {
+            TypeExpr::Nominal { text, .. } => Some(text.as_str()),
+            _ => None,
+        };
+        assert_eq!(
+            type_text,
+            Some("opener policy"),
+            "got {:?}",
+            f.declared_type
+        );
+    }
+
+    #[test]
+    fn initial_value_quoted_code_element() {
+        // Regression: `initially "<code>complete</code>"` was parsed as
+        // InitialValue::Opaque with text `"` because the regex stopped at the
+        // ⟦C0⟧ placeholder.  substitute_code_tokens pre-expands it so the full
+        // quoted string is captured.
+        let out = run_declare(
+            r##"<pre class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</pre>
+<p>Each <code><a href="#document">Document</a></code> has a <dfn id="current-document-readiness" data-dfn-for="Document">current document readiness</dfn>, a string, initially "<code>complete</code>".</p>"##,
+            "HTML",
+        );
+        let f = field(&out, "current-document-readiness");
+        assert!(
+            matches!(
+                &f.initial,
+                Some(InitialValue::Literal { value: Literal::String(s), .. }) if s == "complete"
+            ),
+            "got {:?}",
+            f.initial
         );
     }
 }

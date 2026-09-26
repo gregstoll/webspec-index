@@ -23,12 +23,17 @@ pub(crate) struct ProseOutput {
 
 /// One document-order pass. Blocks inside a structural algorithm body or a
 /// `pre` are skipped; callout blocks only count toward `callouts_excluded`.
+///
+/// `precomputed_bodies` — when the caller already ran `structural_body_nodes`
+/// on this document (e.g. pipeline.rs, to avoid a second pass), pass a
+/// reference here.  Pass `None` to compute it inline.
 pub(crate) fn prose_sources(
     document: &Html,
     spec: &str,
     base_url: &str,
     snapshot_sha: &str,
     sections: &[ParsedSection],
+    precomputed_bodies: Option<&HashSet<ego_tree::NodeId>>,
 ) -> ProseOutput {
     let scope_anchors: HashSet<&str> = sections
         .iter()
@@ -40,7 +45,13 @@ pub(crate) fn prose_sources(
         })
         .map(|s| s.anchor.as_str())
         .collect();
-    let bodies = structural_body_nodes(document);
+    let bodies_owned;
+    let bodies: &HashSet<ego_tree::NodeId> = if let Some(b) = precomputed_bodies {
+        b
+    } else {
+        bodies_owned = structural_body_nodes(document);
+        &bodies_owned
+    };
     let mut out = ProseOutput {
         sources: Vec::new(),
         mentions: BTreeMap::new(),

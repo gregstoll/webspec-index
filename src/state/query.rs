@@ -345,8 +345,8 @@ pub struct MemberInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMemberResult {
     pub member: MemberInfo,
-    pub adds: Vec<SiteInfo>,
-    pub removes: Vec<SiteInfo>,
+    pub adds: SiteGroup,
+    pub removes: SiteGroup,
     pub unclassified: SiteGroup,
     pub status: StateStatus,
 }
@@ -1561,8 +1561,14 @@ impl<'a> Scope<'a> {
                     text: member.decl_text,
                 },
             },
-            adds,
-            removes,
+            adds: SiteGroup {
+                count: counts.adds,
+                items: adds,
+            },
+            removes: SiteGroup {
+                count: counts.removes,
+                items: removes,
+            },
             unclassified: SiteGroup {
                 count: counts.unclassified,
                 items: if self.options.unclassified {
@@ -2160,8 +2166,10 @@ mod tests {
                 .map(|s| s.step_path.clone().unwrap_or_default())
                 .collect()
         };
-        assert_eq!(paths(&m.adds), ["1"]);
-        assert_eq!(paths(&m.removes), ["2"]);
+        assert_eq!(m.adds.count, 1);
+        assert_eq!(paths(&m.adds.items), ["1"]);
+        assert_eq!(m.removes.count, 1);
+        assert_eq!(paths(&m.removes.items), ["2"]);
         assert_eq!(m.status.coverage, Coverage::Complete);
 
         let StateResponse::Type(t) =

@@ -84,11 +84,11 @@ Includes: NonElementParentNode, DocumentOrShadowRoot, ParentNode, XPathEvaluator
 | HTML#active-parser-was-aborted active parser was aborted | boolean | false | sentence | 1 | 0 |
 | HTML#active-sandboxing-flag-set active sandboxing flag set | sandboxing flag set | — | dfn-for | 0 | 2 |
 | HTML#autofocus-candidates autofocus candidates | — | empty | sentence | 4 | 0 |
-| HTML#current-document-readiness current document readiness | string | " | sentence | 1 | 1 |
+| HTML#current-document-readiness current document readiness | string | "complete" | sentence | 1 | 1 |
 | HTML#design-mode-enabled design mode enabled | boolean | false | sentence | 2 | 0 |
 | HTML#is-initial-about:blank is initial `about:blank` | boolean | false | sentence | 1 | 1 |
 | HTML#latest-entry latest entry | session history entry or null | — | sentence | 2 | 0 |
-| HTML#concept-document-coop opener policy | n ⟦L0⟧ | a new opener policy | sentence | 1 | 1 |
+| HTML#concept-document-coop opener policy | opener policy | a new opener policy | sentence | 1 | 1 |
 | HTML#page-showing page showing | boolean | true | sentence | 3 | 0 |
 | HTML#concept-document-policy-container policy container | policy container | a new policy container | dfn-for | 1 | 1 |
 | HTML#concept-document-salvageable salvageable | — | true | sentence | 4 | 0 |
@@ -217,7 +217,7 @@ Set statements with a structured target: 1051 / 1697 (61.9%)
 | unclassified | 76 |
 | write | 907 |
 
-Unclassified: 13.0%
+Unclassified: 2.1%
 
 | Prose | Count |
 |---|---:|
@@ -225,7 +225,7 @@ Unclassified: 13.0%
 | Callouts excluded | 32 |
 | Mentions | 32703 |
 
-### Unclassified review (527)
+### Unclassified review (527, all targets)
 - HTML#rules-for-parsing-a-list-of-dimensions:5.7.2 — INFRA#ascii-whitespace — Remove all ASCII whitespace in *s*.
 - HTML#start-intersection-observing-a-lazy-loading-element:2 — INTERSECTIONOBSERVER#intersectionobserver — If *doc*'s lazy load intersection observer is null, set it to a new `IntersectionObserver` instance, initialized as follows:
 - HTML#update-the-image-data:7.4.1 — HTML#ignore-higher-layer-caching — Set the ignore higher-layer caching flag for that entry.
@@ -276,10 +276,33 @@ clause text at the cited location.
 
 ## Reflection
 
-Content-attribute reflection is tracked separately. When a field is reflected by an IDL
-attribute, the type view notes the IDL attribute and content-attribute anchor. Query the
-field anchor directly for its writes; the reflection relationship confirms that the IDL
-setter also sets the content attribute.
+Content-attribute reflection is tracked separately. Query the IDL-attribute anchor to see
+the reflection relationship:
+
+```sh
+webspec-index state HTML#dom-a-target --format markdown
+```
+
+```
+## HTML#dom-a-target — target
+
+- Not a declared field.
+- Reflects: the `target` content attribute (HTML#attr-hyperlink-target) — [Reflect]
+
+### Writes (0)
+
+### Initializations (0)
+
+Coverage: may · partial — 0 unclassified, 0 possible unlinked writes. Reads are not listed
+(0 occurrences).
+```
+
+The reflection line confirms that the IDL setter also sets the content attribute. Query the
+content-attribute anchor (`HTML#attr-hyperlink-target`) directly for its declared-field writes.
+
+An IDL attribute that is _also_ a declared field (because the spec declares it with `has a`)
+shows no reflection line. Reflections whose content-attribute definition is not indexed cannot
+be queried from the IDL anchor.
 
 ## Set members
 
