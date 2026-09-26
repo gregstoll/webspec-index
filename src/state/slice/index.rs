@@ -2,10 +2,13 @@ use crate::parse::steps::{
     InlineToken, InlineTokenKind, LinkSpan, StructuralAlgorithm, StructuralBranch,
     StructuralSegment, StructuralSpec,
 };
-use crate::state::ir::Statement;
+use crate::state::ir::{
+    Expr, Hop, Path, Root, SourceContext, Statement, StatementKind, StatementSource,
+};
+use crate::state::model::Literal;
 use crate::state::StateSpec;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SliceIndex {
@@ -74,29 +77,76 @@ impl SliceIndex {
 }
 
 /// Spec-wide lookups shared by every algorithm's [`build_one`].
-struct Lookups {}
+struct Lookups<'s> {
+    /// `Init` statements by id, for `Expr::New { init: Some(id) }`.
+    inits: BTreeMap<&'s str, &'s Statement>,
+}
+
+/// A statement of one algorithm: the index of its step, the statement, and its source.
+struct Placed<'s> {
+    step: usize,
+    statement: &'s Statement,
+    source: &'s StatementSource,
+}
 
 /// One slice index per structural algorithm, in document order; an algorithm whose anchor an
 /// earlier algorithm already has gets no index.
-pub fn build_slice_indexes(structure: &StructuralSpec, _state: &StateSpec) -> Vec<SliceIndex> {
+pub fn build_slice_indexes(structure: &StructuralSpec, state: &StateSpec) -> Vec<SliceIndex> {
     let mut seen: HashSet<&str> = HashSet::new();
     let kept: Vec<&StructuralAlgorithm> = structure
         .algorithms
         .iter()
         .filter(|algorithm| seen.insert(algorithm.source.section_anchor.as_str()))
         .collect();
-    let lookups = Lookups {};
-    let buckets: Vec<Vec<&Statement>> = vec![Vec::new(); kept.len()];
+    let mut step_at: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    for (a, algorithm) in kept.iter().enumerate() {
+        for (s, step) in algorithm.steps.iter().enumerate() {
+            step_at.insert(step.source.node_id.as_str(), (a, s));
+        }
+    }
+    let sources: BTreeMap<&str, &StatementSource> = state
+        .sources
+        .iter()
+        .map(|source| (source.id.as_str(), source))
+        .collect();
+    let lookups = Lookups {
+        inits: state
+            .statements
+            .iter()
+            .filter(|statement| matches!(statement.kind, StatementKind::Init { .. }))
+            .map(|statement| (statement.id.as_str(), statement))
+            .collect(),
+    };
+    let mut buckets: Vec<Vec<Placed>> = (0..kept.len()).map(|_| Vec::new()).collect();
+    for statement in &state.statements {
+        let Some(&source) = sources.get(statement.source_id.as_str()) else {
+            continue;
+        };
+        let step_id = match &source.context {
+            SourceContext::Algorithm {
+                step_id: Some(id), ..
+            }
+            | SourceContext::BranchLabel { step_id: id, .. } => id.as_str(),
+            _ => continue,
+        };
+        if let Some(&(a, step)) = step_at.get(step_id) {
+            buckets[a].push(Placed {
+                step,
+                statement,
+                source,
+            });
+        }
+    }
     kept.iter()
         .zip(&buckets)
         .map(|(algorithm, statements)| build_one(algorithm, statements, &lookups))
         .collect()
 }
 
-fn build_one<'a>(
+fn build_one<'a, 's>(
     algorithm: &'a StructuralAlgorithm,
-    _statements: &[&Statement],
-    _lookups: &Lookups,
+    statements: &[Placed<'s>],
+    lookups: &Lookups<'s>,
 ) -> SliceIndex {
     let step_of: HashMap<&str, usize> = algorithm
         .steps
@@ -178,11 +228,218 @@ fn build_one<'a>(
         });
     }
 
+    let known = |name: &str| var_of.get(name).copied();
+    let uses_of = |names: Vec<&str>| -> Vec<u32> {
+        let mut uses: Vec<u32> = names.into_iter().filter_map(known).collect();
+        uses.sort_unstable();
+        uses.dedup();
+        uses
+    };
+    // A `<dl>` initializer is one `Init` per `<dt>`, not linked from the `new` it initializes;
+    // its entry values are uses of the statement in the introducing segment.
+    let mut dl_entries: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for placed in statements {
+        if let (
+            StatementKind::Init { entries, .. },
+            SourceContext::BranchLabel { segment_id, .. },
+        ) = (&placed.statement.kind, &placed.source.context)
+        {
+            let names = dl_entries.entry(segment_id).or_default();
+            for entry in entries {
+                expr_vars(&entry.value, lookups, names);
+            }
+        }
+    }
+    let value_vars = |value: &'s Expr, source: &StatementSource| -> Vec<&'s str> {
+        let mut names = Vec::new();
+        expr_vars(value, lookups, &mut names);
+        if let (Expr::New { init: None, .. }, Some(entries)) =
+            (value, dl_entries.get(source.id.as_str()))
+        {
+            names.extend(entries);
+        }
+        names
+    };
+    let mut edges = Vec::new();
+    for placed in statements {
+        let step = placed.step as u32;
+        let source = placed.source;
+        let edge = |kind, var: Option<&str>, uses, target| DefEdge {
+            step,
+            kind,
+            var: var.and_then(known),
+            uses,
+            target,
+        };
+        let store = |target: &'s Path, mut names: Vec<&'s str>| {
+            if let Some(subscript) = &target.subscript {
+                expr_vars(subscript, lookups, &mut names);
+            }
+            edge(
+                DefKind::Store,
+                root_var(target),
+                uses_of(names),
+                Some(render_path(target, source)),
+            )
+        };
+        match &placed.statement.kind {
+            StatementKind::Let { var, value } => {
+                let names = value_vars(value, source);
+                edges.push(edge(DefKind::Let, Some(var), uses_of(names), None));
+            }
+            StatementKind::Set { targets, value, .. } => {
+                let value_names = value_vars(value, source);
+                for target in targets {
+                    let names = value_names.clone();
+                    edges.push(
+                        match (&target.root, target.hops.is_empty(), &target.subscript) {
+                            (Root::Var(x), true, None) => {
+                                edge(DefKind::Set, Some(x), uses_of(names), None)
+                            }
+                            _ => store(target, names),
+                        },
+                    );
+                }
+            }
+            StatementKind::Mutate {
+                target, operand, ..
+            } => {
+                let mut names = Vec::new();
+                if let Some(operand) = operand {
+                    expr_vars(operand, lookups, &mut names);
+                }
+                edges.push(match (&target.root, target.hops.is_empty()) {
+                    (Root::Var(x), true) => {
+                        if let Some(subscript) = &target.subscript {
+                            expr_vars(subscript, lookups, &mut names);
+                        }
+                        edge(DefKind::Mutate, Some(x), uses_of(names), None)
+                    }
+                    _ => store(target, names),
+                });
+            }
+            StatementKind::Init { .. } => {}
+            StatementKind::Opaque { .. } => {
+                let span = &placed.statement.span;
+                let names = mentioned(&source.tokens, &source.links)
+                    .filter(|token| span.start <= token.span.start && token.span.end <= span.end)
+                    .map(|token| token.source_text.as_str())
+                    .collect();
+                edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
+            }
+        }
+    }
+
     SliceIndex {
         anchor: algorithm.source.section_anchor.clone(),
         vars,
         steps,
-        edges: Vec::new(),
+        edges,
+    }
+}
+
+fn root_var(path: &Path) -> Option<&str> {
+    match &path.root {
+        Root::Var(x) => Some(x),
+        _ => None,
+    }
+}
+
+/// Variable names `expr` reads, appended to `out` (unfiltered, possibly repeated).
+fn expr_vars<'s>(expr: &'s Expr, lookups: &Lookups<'s>, out: &mut Vec<&'s str>) {
+    match expr {
+        Expr::Var(name) => out.push(name),
+        Expr::Path(path) => {
+            match &path.root {
+                Root::Var(name) => out.push(name),
+                Root::Opaque { text } => out.extend(scan_starred(text)),
+                Root::This | Root::Link { .. } | Root::Implicit => {}
+            }
+            if let Some(subscript) = &path.subscript {
+                expr_vars(subscript, lookups, out);
+            }
+        }
+        Expr::New { init: Some(id), .. } => {
+            if let Some(Statement {
+                kind: StatementKind::Init { entries, .. },
+                ..
+            }) = lookups.inits.get(id.as_str()).copied()
+            {
+                for entry in entries {
+                    expr_vars(&entry.value, lookups, out);
+                }
+            }
+        }
+        Expr::Opaque { text } => out.extend(scan_starred(text)),
+        Expr::This | Expr::Literal(_) | Expr::New { init: None, .. } => {}
+    }
+}
+
+/// Names between each successive pair of `*`s: `*a* and *b*` yields `a`, `b`.
+fn scan_starred(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    std::iter::from_fn(move || loop {
+        let open = rest.find('*')?;
+        let after = &rest[open + 1..];
+        let close = after.find('*')?;
+        let name = &after[..close];
+        rest = &after[close + 1..];
+        if !name.is_empty() {
+            return Some(name);
+        }
+    })
+}
+
+/// The store target as prose: `*d*'s f`, `this's [[slot]]`, `*m*[*k*]`. The possessive follows
+/// the source's typography.
+fn render_path(path: &Path, source: &StatementSource) -> String {
+    let possessive = if source.text.contains("’s") {
+        "’s "
+    } else {
+        "'s "
+    };
+    let mut parts: Vec<String> = Vec::with_capacity(path.hops.len() + 1);
+    match &path.root {
+        Root::Var(x) => parts.push(format!("*{x}*")),
+        Root::This => parts.push("this".to_owned()),
+        Root::Link { link_id, .. } => {
+            if let Some(link) = source.links.iter().find(|link| &link.id == link_id) {
+                parts.push(link.visible_text.clone());
+            }
+        }
+        Root::Opaque { text } => parts.push(text.clone()),
+        Root::Implicit => {}
+    }
+    for hop in &path.hops {
+        parts.push(match hop {
+            Hop::Field { visible_text, .. } => visible_text.clone(),
+            Hop::CodeMember { name } => format!("`{name}`"),
+            Hop::Slot { name } => format!("[[{name}]]"),
+        });
+    }
+    let mut rendered = parts.join(possessive);
+    if let Some(subscript) = &path.subscript {
+        rendered.push('[');
+        rendered.push_str(&subscript_text(subscript, source));
+        rendered.push(']');
+    }
+    rendered
+}
+
+fn subscript_text(expr: &Expr, source: &StatementSource) -> String {
+    match expr {
+        Expr::Var(n) => format!("*{n}*"),
+        Expr::Literal(literal) => match literal {
+            Literal::Bool(b) => b.to_string(),
+            Literal::Null => "null".to_owned(),
+            Literal::Undefined => "undefined".to_owned(),
+            Literal::Number(n) => n.clone(),
+            Literal::String(s) => format!("\"{s}\""),
+        },
+        Expr::Opaque { text } => text.clone(),
+        Expr::Path(path) => render_path(path, source),
+        Expr::This => "this".to_owned(),
+        Expr::New { .. } => "a new value".to_owned(),
     }
 }
 
@@ -433,6 +690,107 @@ mod tests {
         let indexes = build_slice_indexes(&structure, &state);
         assert_eq!(indexes.len(), 1, "first algorithm per anchor wins");
         assert_eq!(indexes[0].vars, ["a"]);
+    }
+
+    const EDGES: &str = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given a <var>foo</var>, a <var>bar</var> and a <var>list</var>:</p><ol>
+<li><p>Let <var>a</var> be <var>foo</var>'s <a href="#f">f</a>.</p></li>
+<li><p>Let <var>b</var> be <var>a</var>.</p></li>
+<li><p>If <var>b</var> is null, then:</p><ol><li><p>Return.</p></li><li><p>Set <var>bar</var> to 1.</p></li></ol></li>
+<li><p><a href="https://infra.spec.whatwg.org/#list-append">Append</a> <var>foo</var> to <var>list</var>.</p></li>
+<li><p>Set <var>d</var>'s <a href="#f">f</a> to <var>foo</var>.</p></li>
+<li><p>Set <var>foo</var> to 1.</p></li>
+<li><p>Set <var>m</var>[<var>k</var>] to <var>bar</var>.</p></li>
+<li><p>Let <var>t</var> be a new <a href="#thing">thing</a> whose <a href="#f">f</a> is <var>foo</var>.</p></li>
+<li><p>Append <var>foo</var> to <var>queue</var>'s <a href="#jobs">jobs</a>.</p></li>
+<li><p>Return <var>bar</var> and <var>list</var>.</p></li>
+</ol></div>
+<p><dfn id="f">f</dfn> <dfn id="thing">thing</dfn> <dfn id="jobs">jobs</dfn></p>"##;
+
+    fn edge(index: &SliceIndex, step: &str, kind: DefKind) -> DefEdge {
+        let s = index.step_by_path(step).unwrap() as u32;
+        index
+            .edges
+            .iter()
+            .find(|e| e.step == s && e.kind == kind)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {kind:?} edge at {step}: {:?}", index.edges))
+    }
+
+    fn used(index: &SliceIndex, e: &DefEdge) -> Vec<String> {
+        e.uses.iter().map(|v| index.name(*v).to_string()).collect()
+    }
+
+    #[test]
+    fn let_set_mutate_store_and_opaque_edges() {
+        let index = one(EDGES);
+        let e = edge(&index, "1", DefKind::Let);
+        assert_eq!(
+            (index.name(e.var.unwrap()), used(&index, &e)),
+            ("a", vec!["foo".to_string()])
+        );
+        let e = edge(&index, "2", DefKind::Let);
+        assert_eq!(
+            (index.name(e.var.unwrap()), used(&index, &e)),
+            ("b", vec!["a".to_string()])
+        );
+        let e = edge(&index, "3.2", DefKind::Set);
+        assert_eq!((index.name(e.var.unwrap()), e.uses.len()), ("bar", 0));
+        let e = edge(&index, "4", DefKind::Mutate);
+        assert_eq!(
+            (index.name(e.var.unwrap()), used(&index, &e)),
+            ("list", vec!["foo".to_string()])
+        );
+        let e = edge(&index, "5", DefKind::Store);
+        assert_eq!(index.name(e.var.unwrap()), "d");
+        assert_eq!(used(&index, &e), ["foo"]);
+        assert_eq!(e.target.as_deref(), Some("*d*'s f"));
+        let e = edge(&index, "6", DefKind::Set);
+        assert_eq!(index.name(e.var.unwrap()), "foo");
+        let e = edge(&index, "7", DefKind::Mutate);
+        assert_eq!(index.name(e.var.unwrap()), "m");
+        let mut u = used(&index, &e);
+        u.sort();
+        assert_eq!(u, ["bar", "k"], "map-set operand and subscript are uses");
+        let e = edge(&index, "8", DefKind::Let);
+        assert_eq!(
+            (index.name(e.var.unwrap()), used(&index, &e)),
+            ("t", vec!["foo".to_string()]),
+            "initializer entries are uses"
+        );
+        let e = edge(&index, "9", DefKind::Opaque);
+        assert_eq!(e.var, None);
+        let mut u = used(&index, &e);
+        u.sort();
+        assert_eq!(u, ["foo", "queue"]);
+        assert!(index
+            .edges
+            .iter()
+            .all(|e| e.step != index.step_by_path("10").unwrap() as u32));
+    }
+
+    #[test]
+    fn dl_initializer_entries_are_uses_of_the_let() {
+        let index = one(
+            r##"<div class="algorithm"><p>To <dfn id="go">go</dfn>:</p><ol>
+<li><p>Let <var>state</var> be a new <a href="#ds">document state</a>, with</p><dl><dt><a href="#ds-origin">origin</a></dt><dd><var>foo</var></dd><dt><a href="#ds-ref">referrer</a></dt><dd><var>bar</var>'s <a href="#f">f</a></dd></dl></li>
+<li><p>Return <var>state</var>.</p></li></ol></div>
+<p><dfn id="ds">document state</dfn> <dfn id="ds-origin">origin</dfn> <dfn id="ds-ref">referrer</dfn> <dfn id="f">f</dfn></p>"##,
+        );
+        let e = edge(&index, "1", DefKind::Let);
+        assert_eq!(index.name(e.var.unwrap()), "state");
+        let mut u = used(&index, &e);
+        u.sort();
+        assert_eq!(u, ["bar", "foo"]);
+    }
+
+    #[test]
+    fn typographic_possessive_is_kept_in_store_targets() {
+        let index = one(
+            r##"<div class="algorithm"><p>To <dfn id="go">go</dfn>:</p><ol><li><p><a href="https://infra.spec.whatwg.org/#set-append">Append</a> <var>node</var> to <var>parent</var>’s <a href="#kids">children</a>.</p></li></ol></div><p><dfn id="kids">children</dfn></p>"##,
+        );
+        let e = edge(&index, "1", DefKind::Store);
+        assert_eq!(e.target.as_deref(), Some("*parent*’s children"));
+        assert_eq!(used(&index, &e), ["node"]);
     }
 
     #[test]
