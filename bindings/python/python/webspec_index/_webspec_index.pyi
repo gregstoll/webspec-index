@@ -244,6 +244,30 @@ class FileAnalysis:
 
 # ── Functions ────────────────────────────────────────────────────────
 
+def state(
+    selector: str,
+    include_inits: bool = True,
+    unclassified: bool = False,
+    limit: Optional[int] = None,
+) -> Any:
+    """Query possible writes (state) for a selector.
+
+    *selector* is one of ``TYPE``, ``TYPE.field``, or ``SPEC#anchor``.
+    Returns a dict matching the ``StateResponse`` JSON schema.
+    Raises ``WebspecError`` when the spec has no state model or the selector
+    is not found; for ambiguous selectors the candidates are appended one per
+    line to the error message.
+    """
+    ...
+
+def state_coverage(spec: str) -> Any:
+    """Return state coverage counters for an indexed specification.
+
+    Returns a dict matching the ``StateCoverageResult`` JSON schema.
+    Raises ``WebspecError`` when the spec has no indexed state model.
+    """
+    ...
+
 def query(
     spec_anchor: str, pr: Optional[int] = ..., force_update: bool = ...
 ) -> QueryResult: ...

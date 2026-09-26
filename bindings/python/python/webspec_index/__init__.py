@@ -47,6 +47,8 @@ from ._webspec_index import (
     CoverageSummary,
     # functions
     query,
+    state,
+    state_coverage,
     get_effect_summary,
     explain_effects,
     recompute_effects,
@@ -100,6 +102,8 @@ __all__ = [
     "StepValidation",
     "CoverageSummary",
     "query",
+    "state",
+    "state_coverage",
     "get_effect_summary",
     "explain_effects",
     "recompute_effects",

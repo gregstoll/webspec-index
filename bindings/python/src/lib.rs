@@ -99,6 +99,49 @@ fn effect_result<'py, T: serde::Serialize>(
     py.import("json")?.call_method1("loads", (encoded,))
 }
 
+fn state_error(error: webspec_index::state::query::StateError) -> PyErr {
+    let mut msg = error.message.clone();
+    for candidate in &error.candidates {
+        msg.push('\n');
+        msg.push_str(candidate);
+    }
+    WebspecError::new_err(msg)
+}
+
+/// Query state (possible writes) for a selector: ``TYPE``, ``TYPE.field``, or ``SPEC#anchor``.
+#[pyfunction]
+#[pyo3(signature = (selector, include_inits=true, unclassified=false, limit=None))]
+fn state<'py>(
+    py: Python<'py>,
+    selector: &str,
+    include_inits: bool,
+    unclassified: bool,
+    limit: Option<u32>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let options = webspec_index::state::query::StateQueryOptions {
+        include_inits,
+        unclassified,
+        limit,
+    };
+    match run(webspec_index::state::service::state(
+        selector,
+        &options,
+        &[],
+    ))? {
+        Ok(result) => effect_result(py, &result),
+        Err(error) => Err(state_error(error)),
+    }
+}
+
+/// Return state coverage counters for an indexed specification.
+#[pyfunction]
+fn state_coverage<'py>(py: Python<'py>, spec: &str) -> PyResult<Bound<'py, PyAny>> {
+    match run(webspec_index::state::service::coverage(spec))? {
+        Ok(result) => effect_result(py, &result),
+        Err(error) => Err(state_error(error)),
+    }
+}
+
 /// Return a versioned possible-effects summary for an indexed specification subject.
 #[pyfunction]
 fn get_effect_summary<'py>(
@@ -355,6 +398,8 @@ fn _webspec_index(m: &Bound<'_, PyModule>) -> PyResult<()> {
     types::register(m)?;
 
     m.add_function(wrap_pyfunction!(query, m)?)?;
+    m.add_function(wrap_pyfunction!(state, m)?)?;
+    m.add_function(wrap_pyfunction!(state_coverage, m)?)?;
     m.add_function(wrap_pyfunction!(get_effect_summary, m)?)?;
     m.add_function(wrap_pyfunction!(explain_effects, m)?)?;
     m.add_function(wrap_pyfunction!(recompute_effects, m)?)?;
