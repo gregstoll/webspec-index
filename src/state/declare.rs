@@ -5,6 +5,7 @@ use crate::parse::steps::StructuralSpec;
 use crate::state::block::{
     flatten, innermost_block, list_item, norm, pattern, plain_text, sentences, BlockToken,
 };
+use crate::state::catalog::{StateCatalog, TypeDeclaration};
 use crate::state::model::{
     AnchorTarget, DeclarationSite, FieldBasis, FieldDef, ModelIssue, Owner, OwnerBasis, OwnerRef,
     OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind, TypeRef,
@@ -290,6 +291,11 @@ pub(crate) struct DeclareOutput {
     pub members: Vec<SetMember>,
     pub issues: Vec<ModelIssue>,
     pub counters: DeclareCounters,
+    /// Plain text of the innermost block of every concept dfn outside algorithm steps, by dfn id:
+    /// what a reviewed declaration's `expect_text` is checked against.
+    pub blocks: HashMap<String, String>,
+    /// The `owner_by_rule` key each entry of `fields` was counted under.
+    field_rules: Vec<&'static str>,
 }
 
 #[derive(Debug, Default)]
@@ -659,6 +665,8 @@ pub(crate) fn declare_fields(
             .as_ref()
             .map(|b| flatten(b, spec, base_url))
             .unwrap_or_default();
+        let block_text = plain_text(&tokens);
+        out.blocks.insert(id.to_string(), block_text.clone());
         let dfn_for = dfn
             .value()
             .attr("data-dfn-for")
@@ -695,7 +703,7 @@ pub(crate) fn declare_fields(
                     set: set_key,
                     declaration: DeclarationSite {
                         section_anchor: section_anchor.clone(),
-                        text: plain_text(&tokens),
+                        text: block_text,
                     },
                 });
                 out.counters.set_members += 1;
@@ -872,22 +880,26 @@ pub(crate) fn declare_fields(
             initial: initial_val,
             declaration: Some(DeclarationSite {
                 section_anchor: section_anchor.clone(),
-                text: plain_text(&tokens),
+                text: block_text,
             }),
         });
+        out.field_rules.push(rule_key(&rule));
     }
 
-    // Rewrite same-spec TypeKey::Anchor owner keys through table.by_anchor.
-    // alias_concept() can remove a Concept entry and reroute its anchor to an IDL key;
-    // fields emitted before that alias is established must be updated here.
+    rewrite_owner_keys(&mut out, resolver.table, spec);
+    out
+}
+
+/// Rewrite same-spec `TypeKey::Anchor` owner keys through `table.by_anchor`: an alias can
+/// remove a Concept entry and reroute its anchor to another key after fields named it.
+fn rewrite_owner_keys(out: &mut DeclareOutput, table: &TypeTable, spec: &str) {
     for field in &mut out.fields {
         if let Owner::Known { types, .. } = &mut field.owner {
             let mut seen = HashSet::new();
             types.retain_mut(|owner_ref| {
                 if let TypeKey::Anchor(ref target) = owner_ref.key {
                     if target.spec == spec {
-                        if let Some(new_key) = resolver.table.by_anchor.get(&target.anchor).cloned()
-                        {
+                        if let Some(new_key) = table.by_anchor.get(&target.anchor).cloned() {
                             owner_ref.key = new_key;
                         }
                     }
@@ -899,14 +911,300 @@ pub(crate) fn declare_fields(
     for member in &mut out.members {
         if let TypeKey::Anchor(ref target) = member.set {
             if target.spec == spec {
-                if let Some(new_key) = resolver.table.by_anchor.get(&target.anchor).cloned() {
+                if let Some(new_key) = table.by_anchor.get(&target.anchor).cloned() {
                     member.set = new_key;
                 }
             }
         }
     }
+}
 
+fn is_heading(element: &ElementRef<'_>) -> bool {
+    matches!(
+        element.value().name(),
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    )
+}
+
+/// What a type declaration's `expect_text` is checked against: the anchor's block text, or
+/// (for a heading) the blocks of the fields owned through the declared name.
+enum TypeAnchorText {
+    Block(String),
+    Heading,
+}
+
+/// One walk over the document for the anchors of this spec's type declarations.
+fn type_anchor_texts(
+    document: &Html,
+    spec: &str,
+    base_url: &str,
+    anchors: &HashSet<&str>,
+) -> HashMap<String, TypeAnchorText> {
+    let mut out = HashMap::new();
+    for el in document
+        .root_element()
+        .descendants()
+        .filter_map(ElementRef::wrap)
+    {
+        let Some(id) = el.value().attr("id").filter(|id| anchors.contains(id)) else {
+            continue;
+        };
+        if out.contains_key(id) {
+            continue;
+        }
+        let text = if is_heading(&el) {
+            TypeAnchorText::Heading
+        } else {
+            let block = innermost_block(&el).unwrap_or(el);
+            TypeAnchorText::Block(plain_text(&flatten(&block, spec, base_url)))
+        };
+        out.insert(id.to_string(), text);
+    }
     out
+}
+
+fn mismatch(anchor: &str, public_id: &str, what: &str) -> ModelIssue {
+    ModelIssue {
+        code: StateIssueCode::DeclarationMismatch,
+        anchor: Some(anchor.to_string()),
+        message: format!(
+            "declaration {public_id}: expect_text does not match {what}; declaration ignored"
+        ),
+    }
+}
+
+fn is_owned_via_declaration(field: &FieldDef, key: &TypeKey) -> bool {
+    matches!(&field.owner, Owner::Known { types, .. }
+        if types.iter().any(|t| t.via == OwnerVia::Declaration && t.key == *key))
+}
+
+fn resolve_key(table: &TypeTable, spec: &str, key: &TypeKey) -> TypeKey {
+    match key {
+        TypeKey::Anchor(target) if target.spec == spec => table
+            .by_anchor
+            .get(&target.anchor)
+            .cloned()
+            .unwrap_or_else(|| key.clone()),
+        _ => key.clone(),
+    }
+}
+
+/// Resolves same-spec `{nominal: SPEC#anchor}` references the catalog loader leaves unresolved.
+fn resolve_type(ty: &TypeExpr, table: &TypeTable, spec: &str) -> TypeExpr {
+    match ty {
+        TypeExpr::Nominal {
+            ty: TypeRef::Unresolved(target),
+            text,
+        } if target.spec == spec => match table.by_anchor.get(&target.anchor) {
+            Some(key) => TypeExpr::Nominal {
+                ty: TypeRef::Known(key.clone()),
+                text: text.clone(),
+            },
+            None => ty.clone(),
+        },
+        TypeExpr::Infra { kind, args } => TypeExpr::Infra {
+            kind: *kind,
+            args: args.iter().map(|a| resolve_type(a, table, spec)).collect(),
+        },
+        TypeExpr::Union(members) => TypeExpr::Union(
+            members
+                .iter()
+                .map(|m| resolve_type(m, table, spec))
+                .collect(),
+        ),
+        _ => ty.clone(),
+    }
+}
+
+/// `declare_fields` with the reviewed declarations of `catalog` that belong to `spec` (§8.2).
+/// A type declaration whose text matches binds its name before owner resolution; a heading
+/// anchor is checked against the fields owned through that name afterwards, and its binding is
+/// withdrawn on mismatch. Field declarations then override owner, type and initial value.
+pub(crate) fn declare_with_catalog(
+    document: &Html,
+    spec: &str,
+    base_url: &str,
+    structure: &StructuralSpec,
+    table: &mut TypeTable,
+    catalog: &StateCatalog,
+) -> DeclareOutput {
+    let type_decls: Vec<&TypeDeclaration> =
+        catalog.types.iter().filter(|d| d.ty.spec == spec).collect();
+    let mut issues = Vec::new();
+    let mut bindings = NameBindings::default();
+    let mut deferred = Vec::new();
+    if !type_decls.is_empty() {
+        let anchors: HashSet<&str> = type_decls.iter().map(|d| d.ty.anchor.as_str()).collect();
+        let texts = type_anchor_texts(document, spec, base_url, &anchors);
+        for decl in type_decls {
+            let anchor = decl.ty.anchor.as_str();
+            let key = match texts.get(anchor) {
+                None => {
+                    issues.push(mismatch(anchor, &decl.public_id, "a missing anchor"));
+                    continue;
+                }
+                Some(TypeAnchorText::Heading) => {
+                    let key = table.declared_key(decl);
+                    deferred.push((decl, key.clone()));
+                    key
+                }
+                Some(TypeAnchorText::Block(text)) if decl.expect_text.regex().is_match(text) => {
+                    table.apply_type_declaration(spec, decl)
+                }
+                Some(TypeAnchorText::Block(_)) => {
+                    issues.push(mismatch(anchor, &decl.public_id, "the anchor's block"));
+                    continue;
+                }
+            };
+            if let Some(name) = &decl.name {
+                bindings.names.insert(name.clone(), key);
+            }
+        }
+    }
+
+    let mut out = declare_fields(document, spec, base_url, structure, table, &bindings);
+
+    let mut aliased = false;
+    for (decl, key) in deferred {
+        let matched = decl.name.is_some()
+            && out.fields.iter().any(|f| {
+                is_owned_via_declaration(f, &key)
+                    && out
+                        .blocks
+                        .get(&f.anchor.anchor)
+                        .is_some_and(|text| decl.expect_text.regex().is_match(text))
+            });
+        if matched {
+            table.apply_type_declaration(spec, decl);
+            aliased |= decl.alias_of.is_some();
+            continue;
+        }
+        issues.push(mismatch(
+            &decl.ty.anchor,
+            &decl.public_id,
+            "any field owned through its name",
+        ));
+        withdraw_binding(&mut out, &key);
+    }
+    if aliased {
+        rewrite_owner_keys(&mut out, table, spec);
+    }
+
+    apply_field_declarations(document, spec, table, catalog, &mut out, &mut issues);
+    out.issues.extend(issues);
+    out
+}
+
+/// Drop owner refs a withdrawn name binding produced; a field left without owners is unknown.
+fn withdraw_binding(out: &mut DeclareOutput, key: &TypeKey) {
+    for field in &mut out.fields {
+        let Owner::Known { types, .. } = &mut field.owner else {
+            continue;
+        };
+        types.retain(|t| !(t.via == OwnerVia::Declaration && t.key == *key));
+        if types.is_empty() {
+            field.owner = Owner::Unknown { hint: None };
+            out.counters.owner_resolved -= 1;
+            out.issues.push(ModelIssue {
+                code: StateIssueCode::OwnerUnknown,
+                anchor: Some(field.anchor.anchor.clone()),
+                message: format!("owner of {} not inferred", field.anchor.anchor),
+            });
+        }
+    }
+}
+
+fn apply_field_declarations(
+    document: &Html,
+    spec: &str,
+    table: &TypeTable,
+    catalog: &StateCatalog,
+    out: &mut DeclareOutput,
+    issues: &mut Vec<ModelIssue>,
+) {
+    let mut located: Option<Vec<(ElementRef<'_>, String)>> = None;
+    for decl in catalog.fields.iter().filter(|d| d.field.spec == spec) {
+        let anchor = decl.field.anchor.as_str();
+        let Some(block) = out
+            .blocks
+            .get(anchor)
+            .filter(|text| decl.expect_text.regex().is_match(text))
+        else {
+            issues.push(mismatch(anchor, &decl.public_id, "the field's block"));
+            continue;
+        };
+        let index = match out.fields.iter().position(|f| f.anchor.anchor == anchor) {
+            Some(index) => index,
+            None => {
+                let dfns = located.get_or_insert_with(|| located_concept_dfns(document));
+                let Some((dfn, section_anchor)) = dfns
+                    .iter()
+                    .find(|(dfn, _)| dfn.value().attr("id") == Some(anchor))
+                else {
+                    continue;
+                };
+                let (_, names) = dfn_names(dfn);
+                out.fields.push(FieldDef {
+                    anchor: decl.field.clone(),
+                    name: dfn_display_name(dfn),
+                    names,
+                    owner: Owner::Unknown { hint: None },
+                    field_basis: FieldBasis::Declared,
+                    declared_type: TypeExpr::Unknown,
+                    initial: None,
+                    declaration: Some(DeclarationSite {
+                        section_anchor: section_anchor.clone(),
+                        text: block.clone(),
+                    }),
+                });
+                out.field_rules.push("");
+                out.fields.len() - 1
+            }
+        };
+        let field = &mut out.fields[index];
+        if let Some(owners) = &decl.owner {
+            let counters = &mut out.counters;
+            match out.field_rules[index] {
+                "" => counters.owner_candidates += 1,
+                previous => {
+                    if let Some(count) = counters.owner_by_rule.get_mut(previous) {
+                        *count -= 1;
+                    }
+                }
+            }
+            if !matches!(field.owner, Owner::Known { .. }) {
+                counters.owner_resolved += 1;
+            }
+            let rule = OwnerBasis::Override {
+                rule_id: decl.public_id.clone(),
+            };
+            *counters
+                .owner_by_rule
+                .entry(rule_key(&rule).to_string())
+                .or_default() += 1;
+            out.field_rules[index] = rule_key(&rule);
+            let mut types: Vec<OwnerRef> = Vec::new();
+            for owner in owners {
+                let key = resolve_key(table, spec, owner);
+                if !types.iter().any(|t| t.key == key) {
+                    types.push(OwnerRef {
+                        key,
+                        via: OwnerVia::Declaration,
+                    });
+                }
+            }
+            field.owner = Owner::Known { types, basis: rule };
+            out.issues.retain(|i| {
+                !(i.code == StateIssueCode::OwnerUnknown && i.anchor.as_deref() == Some(anchor))
+            });
+        }
+        if let Some(ty) = &decl.ty {
+            field.declared_type = resolve_type(ty, table, spec);
+        }
+        if let Some(initial) = &decl.initial {
+            field.initial = Some(initial.clone());
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! IDL type collection (§6.2): builds a `TypeTable` from IDL definitions and concept dfns.
 use crate::model::ParsedIdlDefinition;
 use crate::parse::idl::extract_idl_text;
+use crate::state::catalog::TypeDeclaration;
 use crate::state::model::{
     AnchorRole, AnchorTarget, ConceptAliasBasis, SuperBasis, SuperEdge, TypeAnchor, TypeDef,
     TypeKey, TypeKind,
@@ -263,6 +264,102 @@ impl TypeTable {
         }
         self.by_anchor.insert(anchor.to_string(), key.clone());
         true
+    }
+
+    /// Ensure a type entry exists for a key a reviewed declaration names.
+    fn ensure_type(&mut self, spec: &str, key: &TypeKey) {
+        match key {
+            TypeKey::Idl(name) => {
+                self.ensure_idl(name, TypeKind::IdlInterface);
+            }
+            TypeKey::Anchor(target) => {
+                self.types.entry(key.clone()).or_insert_with(|| TypeDef {
+                    key: key.clone(),
+                    name: target.anchor.clone(),
+                    kind: TypeKind::Concept,
+                    anchors: Vec::new(),
+                    supertypes: Vec::new(),
+                });
+                if target.spec == spec && !self.by_anchor.contains_key(&target.anchor) {
+                    self.add_anchor(key.clone(), spec, &target.anchor, AnchorRole::Defining);
+                }
+            }
+        }
+    }
+
+    /// The key a reviewed type declaration resolves to, without changing the table.
+    pub fn declared_key(&self, declaration: &TypeDeclaration) -> TypeKey {
+        declaration
+            .alias_of
+            .clone()
+            .or_else(|| self.by_anchor.get(&declaration.ty.anchor).cloned())
+            .unwrap_or_else(|| TypeKey::Anchor(declaration.ty.clone()))
+    }
+
+    /// Apply a reviewed type declaration of this spec (§8.2): `alias_of` makes the anchor a
+    /// `ConceptAlias` of the target type, `kind` overrides the kind, and every `implemented_by`
+    /// type gets an `Override` supertype edge. Returns the key the declaration's name binds to.
+    pub fn apply_type_declaration(&mut self, spec: &str, declaration: &TypeDeclaration) -> TypeKey {
+        let key = self.declared_key(declaration);
+        let anchor = declaration.ty.anchor.as_str();
+        if declaration.alias_of.is_some() {
+            self.ensure_type(spec, &key);
+            self.alias_declared(&key, spec, anchor);
+        } else if !self.types.contains_key(&key) {
+            let name = declaration.name.as_deref().unwrap_or(anchor);
+            self.types.insert(
+                key.clone(),
+                TypeDef {
+                    key: key.clone(),
+                    name: name.to_string(),
+                    kind: TypeKind::Concept,
+                    anchors: Vec::new(),
+                    supertypes: Vec::new(),
+                },
+            );
+            self.add_anchor(key.clone(), spec, anchor, AnchorRole::Defining);
+        }
+        if let (Some(kind), Some(type_def)) = (&declaration.kind, self.types.get_mut(&key)) {
+            type_def.kind = kind.clone();
+        }
+        for implementer in &declaration.implemented_by {
+            self.ensure_type(spec, implementer);
+            self.add_supertype(
+                implementer,
+                SuperEdge {
+                    target: key.clone(),
+                    basis: SuperBasis::Override {
+                        rule_id: declaration.public_id.clone(),
+                    },
+                },
+            );
+        }
+        key
+    }
+
+    /// Move `anchor` to the existing type `key` as a reviewed `ConceptAlias(Evidence)`, taking it
+    /// from whichever type held it; a type keyed by the anchor itself is dropped.
+    fn alias_declared(&mut self, key: &TypeKey, spec: &str, anchor: &str) {
+        let target = AnchorTarget {
+            spec: spec.to_string(),
+            anchor: anchor.to_string(),
+        };
+        if let Some(current) = self.by_anchor.get(anchor).cloned() {
+            if current == TypeKey::Anchor(target.clone()) {
+                self.types.remove(&current);
+            } else if current != *key {
+                if let Some(type_def) = self.types.get_mut(&current) {
+                    type_def.anchors.retain(|a| a.target != target);
+                }
+            }
+        }
+        let role = AnchorRole::ConceptAlias(ConceptAliasBasis::Evidence);
+        let type_def = self.types.get_mut(key).expect("alias target exists");
+        match type_def.anchors.iter_mut().find(|a| a.target == target) {
+            Some(existing) => existing.role = role,
+            None => type_def.anchors.push(TypeAnchor { target, role }),
+        }
+        self.by_anchor.insert(anchor.to_string(), key.clone());
     }
 
     /// Walk `dl.element` blocks, find the nearest preceding heading, and add an

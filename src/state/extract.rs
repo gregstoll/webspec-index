@@ -9,7 +9,8 @@ use crate::model::{ParsedIdlDefinition, ParsedSection};
 use crate::parse::steps::{
     AnchorTarget, InlineTokenKind, LinkSpan, StepItem, StructuralBranch, StructuralSpec, TextSpan,
 };
-use crate::state::declare::{self, NameBindings};
+use crate::state::catalog::load_state_files;
+use crate::state::declare;
 use crate::state::ir::{
     self, Expr, Hop, InitForm, MutationOp, OpaqueReason, Path, ProseRole, Root, SetForm,
     SourceContext, Statement, StatementKind, StatementSource,
@@ -33,10 +34,21 @@ pub struct StateInputs<'a> {
     pub catalog: &'a StateCatalog,
 }
 
-/// The reviewed catalog applied at index time.
+const EMBEDDED: &str = include_str!("../../data/semantics/embedded.json");
+
+/// The reviewed catalog applied at index time: the `state/` files of the embedded
+/// semantics package.
 pub fn bundled_catalog() -> &'static StateCatalog {
     static CATALOG: OnceLock<StateCatalog> = OnceLock::new();
-    CATALOG.get_or_init(StateCatalog::default)
+    CATALOG.get_or_init(|| {
+        let files: Vec<(String, String)> =
+            serde_json::from_str(EMBEDDED).expect("embedded semantics files are valid JSON");
+        let files: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        load_state_files(&files).expect("bundled state catalog is valid")
+    })
 }
 
 /// The `representation_version` of a snapshot indexed with the bundled catalog.
@@ -56,13 +68,13 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     let concepts = declare::concept_dfns(document);
     let mut table =
         types::collect_types(document, spec, base_url, inputs.idl_definitions, &concepts);
-    let declared = declare::declare_fields(
+    let declared = declare::declare_with_catalog(
         document,
         spec,
         base_url,
         structure,
         &mut table,
-        &NameBindings::default(),
+        inputs.catalog,
     );
     let model = ObjectModel {
         types: table.types.into_values().collect(),
@@ -1004,7 +1016,94 @@ pub(crate) fn algorithm_sources(structure: &StructuralSpec) -> (Vec<StatementSou
 mod tests {
     use super::*;
     use crate::state::testing::{extract_html as extract, DL_HTML, MINI};
-    use crate::state::STATE_VERSION;
+    use crate::state::{OwnerBasis, StateIssueCode, SuperBasis, STATE_VERSION};
+
+    #[test]
+    fn declarations_bind_names_add_edges_and_override_owners() {
+        let dom = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="nodeiterator">NodeIterator</dfn> {}; interface <dfn data-dfn-type="interface" id="treewalker">TreeWalker</dfn> {};</pre>
+      <h2 id="traversal">Traversal</h2>
+      <p>Each <code><a href="#nodeiterator">NodeIterator</a></code> and <code><a href="#treewalker">TreeWalker</a></code> object has an associated boolean <dfn data-dfn-for="traversal" data-dfn-type="dfn" id="concept-traversal-active">is active</dfn> to avoid recursive invocations. It is initially false.</p>"##;
+        let yaml = "schema: 1\npackage: p\ntypes:\n  - id: dom-traversal\n    type: DOM#traversal\n    name: traversal\n    kind: concept\n    implemented_by: [idl:NodeIterator, idl:TreeWalker]\n    expect_text: '(?i)Each NodeIterator and TreeWalker object has an associated'\n    reason: r\n";
+        let catalog = crate::state::catalog::load_state_files(&[("state/t.yaml", yaml)]).unwrap();
+        let state = crate::state::testing::extract_with_catalog(dom, "DOM", &catalog);
+        let f = state
+            .model
+            .fields
+            .iter()
+            .find(|f| f.anchor.anchor == "concept-traversal-active")
+            .unwrap();
+        assert!(
+            matches!(&f.owner, Owner::Known { types, basis: OwnerBasis::DfnFor } if types[0].key.to_string() == "DOM#traversal")
+        );
+        let iterator = state
+            .model
+            .types
+            .iter()
+            .find(|t| t.key.to_string() == "idl:NodeIterator")
+            .unwrap();
+        assert!(iterator
+            .supertypes
+            .iter()
+            .any(|e| e.target.to_string() == "DOM#traversal"
+                && matches!(e.basis, SuperBasis::Override { .. })));
+        assert!(state
+            .representation_version
+            .starts_with(&format!("{STATE_VERSION}+sha256:")));
+    }
+
+    #[test]
+    fn mismatched_expect_text_is_reported_and_ignored() {
+        let html = r#"<p>Some video files also have an explicit date, known as the <dfn id="timeline-offset">timeline offset</dfn>.</p>"#;
+        let yaml = "schema: 1\npackage: p\nfields:\n  - id: t\n    field: HTML#timeline-offset\n    owner: [HTML#media-resource]\n    expect_text: 'does not occur'\n    reason: r\n";
+        let catalog = crate::state::catalog::load_state_files(&[("state/f.yaml", yaml)]).unwrap();
+        let state = crate::state::testing::extract_with_catalog(html, "HTML", &catalog);
+        assert!(state
+            .issues
+            .iter()
+            .any(|i| i.code == StateIssueCode::DeclarationMismatch));
+        assert!(state.model.fields.iter().all(|f| !matches!(
+            f.owner,
+            Owner::Known {
+                basis: OwnerBasis::Override { .. },
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn matching_field_declaration_creates_the_field_and_overrides_its_owner() {
+        let html = r#"<p>Some video files also have an explicit date, known as the <dfn id="timeline-offset">timeline offset</dfn>.</p>"#;
+        let yaml = "schema: 1\npackage: p\nfields:\n  - id: t\n    field: HTML#timeline-offset\n    owner: [HTML#media-resource]\n    expect_text: 'known as the timeline offset'\n    reason: r\n";
+        let catalog = crate::state::catalog::load_state_files(&[("state/f.yaml", yaml)]).unwrap();
+        let state = crate::state::testing::extract_with_catalog(html, "HTML", &catalog);
+        let f = &state.model.fields[0];
+        assert!(
+            matches!(&f.owner, Owner::Known { types, basis: OwnerBasis::Override { rule_id } }
+                if rule_id == "p/t" && types[0].key.to_string() == "HTML#media-resource")
+        );
+        assert_eq!(state.coverage.owner_by_rule.get("override"), Some(&1));
+        assert!(state.issues.is_empty());
+    }
+
+    #[test]
+    fn heading_declaration_without_owned_matching_field_is_withdrawn() {
+        let html = r#"<h2 id="traversal">Traversal</h2>
+      <p>Each thing has an associated <dfn data-dfn-for="traversal" id="active">is active</dfn>.</p>"#;
+        let yaml = "schema: 1\npackage: p\ntypes:\n  - id: t\n    type: DOM#traversal\n    name: traversal\n    expect_text: 'does not occur'\n    reason: r\n";
+        let catalog = crate::state::catalog::load_state_files(&[("state/t.yaml", yaml)]).unwrap();
+        let state = crate::state::testing::extract_with_catalog(html, "DOM", &catalog);
+        assert!(state
+            .issues
+            .iter()
+            .any(|i| i.code == StateIssueCode::DeclarationMismatch
+                && i.anchor.as_deref() == Some("traversal")));
+        assert!(matches!(state.model.fields[0].owner, Owner::Unknown { .. }));
+        assert!(state
+            .model
+            .types
+            .iter()
+            .all(|t| t.key.to_string() != "DOM#traversal"));
+    }
 
     #[test]
     fn mini_spec_produces_field_sites_and_counts() {
