@@ -4,9 +4,8 @@ use crate::effects::catalog::{
     Anchor, CaptureSource, Catalog, Emit, EmitValue, ParameterType, Rule,
 };
 use crate::effects::model::{EffectParams, EffectValue, EvidenceBasis, IssueCode, Span};
-use crate::parse::steps::{
-    AnchorTarget, InlineTokenKind, OperationSite, StructuralAlgorithm, StructuralSegment,
-};
+use crate::parse::steps::{AnchorTarget, OperationSite, StructuralAlgorithm, StructuralSegment};
+use crate::semantics::{extract_capture, scoped_text_matches};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -135,45 +134,30 @@ pub(crate) fn match_segment(
         spec: algorithm.source.spec.clone(),
         anchor: algorithm.source.section_anchor.clone(),
     };
-    let mut by_span: BTreeMap<(usize, usize), Vec<MatchedEffect>> = BTreeMap::new();
-    for rule in catalog
+    let rules = catalog
         .rules()
         .filter(|rule| rule.match_spec.anchor.is_none())
-    {
-        if rule
-            .match_spec
-            .subject
-            .as_ref()
-            .is_some_and(|expected| expected != &subject)
-            || rule
-                .match_spec
-                .exclude_text
-                .iter()
-                .any(|pattern| pattern.regex().is_match(&segment.text))
-        {
-            continue;
-        }
-        let Some(pattern) = &rule.match_spec.text else {
-            continue;
-        };
-        for captures in pattern.regex().captures_iter(&segment.text) {
-            let Some(whole) = captures.get(0) else {
-                continue;
-            };
-            by_span
-                .entry((whole.start(), whole.end()))
-                .or_default()
-                .push(emit_match(
-                    catalog,
-                    rule,
-                    &rule.emit,
-                    segment,
-                    Some(&captures),
-                    Some((whole.start(), whole.end())),
-                ));
-        }
-    }
-    by_span.into_values().flat_map(specialize).collect()
+        .map(|rule| (rule, &rule.match_spec));
+    scoped_text_matches(rules, &subject, &segment.text)
+        .into_iter()
+        .flat_map(|(span, matches)| {
+            specialize(
+                matches
+                    .into_iter()
+                    .map(|(rule, captures)| {
+                        emit_match(
+                            catalog,
+                            rule,
+                            &rule.emit,
+                            segment,
+                            Some(&captures),
+                            Some(span),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 pub(crate) fn intrinsic_rules(catalog: &Catalog) -> Vec<(&Rule, MatchedEffect)> {
@@ -309,34 +293,6 @@ fn emit_match(
             end: end as u64,
         }),
         issues,
-    }
-}
-
-fn extract_capture(
-    segment: &StructuralSegment,
-    start: usize,
-    end: usize,
-    source: CaptureSource,
-) -> Option<String> {
-    match source {
-        CaptureSource::Text => segment.text.get(start..end).map(str::to_owned),
-        CaptureSource::Literal => {
-            let token = segment.tokens.iter().find(|token| {
-                token.span.start == start
-                    && token.span.end == end
-                    && token.kind == InlineTokenKind::Literal
-            })?;
-            let raw = segment.text.get(start..end)?;
-            Some(raw.trim_matches(['`', '"', '\'']).to_owned())
-                .filter(|v| !v.is_empty())
-                .or_else(|| Some(token.source_text.clone()))
-        }
-        CaptureSource::Anchor => segment
-            .links
-            .iter()
-            .find(|link| link.span.start == start && link.span.end == end)
-            .and_then(|link| link.target.as_ref())
-            .map(|target| format!("{}#{}", target.spec, target.anchor)),
     }
 }
 

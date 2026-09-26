@@ -26,6 +26,7 @@ pub mod model;
 #[deny(clippy::iter_over_hash_type)]
 pub mod parse;
 pub mod render;
+pub mod semantics;
 #[cfg(feature = "native")]
 pub mod spec_list;
 pub mod spec_registry;

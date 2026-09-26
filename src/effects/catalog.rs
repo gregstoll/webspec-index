@@ -1,92 +1,19 @@
 use crate::effects::model::{
     canonical_json_sha256, EffectValue, Execution, EFFECTS_SCHEMA_VERSION,
 };
-use regex::Regex;
+use crate::semantics::{
+    compile_match, compile_pattern, matches_identifier, parse_anchor, parse_yaml_file,
+    sha256_bytes, validate_id, RawMatchSpec,
+};
+pub use crate::semantics::{Anchor, CaptureSource, CatalogError, CatalogPattern, MatchSpec};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 #[cfg(feature = "native")]
 use std::fs;
 #[cfg(feature = "native")]
 use std::path::Path;
 use std::path::PathBuf;
-use yaml_rust2::parser::{Event, MarkedEventReceiver, Parser};
-use yaml_rust2::scanner::Marker;
-use yaml_rust2::{Yaml, YamlLoader};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CatalogError {
-    pub file: Option<String>,
-    pub location: Option<String>,
-    pub message: String,
-}
-
-impl CatalogError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            file: None,
-            location: None,
-            message: message.into(),
-        }
-    }
-
-    fn file(file: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            file: Some(file.into()),
-            location: None,
-            message: message.into(),
-        }
-    }
-
-    fn at(mut self, location: impl Into<String>) -> Self {
-        self.location = Some(location.into());
-        self
-    }
-}
-
-impl fmt::Display for CatalogError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(file) = &self.file {
-            write!(f, "{file}")?;
-            if let Some(location) = &self.location {
-                write!(f, " ({location})")?;
-            }
-            write!(f, ": ")?;
-        }
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for CatalogError {}
-
-#[derive(Debug, Clone)]
-pub struct CatalogPattern {
-    source: String,
-    regex: Regex,
-}
-
-impl CatalogPattern {
-    pub fn as_str(&self) -> &str {
-        &self.source
-    }
-
-    pub fn regex(&self) -> &Regex {
-        &self.regex
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Anchor {
-    pub spec: String,
-    pub anchor: String,
-}
-
-impl Anchor {
-    pub fn as_identity(&self) -> String {
-        format!("{}#{}", self.spec, self.anchor)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,14 +40,6 @@ pub struct EffectDefinition {
     pub label: String,
     #[serde(default)]
     pub parameters: BTreeMap<String, ParameterDefinition>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CaptureSource {
-    Literal,
-    Text,
-    Anchor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,14 +121,6 @@ pub struct Emit {
     pub kind: String,
     #[serde(default)]
     pub params: BTreeMap<String, EmitValue>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MatchSpec {
-    pub anchor: Option<Anchor>,
-    pub subject: Option<Anchor>,
-    pub text: Option<CatalogPattern>,
-    pub exclude_text: Vec<CatalogPattern>,
 }
 
 #[derive(Debug, Clone)]
@@ -314,16 +225,6 @@ struct RawRule {
     description: Option<String>,
     #[serde(default)]
     expect: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawMatchSpec {
-    anchor: Option<String>,
-    subject: Option<String>,
-    text: Option<String>,
-    #[serde(default)]
-    exclude_text: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -458,7 +359,7 @@ pub(crate) fn package_digest(files: &[(&str, &str)]) -> Result<(String, String),
     files.sort_by(|left, right| left.0.cmp(&right.0));
     let digest = files_digest(&files)?;
     let (path, content) = &files[0];
-    let package_id = parse_file(path, content)?.package;
+    let package_id = parse_yaml_file::<RawFile>(path, content)?.package;
     validate_id(&package_id, "package identifier", path)?;
     Ok((package_id, digest))
 }
@@ -551,7 +452,7 @@ fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, Catalog
     let content_digest = files_digest(&files)?;
     let mut raws = Vec::with_capacity(files.len());
     for (path, content) in &files {
-        raws.push((path.clone(), parse_file(path, content)?));
+        raws.push((path.clone(), parse_yaml_file::<RawFile>(path, content)?));
     }
     let package_id = raws[0].1.package.clone();
     validate_id(&package_id, "package identifier", &raws[0].0)?;
@@ -589,45 +490,11 @@ fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, Catalog
             validate_declaration_id(&raw_rule.id, &mut ids, &file)?;
             let public_id = format!("{package_id}/{}", raw_rule.id);
             let location = format!("rule {public_id}");
-            let anchor = raw_rule
-                .match_spec
-                .anchor
-                .as_deref()
-                .map(|value| parse_anchor(value, &file, &location))
-                .transpose()?;
-            let subject = raw_rule
-                .match_spec
-                .subject
-                .as_deref()
-                .map(|value| parse_anchor(value, &file, &location))
-                .transpose()?;
-            let text = raw_rule
-                .match_spec
-                .text
-                .as_deref()
-                .map(|value| compile_pattern(value, false, &file, &location))
-                .transpose()?;
-            if anchor.is_none() && text.is_none() {
-                return Err(
-                    CatalogError::file(&file, "match requires at least anchor or text")
-                        .at(location),
-                );
-            }
-            let exclude_text = raw_rule
-                .match_spec
-                .exclude_text
-                .iter()
-                .map(|value| compile_pattern(value, true, &file, &location))
-                .collect::<Result<_, _>>()?;
+            let match_spec = compile_match(&raw_rule.match_spec, &file, &location)?;
             rules.push(Rule {
                 id: raw_rule.id,
                 public_id,
-                match_spec: MatchSpec {
-                    anchor,
-                    subject,
-                    text,
-                    exclude_text,
-                },
+                match_spec,
                 emit: raw_rule.emit,
                 continuations: raw_rule.continuations,
                 description: raw_rule.description,
@@ -676,144 +543,6 @@ fn load_owned_files(mut files: Vec<(String, String)>) -> Result<Package, Catalog
         content_digest,
         files: files.into_iter().map(|(path, _)| path).collect(),
     })
-}
-
-fn parse_file(path: &str, content: &str) -> Result<RawFile, CatalogError> {
-    let mut preflight = YamlPreflight::default();
-    Parser::new_from_str(content)
-        .load(&mut preflight, true)
-        .map_err(|error| CatalogError::file(path, format!("invalid YAML: {error}")))?;
-    if let Some(error) = preflight.error {
-        return Err(CatalogError::file(path, error));
-    }
-    if preflight.documents != 1 {
-        return Err(CatalogError::file(
-            path,
-            format!(
-                "expected exactly one YAML document, found {}",
-                preflight.documents
-            ),
-        ));
-    }
-    let mut docs = YamlLoader::load_from_str(content)
-        .map_err(|error| CatalogError::file(path, format!("invalid YAML: {error}")))?;
-    if docs.len() != 1 {
-        return Err(CatalogError::file(
-            path,
-            "expected exactly one YAML document",
-        ));
-    }
-    let value = yaml_to_json(docs.remove(0), path, "$")?;
-    let encoded = serde_json::to_string(&value)
-        .map_err(|error| CatalogError::file(path, format!("cannot decode catalog: {error}")))?;
-    let mut deserializer = serde_json::Deserializer::from_str(&encoded);
-    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
-        CatalogError::file(path, format!("invalid catalog fields: {}", error.inner()))
-            .at(error.path().to_string())
-    })
-}
-
-#[derive(Default)]
-struct YamlPreflight {
-    documents: usize,
-    error: Option<String>,
-}
-
-impl MarkedEventReceiver for YamlPreflight {
-    fn on_event(&mut self, event: Event, marker: Marker) {
-        if self.error.is_some() {
-            return;
-        }
-        let at = || format!("line {}, column {}", marker.line() + 1, marker.col() + 1);
-        match event {
-            Event::DocumentStart => self.documents += 1,
-            Event::Alias(_) => {
-                self.error = Some(format!("YAML aliases are not supported ({})", at()))
-            }
-            Event::Scalar(_, _, anchor, tag) => self.check_node(anchor, tag, &at()),
-            Event::SequenceStart(anchor, tag) | Event::MappingStart(anchor, tag) => {
-                self.check_node(anchor, tag, &at())
-            }
-            _ => {}
-        }
-    }
-}
-
-impl YamlPreflight {
-    fn check_node(&mut self, anchor: usize, tag: Option<yaml_rust2::parser::Tag>, at: &str) {
-        if anchor != 0 {
-            self.error = Some(format!("YAML anchors are not supported ({at})"));
-        } else if let Some(tag) = tag {
-            let standard = tag.handle == "tag:yaml.org,2002:"
-                && matches!(tag.suffix.as_str(), "str" | "bool" | "int" | "null");
-            if !standard {
-                self.error = Some(format!("custom YAML tags are not supported ({at})"));
-            }
-        }
-    }
-}
-
-fn yaml_to_json(yaml: Yaml, file: &str, location: &str) -> Result<Value, CatalogError> {
-    match yaml {
-        Yaml::Null => Ok(Value::Null),
-        Yaml::Boolean(value) => Ok(Value::Bool(value)),
-        Yaml::Integer(value) => Ok(Value::Number(value.into())),
-        Yaml::String(value) => Ok(Value::String(value)),
-        Yaml::Array(values) => values
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| yaml_to_json(value, file, &format!("{location}[{index}]")))
-            .collect(),
-        Yaml::Hash(values) => {
-            let mut output = serde_json::Map::new();
-            for (key, value) in values {
-                let Yaml::String(key) = key else {
-                    return Err(
-                        CatalogError::file(file, "mapping keys must be strings").at(location)
-                    );
-                };
-                if key == "<<" {
-                    return Err(
-                        CatalogError::file(file, "YAML merge keys are not supported").at(location),
-                    );
-                }
-                output.insert(
-                    key.clone(),
-                    yaml_to_json(value, file, &format!("{location}.{key}"))?,
-                );
-            }
-            Ok(Value::Object(output))
-        }
-        Yaml::Real(_) => {
-            Err(CatalogError::file(file, "floating-point values are not supported").at(location))
-        }
-        Yaml::Alias(_) => {
-            Err(CatalogError::file(file, "YAML aliases are not supported").at(location))
-        }
-        Yaml::BadValue => Err(CatalogError::file(file, "invalid YAML value").at(location)),
-    }
-}
-
-/// Checks `value` against `^first rest*$` without compiling a regex: the
-/// catalog validates every ID in every process that loads it.
-fn matches_identifier(value: &str, first: fn(char) -> bool, rest: fn(char) -> bool) -> bool {
-    let mut chars = value.chars();
-    chars.next().is_some_and(first) && chars.all(rest)
-}
-
-fn validate_id(value: &str, what: &str, file: &str) -> Result<(), CatalogError> {
-    if matches_identifier(
-        value,
-        |c| c.is_ascii_lowercase() || c.is_ascii_digit(),
-        |c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'),
-    ) {
-        Ok(())
-    } else {
-        Err(CatalogError::file(
-            file,
-            format!("invalid {what} {value:?}; expected [a-z0-9][a-z0-9._-]*"),
-        ))
-    }
 }
 
 fn validate_declaration_id(
@@ -1017,58 +746,6 @@ fn validate_constant(
     Ok(())
 }
 
-fn parse_anchor(value: &str, file: &str, location: &str) -> Result<Anchor, CatalogError> {
-    if value.chars().any(char::is_whitespace) || value.matches('#').count() != 1 {
-        return Err(CatalogError::file(
-            file,
-            format!("malformed canonical anchor {value:?}; expected SPEC#anchor"),
-        )
-        .at(location));
-    }
-    let (spec, anchor) = value.split_once('#').expect("one delimiter checked");
-    if spec.is_empty() || anchor.is_empty() {
-        return Err(CatalogError::file(
-            file,
-            format!("malformed canonical anchor {value:?}; expected SPEC#anchor"),
-        )
-        .at(location));
-    }
-    let registry = crate::spec_registry::SpecRegistry::new();
-    let canonical_spec = registry
-        .infer_base_url_from_spec_name(spec)
-        .and_then(|(base, _)| {
-            registry.resolve_url(&format!("{}#{anchor}", base.trim_end_matches('#')))
-        })
-        .map(|(name, _)| name)
-        .unwrap_or_else(|| spec.to_owned());
-    Ok(Anchor {
-        spec: canonical_spec,
-        anchor: anchor.to_owned(),
-    })
-}
-
-fn compile_pattern(
-    value: &str,
-    allow_empty: bool,
-    file: &str,
-    location: &str,
-) -> Result<CatalogPattern, CatalogError> {
-    let regex = Regex::new(value).map_err(|error| {
-        CatalogError::file(file, format!("invalid Rust regex {value:?}: {error}")).at(location)
-    })?;
-    if !allow_empty && regex.is_match("") {
-        return Err(CatalogError::file(
-            file,
-            format!("match regex {value:?} is capable of an empty match"),
-        )
-        .at(location));
-    }
-    Ok(CatalogPattern {
-        source: value.to_owned(),
-        regex,
-    })
-}
-
 fn require_text(
     value: String,
     field: &str,
@@ -1082,14 +759,10 @@ fn require_text(
     }
 }
 
-fn sha256_bytes(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    crate::hex::encode(&Sha256::digest(bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use regex::Regex;
 
     #[test]
     fn id_validation_accepts_exactly_the_documented_patterns() {
