@@ -52,6 +52,7 @@ export interface QueryResult {
   incoming_refs: RefEntry[];
   effects?: EffectSummary[];
   effects_status?: EffectsStatus;
+  slice?: SliceResult;
 }
 
 // --- Search ---
@@ -423,6 +424,29 @@ export interface FlowResult {
   issues: FlowIssue[];
 }
 
+// --- Slice types ---
+
+export type SliceDefKind = 'let' | 'set' | 'mutate' | 'store' | 'opaque';
+export type SliceErrorCode = 'slice_invalid_selector' | 'slice_not_an_algorithm' | 'slice_unknown_variable' | 'slice_unknown_step' | 'slice_unavailable';
+export interface ViewRequest { involving?: string[]; feeding?: { step: string; variables?: string[] }; steps?: string[]; depth?: number | null }
+export interface SliceResult {
+  algorithm: string;
+  view: ViewRequest;
+  variables: { name: string; basis: 'seed' | 'let' | 'set' | 'mutate' | 'feeds'; step?: string; from?: string[] }[];
+  steps: { path: string; role: 'match' | 'inherited' | 'context' | 'target' | 'definition' | 'selected'; edges?: SliceDefKind[] }[];
+  omitted: { parent: string | null; first: string; last: string; steps: number; in_slice?: number; reason: string }[];
+  stores: { step: string; target: string; from: string[] }[];
+  unfollowed: { step: string; reason: 'opaque_statement' | 'loop_binding'; variables: string[] }[];
+  rebound: { name: string; steps: string[] }[];
+  inputs?: string[];
+  later_definitions?: { step: string; variable: string; kind: SliceDefKind }[];
+  status: {
+    semantics: 'may'; scope: 'algorithm'; rendering: 'aligned' | 'unaligned'; markdown_items?: number;
+    counts: { steps: number; kept: number; matched: number; inherited: number; context: number; target?: number; definition?: number; selected?: number; omitted: number };
+    issues: 'render_unaligned'[];
+  };
+}
+
 // --- State types ---
 
 export type StateOccurrenceOp = string;
@@ -441,7 +465,7 @@ export interface StateCoverageResult { spec: string; snapshot_sha: string; count
 export type Request =
   | { type: 'specs' }
   | { type: 'exists'; target: string }
-  | { type: 'query'; target: string; effects?: boolean; render?: 'html' }
+  | { type: 'query'; target: string; effects?: boolean; render?: 'html'; view?: ViewRequest }
   | { type: 'search'; query: string; spec?: string; limit?: number }
   | { type: 'anchors'; pattern: string; spec?: string; limit?: number }
   | { type: 'list'; spec: string }

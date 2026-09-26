@@ -339,3 +339,28 @@ fn exported_db_answers_state_requests_without_state_models() {
     assert_eq!(v["type"], "state_field", "{v}");
     assert_eq!(v["result"]["writes"].as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn exported_db_answers_views() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("index.db");
+    {
+        let (conn, _) = seeded_db(&src);
+        let html = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given a <var>foo</var>:</p><ol><li><p>Let <var>a</var> be <var>foo</var>.</p></li><li><p>Return.</p></li></ol></div>"##;
+        webspec_index::state::testing::index_offline(&conn, "T", "https://t.example/", html)
+            .unwrap();
+        conn.execute("UPDATE specs SET provider = 'whatwg' WHERE name = 'T'", [])
+            .unwrap();
+        publish_effects(&conn);
+    }
+    let out = dir.path().join("web");
+    let manifest = export_web(&src, &out, &options()).unwrap();
+    let conn = joined_db(dir.path(), &out, &manifest);
+    let v: serde_json::Value = serde_json::from_str(&webspec_index::api::handle_json(
+        &conn,
+        r#"{"type":"query","target":"T#go","view":{"involving":["foo"]}}"#,
+    ))
+    .unwrap();
+    assert_eq!(v["type"], "query", "{v}");
+    assert_eq!(v["result"]["slice"]["status"]["counts"]["omitted"], 1);
+}
