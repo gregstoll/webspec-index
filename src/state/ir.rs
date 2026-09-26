@@ -110,7 +110,7 @@ pub enum SetForm {
     Chained,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationOp {
     Append,
@@ -247,6 +247,27 @@ pub(crate) const LEXICON: [&str; 21] = [
     "toggle",
 ];
 
+/// Infra-linked mutations (§7.3): `INFRA` anchor, operation, and the
+/// prepositions that end the operand and start the target. Without
+/// prepositions the target follows the link directly.
+const INFRA_OPS: &[(&str, MutationOp, &[&str])] = &[
+    ("list-append", MutationOp::Append, &[" to ", " into "]),
+    ("set-append", MutationOp::Append, &[" to ", " into "]),
+    ("list-prepend", MutationOp::Prepend, &[" to "]),
+    ("set-prepend", MutationOp::Prepend, &[" to "]),
+    ("list-extend", MutationOp::Extend, &[]),
+    ("list-insert", MutationOp::Insert, &[" into "]),
+    ("list-remove", MutationOp::Remove, &[" from "]),
+    ("list-replace", MutationOp::Replace, &[" in "]),
+    ("set-replace", MutationOp::Replace, &[" in "]),
+    ("list-empty", MutationOp::Empty, &[]),
+    ("map-set", MutationOp::MapSet, &[]),
+    ("map-remove", MutationOp::MapRemove, &[]),
+    ("map-clear", MutationOp::Clear, &[]),
+    ("queue-enqueue", MutationOp::Enqueue, &[" to ", " on "]),
+    ("queue-dequeue", MutationOp::Dequeue, &[" from "]),
+];
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ParsedSource {
@@ -262,7 +283,8 @@ pub(crate) struct ParsedSource {
 pub(crate) struct Clause {
     /// Byte offset into the source text.
     pub start: usize,
-    /// The clause-initial lexicon verb, lowercase.
+    /// The clause-initial lexicon verb, or the text of a clause-initial
+    /// Infra operation link, lowercase.
     pub verb: Option<String>,
     pub consumed: bool,
 }
@@ -510,9 +532,17 @@ pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
         out: ParsedSource::default(),
         opaque_clauses: Vec::new(),
         covered_until: 0,
+        inits: BTreeMap::new(),
     };
+    p.inits = p.parse_initializers();
     for (at, verb) in enc.clause_starts() {
+        // An Infra-linked operation is spelled by its link text ("Append").
+        let verb = verb.or_else(|| {
+            p.infra_op(at)
+                .map(|(link, ..)| source.links[link].visible_text.to_lowercase())
+        });
         let consumed = at < p.covered_until
+            || p.try_infra_mutation(at)
             || p.try_set(at)
             || p.try_unset(at)
             || p.try_incdec(at)
@@ -541,6 +571,10 @@ struct PathParse {
     read_ranges: Vec<(usize, usize)>,
 }
 
+/// An Infra-linked mutation's target, its operand range, and the statement
+/// end.
+type InfraTarget = (PathParse, Option<(usize, usize)>, usize);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RootKind {
     Var,
@@ -562,9 +596,122 @@ struct Parser<'a> {
     opaque_clauses: Vec<usize>,
     /// End of the last structured statement; clauses before it are inside it.
     covered_until: usize,
+    /// Encoded position of each initializer's `a new` → its `Init` id.
+    inits: BTreeMap<usize, String>,
 }
 
 impl Parser<'_> {
+    /// A clause starting with a link to an `INFRA_OPS` anchor: `⟦L⟧ OPERAND
+    /// PREP PATH`, or `⟦L⟧ PATH` for an operation without prepositions
+    /// (`map-set` takes `PATH[key] to VALUE`, `list-extend` an optional
+    /// ` with VALUE`).
+    fn try_infra_mutation(&mut self, at: usize) -> bool {
+        let Some((link, after_link, op, prepositions)) = self.infra_op(at) else {
+            return false;
+        };
+        let anchor = self.source.links[link].target.clone().expect("infra_op");
+        let basis = OpBasis::InfraLink(anchor);
+        let parsed = self.keyword(after_link, &[" "]).and_then(|start| {
+            if prepositions.is_empty() {
+                self.direct_infra_target(start, op)
+            } else {
+                self.infra_operand_target(start, prepositions)
+            }
+        });
+        let Some((target, operand, end)) = parsed else {
+            let verb = self.source.links[link].visible_text.to_lowercase();
+            self.push_opaque(at, OpaqueReason::UnparsedTarget, Some(verb));
+            return false;
+        };
+        let kind = StatementKind::Mutate {
+            op,
+            target: target.path.clone(),
+            operand: operand.map(|(start, end)| self.expr(start, end)),
+            basis,
+        };
+        let id = self.push(at, end, "mutate", kind);
+        self.target_roles(std::slice::from_ref(&target), &id);
+        if let Some((start, end)) = operand {
+            self.read_roles(start, end, &id);
+        }
+        self.covered_until = end;
+        true
+    }
+
+    /// The link at `at` when it targets an `INFRA_OPS` anchor: its index, the
+    /// position after it, the operation and its prepositions.
+    fn infra_op(&self, at: usize) -> Option<(usize, usize, MutationOp, &'static [&'static str])> {
+        let (Placeholder::Link(link), after_link) = self.enc.placeholder(at)? else {
+            return None;
+        };
+        let anchor = self.source.links[link]
+            .target
+            .as_ref()
+            .filter(|target| target.spec.eq_ignore_ascii_case("INFRA"))?;
+        let &(_, op, prepositions) = INFRA_OPS.iter().find(|(name, ..)| *name == anchor.anchor)?;
+        Some((link, after_link, op, prepositions))
+    }
+
+    /// The target `PATH` at `start`, with the operand range after it for
+    /// `map-set` and `list-extend`, and the statement end.
+    fn direct_infra_target(&self, start: usize, op: MutationOp) -> Option<InfraTarget> {
+        let target = self.path(start, false)?;
+        let trailing = match op {
+            MutationOp::MapSet if target.path.subscript.is_some() => {
+                Some(self.keyword(target.end, &[" to "])?)
+            }
+            MutationOp::MapSet => return None,
+            MutationOp::Extend => self.keyword(target.end, &[" with "]),
+            _ => None,
+        };
+        match trailing {
+            Some(value_start) => {
+                let value_end = self.value_end(value_start, None);
+                Some((target, Some((value_start, value_end)), value_end))
+            }
+            None if self.is_target_end(target.end) => {
+                let end = target.end;
+                Some((target, None, end))
+            }
+            None => None,
+        }
+    }
+
+    /// `OPERAND PREP PATH` at `start`: the first preposition occurrence
+    /// inside the clause whose following `PATH` ends at a target end.
+    fn infra_operand_target(&self, start: usize, prepositions: &[&str]) -> Option<InfraTarget> {
+        let bound = self.value_end(start, None);
+        let mut candidates: Vec<(usize, usize)> = prepositions
+            .iter()
+            .flat_map(|prep| {
+                self.enc.text[start..bound]
+                    .match_indices(prep)
+                    .map(move |(offset, _)| (start + offset, start + offset + prep.len()))
+            })
+            .filter(|&(at, _)| at > start && !self.enc.is_protected(at))
+            .collect();
+        candidates.sort_unstable();
+        candidates
+            .into_iter()
+            .find_map(|(operand_end, target_start)| {
+                let target = self
+                    .path(target_start, false)
+                    .filter(|target| self.is_target_end(target.end))?;
+                let end = target.end;
+                Some((target, Some((start, operand_end)), end))
+            })
+    }
+
+    /// Where an Infra-linked mutation's target ends (§7.3).
+    fn is_target_end(&self, pos: usize) -> bool {
+        pos == self.enc.text.len()
+            || [
+                " with ", " at ", " before ", " after ", " if ", ", ", ".", ";", " and ",
+            ]
+            .iter()
+            .any(|end| self.lit(pos, end))
+    }
+
     fn try_set(&mut self, at: usize) -> bool {
         let Some(after) = self.keyword(at, &["Set ", "set "]) else {
             return false;
@@ -764,15 +911,132 @@ impl Parser<'_> {
         true
     }
 
+    /// Each `a new NEWTYPE … whose …` or `a new NEWTYPE …, with …`
+    /// initializer anywhere in the source becomes an `Init` statement; it
+    /// consumes no clause. Returns the encoded position of each
+    /// initializer's `a new` → its statement id.
+    fn parse_initializers(&mut self) -> BTreeMap<usize, String> {
+        let enc = self.enc;
+        let bytes = enc.text.as_bytes();
+        let starts: Vec<usize> = enc
+            .text
+            .match_indices("new ")
+            .filter_map(|(new, _)| {
+                let start = [2, 3]
+                    .into_iter()
+                    .filter_map(|back| new.checked_sub(back))
+                    .find(|&start| self.keyword(start, &["a new ", "an new "]).is_some())?;
+                let at_word = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+                (at_word && !enc.is_protected(start)).then_some(start)
+            })
+            .collect();
+        let mut inits = BTreeMap::new();
+        for start in starts {
+            if let Some(id) = self.initializer(start) {
+                inits.insert(start, id);
+            }
+        }
+        inits
+    }
+
+    /// The initializer whose `a new` is at `start`, pushed as an `Init`.
+    fn initializer(&mut self, start: usize) -> Option<String> {
+        let type_start = self.keyword(start, &["a new ", "an new "])?;
+        let (constructed, type_end) = match self.enc.placeholder(type_start) {
+            Some((Placeholder::Link(_), end)) => (self.new_type(type_start), end),
+            _ => (Some(self.new_type(type_start)?), self.code(type_start)?.1),
+        };
+        let type_end = [" node", " object", " element"]
+            .iter()
+            .find(|word| self.lit(type_end, word) && !self.word_continues(type_end + word.len()))
+            .map_or(type_end, |word| type_end + word.len());
+        let bound = self.value_end(type_end, None);
+        let marker = [" whose ", ", with "]
+            .iter()
+            .filter_map(|word| Some((self.find(type_end, word)?, *word)))
+            .filter(|&(at, _)| at < bound)
+            .min()?;
+        if self.enc.text[type_end..marker.0].contains("a new ") {
+            return None;
+        }
+        let whose = marker.1 == " whose ";
+        let mut pos = marker.0 + marker.1.len();
+        let mut entries = Vec::new();
+        let mut first_its = false;
+        while let Some((hop, link, value_start, its)) = self.init_entry(pos, whose) {
+            first_its |= entries.is_empty() && its;
+            let value_end = self.init_value_end(value_start, bound, whose);
+            entries.push((hop, link, value_start, value_end));
+            match self.keyword(value_end, &[", and ", ", ", " and "]) {
+                Some(next) => pos = next,
+                None => break,
+            }
+        }
+        let end = entries.last()?.3;
+        let form = match (whose, first_its) {
+            (true, _) => InitForm::WhoseList,
+            (false, true) => InitForm::WithItsSetTo,
+            (false, false) => InitForm::WithList,
+        };
+        let kind = StatementKind::Init {
+            constructed,
+            entries: entries
+                .iter()
+                .map(|(hop, _, value_start, value_end)| InitEntry {
+                    field: hop.clone(),
+                    value: self.expr(*value_start, *value_end),
+                })
+                .collect(),
+            form,
+        };
+        let id = self.push(start, end, "init", kind);
+        for (_, link, value_start, value_end) in entries {
+            self.role(link, OccurrenceClass::Init, &id);
+            self.read_roles(value_start, value_end, &id);
+        }
+        Some(id)
+    }
+
+    /// An initializer entry at `pos`: `⟦F⟧ is ` (`whose`) or `(its )?⟦F⟧ set
+    /// to `. Returns the field hop, its link, the value start and whether
+    /// the entry says `its`.
+    fn init_entry(&self, pos: usize, whose: bool) -> Option<(Hop, usize, usize, bool)> {
+        let (its, at) = match self.keyword(pos, &["its "]) {
+            Some(at) if !whose => (true, at),
+            _ => (false, pos),
+        };
+        let (hop, Some(link), end) = self.hop(at)? else {
+            return None;
+        };
+        let value_start = self.keyword(end, &[if whose { " is " } else { " set to " }])?;
+        Some((hop, link, value_start, its))
+    }
+
+    /// End of an initializer entry value: the next entry, ` to ` after a
+    /// `whose` value ("… whose F is v to L"), or `bound`.
+    fn init_value_end(&self, start: usize, bound: usize, whose: bool) -> usize {
+        (start..bound)
+            .filter(|&i| self.enc.text.is_char_boundary(i) && !self.enc.is_protected(i))
+            .find(|&i| {
+                (whose && self.lit(i, " to "))
+                    || self
+                        .keyword(i, &[", and ", ", ", " and "])
+                        .is_some_and(|next| self.init_entry(next, whose).is_some())
+            })
+            .unwrap_or(bound)
+    }
+
     /// An `Opaque` statement for the clause at `at`. `target_text` is the
-    /// text after the verb up to ` to ` or the value end, links elided.
+    /// text after the verb up to ` to ` or the value end, links elided. The
+    /// verb is a word or, for an Infra-linked operation, the link at `at`.
     fn push_opaque(&mut self, at: usize, reason: OpaqueReason, verb: Option<String>) -> String {
-        let after = match &verb {
-            Some(verb) => {
+        let after = match (&verb, self.enc.placeholder(at)) {
+            (Some(_), Some((Placeholder::Link(_), end))) => end + usize::from(self.lit(end, " ")),
+            (Some(verb), _) => {
                 let end = at + verb.len();
                 end + usize::from(self.lit(end, " "))
             }
-            None => at,
+            (None, _) => at,
         };
         let end = self.value_end(after, None);
         let target_end = self
@@ -1379,7 +1643,7 @@ impl Parser<'_> {
         if let Some(after) = self.keyword(start, &["a new ", "an new "]) {
             return Expr::New {
                 ty: self.new_type(after),
-                init: None,
+                init: self.inits.get(&start).cloned(),
             };
         }
         if let Some(path) = self.path(start, false).filter(|path| path.end == end) {
@@ -1398,8 +1662,13 @@ impl Parser<'_> {
                 .clone()
                 .map(TypeRef::Unresolved);
         }
-        self.code(pos)
-            .map(|(name, _)| TypeRef::Known(TypeKey::Idl(name)))
+        let (name, _) = self.code(pos)?;
+        let mut chars = name.chars();
+        let is_identifier = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+        is_identifier.then_some(TypeRef::Known(TypeKey::Idl(name)))
     }
 }
 
@@ -1429,12 +1698,12 @@ fn literal(text: &str) -> Option<Literal> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests_support {
+    use super::StatementSource;
     use crate::parse::steps::extract_step_structure;
 
     /// Wrap step bodies in an algorithm, extract structure, return the sources of all segments.
-    fn sources(steps: &[&str]) -> Vec<StatementSource> {
+    pub(crate) fn sources(steps: &[&str]) -> Vec<StatementSource> {
         let lis: String = steps
             .iter()
             .map(|s| format!("<li><p>{s}</p></li>"))
@@ -1446,6 +1715,12 @@ mod tests {
             extract_step_structure(&html, "HTML", "https://html.spec.whatwg.org/", "hash:t");
         crate::state::extract::algorithm_sources(&structure)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::sources;
+    use super::*;
 
     fn one(step: &str) -> (StatementSource, ParsedSource) {
         let source = sources(&[step]).remove(0);
@@ -2020,5 +2295,167 @@ mod tests {
             .iter()
             .find(|c| c.start == p.statements[1].span.start);
         assert!(clause.is_some_and(|c| c.consumed));
+    }
+
+    #[test]
+    fn infra_append_to_field_and_to_local() {
+        let (s, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#list-append">Append</a> <var>x</var> to <var>d</var>’s <a href="#script-blocking-style-sheet-set">script-blocking style sheet set</a>."##,
+        );
+        assert!(
+            matches!(&p.statements[0].kind, StatementKind::Mutate { op: MutationOp::Append, basis: OpBasis::InfraLink(_), operand: Some(Expr::Var(v)), .. } if v == "x")
+        );
+        assert_eq!(
+            role_of(&s, &p, "script-blocking style sheet set"),
+            Some(OccurrenceClass::Write)
+        );
+        let (_, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#list-append">Append</a> <var>x</var> to <var>list</var>."##,
+        );
+        assert!(
+            matches!(&p.statements[0].kind, StatementKind::Mutate { target, .. } if target.hops.is_empty() && target.root == Root::Var("list".into()))
+        );
+    }
+
+    #[test]
+    fn initializers_whose_and_with_its() {
+        let (s, p) = one(
+            r##"Return a new <a href="#concept-node">node</a> that implements <var>interface</var>, with its <a href="#concept-node-document">node document</a> set to <var>document</var>."##,
+        );
+        let init = p
+            .statements
+            .iter()
+            .find(|st| matches!(st.kind, StatementKind::Init { .. }))
+            .unwrap();
+        assert!(
+            matches!(&init.kind, StatementKind::Init { form: InitForm::WithItsSetTo, entries, .. } if entries.len() == 1)
+        );
+        assert_eq!(
+            role_of(&s, &p, "node document"),
+            Some(OccurrenceClass::Init)
+        );
+        let (s, p) = one(
+            r##"Append a new <code><a href="https://dom.spec.whatwg.org/#text">Text</a></code> node whose <a href="https://dom.spec.whatwg.org/#concept-cd-data">data</a> is <var>text</var> and <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a> is <var>document</var> to <var>fragment</var>."##,
+        );
+        let init = p
+            .statements
+            .iter()
+            .find(|st| matches!(st.kind, StatementKind::Init { .. }))
+            .unwrap();
+        assert!(
+            matches!(&init.kind, StatementKind::Init { form: InitForm::WhoseList, entries, .. } if entries.len() == 2)
+        );
+        assert_eq!(
+            role_of(&s, &p, "node document"),
+            Some(OccurrenceClass::Init)
+        );
+    }
+
+    #[test]
+    fn let_with_new_points_at_its_initializer() {
+        let (_, p) = one(
+            r##"Let <var>t</var> be a new <a href="#tuple">thing</a> whose <a href="#f">f</a> is 1."##,
+        );
+        let init_id = p
+            .statements
+            .iter()
+            .find(|st| matches!(st.kind, StatementKind::Init { .. }))
+            .unwrap()
+            .id
+            .clone();
+        assert!(p.statements.iter().any(|st| matches!(&st.kind, StatementKind::Let { value: Expr::New { init: Some(id), .. }, .. } if *id == init_id)));
+    }
+
+    #[test]
+    fn initializer_types_values_and_with_list() {
+        let (s, p) = one(
+            r##"Append a new <a href="https://dom.spec.whatwg.org/#text">Text</a> node whose <a href="#d">data</a> is <var>text</var> to <var>fragment</var>."##,
+        );
+        let init = p
+            .statements
+            .iter()
+            .find(|st| matches!(st.kind, StatementKind::Init { .. }))
+            .unwrap();
+        assert!(
+            matches!(&init.kind, StatementKind::Init { constructed: Some(TypeRef::Unresolved(t)), entries, .. } if t.spec == "DOM" && t.anchor == "text" && entries[0].value == Expr::Var("text".into()))
+        );
+        assert_eq!(role_of(&s, &p, "data"), Some(OccurrenceClass::Init));
+        let (s, p) = one(
+            r##"Let <var>n</var> be a new <code>Text</code> node, with <a href="#d">data</a> set to <var>x</var>, and <a href="#nd">node document</a> set to <var>doc</var>’s <a href="#o">owner</a>."##,
+        );
+        let init = p
+            .statements
+            .iter()
+            .find(|st| matches!(st.kind, StatementKind::Init { .. }))
+            .unwrap();
+        assert!(
+            matches!(&init.kind, StatementKind::Init { constructed: Some(TypeRef::Known(TypeKey::Idl(name))), form: InitForm::WithList, entries } if name == "Text" && entries.len() == 2)
+        );
+        assert_eq!(
+            role_of(&s, &p, "node document"),
+            Some(OccurrenceClass::Init)
+        );
+        assert_eq!(role_of(&s, &p, "owner"), Some(OccurrenceClass::Read));
+        let (_, p) = one(r##"Let <var>n</var> be a new <a href="#t">thing</a>."##);
+        assert!(!p
+            .statements
+            .iter()
+            .any(|st| matches!(st.kind, StatementKind::Init { .. })));
+        assert!(matches!(
+            &p.statements[0].kind,
+            StatementKind::Let {
+                value: Expr::New {
+                    init: None,
+                    ty: Some(_)
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn infra_prepositions_map_set_and_unparsed_targets() {
+        let (s, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#list-remove">Remove</a> <var>x</var> from the <a href="#q">pending queue</a>, then return."##,
+        );
+        assert!(
+            matches!(&p.statements[0].kind, StatementKind::Mutate { op: MutationOp::Remove, target, .. } if target.root == Root::Implicit)
+        );
+        assert_eq!(
+            role_of(&s, &p, "pending queue"),
+            Some(OccurrenceClass::Write)
+        );
+        assert!(p.clauses[0].consumed);
+        let (s, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#map-set">Set</a> <var>d</var>’s <a href="#m">map</a>[<var>k</var>] to <var>e</var>’s <a href="#v">value</a>."##,
+        );
+        assert!(
+            matches!(&p.statements[0].kind, StatementKind::Mutate { op: MutationOp::MapSet, target, operand: Some(Expr::Path(_)), .. } if target.subscript.is_some())
+        );
+        assert_eq!(role_of(&s, &p, "map"), Some(OccurrenceClass::Write));
+        assert_eq!(role_of(&s, &p, "value"), Some(OccurrenceClass::Read));
+        let (s, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#list-empty">Empty</a> <var>d</var>’s <a href="#l">list</a>."##,
+        );
+        assert!(matches!(
+            &p.statements[0].kind,
+            StatementKind::Mutate {
+                op: MutationOp::Empty,
+                operand: None,
+                ..
+            }
+        ));
+        assert_eq!(role_of(&s, &p, "list"), Some(OccurrenceClass::Write));
+        let (s, p) = one(
+            r##"<a href="https://infra.spec.whatwg.org/#list-append">Append</a> <var>x</var> to the end of the <a href="#l">list</a>."##,
+        );
+        assert!(matches!(
+            &p.statements[0].kind,
+            StatementKind::Opaque { reason: OpaqueReason::UnparsedTarget, verb: Some(v), .. } if v == "append"
+        ));
+        assert_eq!(role_of(&s, &p, "list"), None);
+        assert_eq!(p.statements.len(), 1);
+        assert!(!p.clauses[0].consumed);
+        assert_eq!(p.clauses[0].verb.as_deref(), Some("append"));
     }
 }
