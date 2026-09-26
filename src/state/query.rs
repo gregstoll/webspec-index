@@ -410,6 +410,16 @@ fn glob_to_like(glob: &str) -> String {
     glob.replace('*', "%")
 }
 
+/// A `LIKE` pattern matching every name whose `fold_name` equals `folded`:
+/// the folded words joined by `%`, with `LIKE` metacharacters widened to `_`.
+fn folded_prefilter(folded: &str) -> String {
+    let words: Vec<String> = folded
+        .split(' ')
+        .map(|word| word.replace(['%', '_', '`'], "_"))
+        .collect();
+    format!("%{}%", words.join("%"))
+}
+
 /// SQLite `LIKE`: `%` matches any run, `_` one character, ASCII case-insensitive.
 fn like_match(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().map(|c| c.to_ascii_lowercase()).collect();
@@ -922,29 +932,24 @@ impl<'a> Scope<'a> {
         self.options.limit.unwrap_or(FIELD_SITE_LIMIT) as usize
     }
 
-    /// Errors for a `SPEC#…` selector whose spec has no state model in scope.
-    fn spec_not_in_scope(&self, spec: &str) -> Result<StateError, StateError> {
-        Ok(if db::has_current_snapshot(self.conn, spec)? {
-            StateError::new(
-                StateErrorCode::SpecNotIndexed,
-                format!("{spec} has no state model; run `webspec-index update -s {spec}`"),
-            )
+    /// The error for a `SPEC#…` selector whose spec has no state model in scope.
+    fn spec_not_in_scope(spec: &str, has_current_snapshot: bool) -> StateError {
+        let message = if has_current_snapshot {
+            format!("{spec} has no state model; run `webspec-index update -s {spec}`")
         } else {
-            StateError::new(
-                StateErrorCode::SpecNotIndexed,
-                format!("{spec} is not indexed"),
-            )
-        })
+            format!("{spec} is not indexed")
+        };
+        StateError::new(StateErrorCode::SpecNotIndexed, message)
     }
 
     fn anchor_view(&self, spec: &str, anchor: &str) -> Result<StateResponse, StateError> {
         if !self.spec_in_scope(spec) {
             if db::has_current_snapshot(self.conn, spec)? {
-                return Err(self.spec_not_in_scope(spec)?);
+                return Err(Self::spec_not_in_scope(spec, true));
             }
             let sites = db::sites_for_target(self.conn, &self.ids, spec, anchor)?;
             if sites.is_empty() {
-                return Err(self.spec_not_in_scope(spec)?);
+                return Err(Self::spec_not_in_scope(spec, false));
             }
             return Ok(StateResponse::Field(self.field_view(
                 spec,
@@ -993,7 +998,7 @@ impl<'a> Scope<'a> {
         let mut candidates = Vec::new();
         if let Some(title) = db::section_title(self.conn, &spec_ids, anchor)? {
             let folded = fold_name(&title);
-            for row in db::fields_like(self.conn, &self.ids, &title)? {
+            for row in db::fields_like(self.conn, &self.ids, &folded_prefilter(&folded))? {
                 let field = self.decode(row);
                 let selector = format!("{}#{}", field.spec, field.anchor);
                 if fold_name(&field.row.name) == folded && !candidates.contains(&selector) {
@@ -1188,31 +1193,26 @@ impl<'a> Scope<'a> {
 
     /// Opaque writes whose target text names this field (`'s NAME`, `the NAME`).
     fn possible_unlinked(&self, field: &Field) -> Result<Vec<SiteInfo>, StateError> {
-        let mut seen = BTreeSet::new();
-        let mut out = Vec::new();
-        for name in field.all_names() {
-            let name = name.trim();
-            if name.is_empty() {
-                continue;
-            }
-            let pattern = format!(r"(?i)(?:'s|’s|\bthe) {}\b", regex::escape(name));
-            let Ok(regex) = regex::Regex::new(&pattern) else {
-                continue;
-            };
-            for site in db::opaque_writes_like(self.conn, &self.ids, name)? {
-                if regex.is_match(&site.target_text)
-                    && seen.insert((
-                        site.spec.clone(),
-                        site.subject_anchor.clone(),
-                        site.step_path.clone(),
-                        site.text.clone(),
-                    ))
-                {
-                    out.push(site_info(&site));
-                }
-            }
-        }
-        Ok(out)
+        let names: Vec<String> = field
+            .all_names()
+            .iter()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .collect();
+        let alternatives = names
+            .iter()
+            .map(|name| regex::escape(name))
+            .collect::<Vec<_>>()
+            .join("|");
+        let Ok(regex) = regex::Regex::new(&format!(r"(?i)(?:'s|’s|\bthe) (?:{alternatives})\b"))
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(db::opaque_writes_like(self.conn, &self.ids, &names)?
+            .iter()
+            .filter(|site| regex.is_match(&site.target_text))
+            .map(site_info)
+            .collect())
     }
 
     fn member_view(&self, member: StoredMember) -> Result<StateMemberResult, StateError> {
@@ -1591,7 +1591,10 @@ impl<'a> Scope<'a> {
         pattern: &str,
     ) -> Result<StateResponse, StateError> {
         if !self.spec_in_scope(spec) {
-            return Err(self.spec_not_in_scope(spec)?);
+            return Err(Self::spec_not_in_scope(
+                spec,
+                db::has_current_snapshot(self.conn, spec)?,
+            ));
         }
         let matches = db::fields_like(self.conn, &self.spec_ids(spec), pattern)?
             .into_iter()
@@ -1610,9 +1613,18 @@ impl<'a> Scope<'a> {
         let mut issues = BTreeSet::new();
         let mut counts = StatusCounts::default();
         let mut entries = Vec::new();
-        for (field, found_on) in matches.into_iter().take(limit) {
-            let (spec, anchor) = field.key();
-            let sites = db::sites_for_target(self.conn, &self.ids, &spec, &anchor)?;
+        let listed: Vec<(Field, Option<FoundOn>)> = matches.into_iter().take(limit).collect();
+        let targets: Vec<(String, String)> = listed.iter().map(|(field, _)| field.key()).collect();
+        let mut sites_by_target: HashMap<(String, String), Vec<StoredSite>> = HashMap::new();
+        for site in db::sites_for_targets(self.conn, &self.ids, &targets)? {
+            let target = (
+                site.target_spec.clone().unwrap_or_default(),
+                site.target_anchor.clone().unwrap_or_default(),
+            );
+            sites_by_target.entry(target).or_default().push(site);
+        }
+        for (field, found_on) in listed {
+            let sites = sites_by_target.remove(&field.key()).unwrap_or_default();
             let groups = Groups::new(&sites, LIST_SITES_PER_GROUP);
             let (owners, _, _) = self.owner_infos(&field, &mut issues);
             counts.writes += groups.counts.writes;
@@ -1731,6 +1743,7 @@ mod tests {
         )
         .unwrap();
         let f = field(&conn, "DOM#concept-node-document");
+        assert!(!f.writes.is_empty());
         assert!(f.writes.iter().all(|w| w.spec == "DOM"));
     }
 
@@ -1804,6 +1817,212 @@ mod tests {
         assert!(f.inits.is_none());
         assert_eq!(f.writes.len(), 1);
         assert_eq!(f.unclassified.items.len(), 1);
+    }
+
+    /// Unowned field, possible unlinked write, a write to a non-field anchor,
+    /// a heading titled like a field, and a concept type that `OTHER` repeats.
+    const EXTRA: &str = r##"<div data-algorithm=""><p>To <dfn id="reset-a-document">reset a document</dfn> given <var>document</var>:</p><ol>
+<li><p>Set <var>document</var>'s is initial about:blank to the result of something.</p></li>
+<li><p>Set <var>x</var>'s <a href="#reset-a-document">reset</a> to 1.</p></li></ol></div>
+<p>Such objects have associated <dfn id="such-thing">thing</dfn>.</p>
+<h4 id="initial-heading">is initial about:blank</h4>
+<p>A <dfn data-dfn-type="dfn" id="concept-widget">widget</dfn> is a thing.</p>
+<p>Each <a href="#concept-widget">widget</a> has a <dfn id="widget-size">size</dfn>, which is a number.</p>"##;
+
+    fn extra_db() -> rusqlite::Connection {
+        db_with(&[
+            ("DOM", crate::state::testing::QUERY_DOM),
+            ("HTML", HTML),
+            ("EXTRA", EXTRA),
+            ("OTHER", EXTRA),
+        ])
+    }
+
+    #[test]
+    fn member_view_splits_adds_and_removes() {
+        let conn = both();
+        let StateResponse::Member(m) = query(
+            &conn,
+            "HTML#sandboxed-navigation-browsing-context-flag",
+            &Default::default(),
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(m.member.set, "HTML#sandboxing-flag-set");
+        assert_eq!(m.member.set_name.as_deref(), Some("sandboxing flag set"));
+        assert_eq!(m.member.declaration.section, "HTML#sandboxing");
+        let paths = |sites: &[SiteInfo]| -> Vec<String> {
+            sites
+                .iter()
+                .map(|s| s.step_path.clone().unwrap_or_default())
+                .collect()
+        };
+        assert_eq!(paths(&m.adds), ["1"]);
+        assert_eq!(paths(&m.removes), ["2"]);
+        assert_eq!(m.status.coverage, Coverage::Complete);
+
+        let StateResponse::Type(t) =
+            query(&conn, "HTML#sandboxing-flag-set", &Default::default()).unwrap()
+        else {
+            panic!()
+        };
+        let rows: Vec<_> = t
+            .members
+            .iter()
+            .map(|r| (r.anchor.as_str(), r.adds, r.removes))
+            .collect();
+        assert_eq!(rows, [("sandboxed-navigation-browsing-context-flag", 1, 1)]);
+    }
+
+    #[test]
+    fn opaque_write_naming_the_field_is_a_possible_unlinked_write() {
+        let conn = extra_db();
+        let f = field(&conn, "HTML#is-initial-about:blank");
+        let texts: Vec<_> = f
+            .possible_unlinked
+            .iter()
+            .map(|s| (s.spec.as_str(), s.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (
+                    "EXTRA",
+                    "Set *document*'s is initial about:blank to the result of something."
+                ),
+                (
+                    "OTHER",
+                    "Set *document*'s is initial about:blank to the result of something."
+                ),
+            ]
+        );
+        assert_eq!(f.status.counts.possible_unlinked, 2);
+        assert!(f
+            .status
+            .issues
+            .contains(&StateIssueCode::PossibleUnlinkedWrite));
+        assert_eq!(f.status.coverage, Coverage::Partial);
+        assert!(field(&both(), "HTML#is-initial-about:blank")
+            .possible_unlinked
+            .is_empty());
+    }
+
+    #[test]
+    fn sites_on_a_non_field_anchor_give_field_not_declared() {
+        let conn = extra_db();
+        let f = field(&conn, "EXTRA#reset-a-document");
+        assert!(f.status.issues.contains(&StateIssueCode::FieldNotDeclared));
+        assert_eq!(f.field.name, "reset a document");
+        assert!(f.field.owners.is_empty());
+        assert_eq!(f.writes.len(), 1);
+        assert_eq!(f.writes[0].text, "Set *x*'s reset to 1.");
+        assert_eq!(f.status.coverage, Coverage::Partial);
+    }
+
+    #[test]
+    fn not_found_suggests_fields_named_like_the_section_title() {
+        let conn = extra_db();
+        let error = query(&conn, "EXTRA#initial-heading", &Default::default()).unwrap_err();
+        assert_eq!(error.code, StateErrorCode::NotFound);
+        assert_eq!(error.candidates, ["HTML#is-initial-about:blank"]);
+    }
+
+    #[test]
+    fn ambiguous_types_and_fields_list_candidate_selectors() {
+        let conn = extra_db();
+        let error = query(&conn, "widget", &Default::default()).unwrap_err();
+        assert_eq!(error.code, StateErrorCode::AmbiguousSelector);
+        assert_eq!(
+            error.candidates,
+            ["EXTRA#concept-widget", "OTHER#concept-widget"]
+        );
+
+        let conn = db_with(&[
+            ("DOM", crate::state::testing::QUERY_DOM),
+            ("HTML", HTML),
+            ("EXTRA", HTML),
+        ]);
+        let error = query(
+            &conn,
+            "Document.is initial about:blank",
+            &Default::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, StateErrorCode::AmbiguousSelector);
+        assert_eq!(
+            error.candidates,
+            [
+                "EXTRA#is-initial-about:blank",
+                "HTML#is-initial-about:blank"
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_owner_keeps_its_hint() {
+        let conn = extra_db();
+        let f = field(&conn, "EXTRA#such-thing");
+        assert!(f.field.owners.is_empty());
+        assert_eq!(f.field.owner_hint.as_deref(), Some("such"));
+        assert!(f.status.issues.contains(&StateIssueCode::OwnerUnknown));
+        assert_eq!(f.status.coverage, Coverage::Partial);
+    }
+
+    #[test]
+    fn unknown_spec_and_empty_scope_are_spec_not_indexed() {
+        let error = query(&both(), "NOPE#x", &Default::default()).unwrap_err();
+        assert_eq!(error.code, StateErrorCode::SpecNotIndexed);
+        assert_eq!(error.message, "NOPE is not indexed");
+
+        let error = query(&db_with(&[]), "Document", &Default::default()).unwrap_err();
+        assert_eq!(error.code, StateErrorCode::SpecNotIndexed);
+        assert!(error
+            .message
+            .starts_with("no indexed spec has a state model"));
+    }
+
+    #[test]
+    fn type_view_limit_records_truncated_rows() {
+        let conn = both();
+        let options = StateQueryOptions {
+            limit: Some(0),
+            ..Default::default()
+        };
+        let StateResponse::Type(t) = query(&conn, "Document", &options).unwrap() else {
+            panic!()
+        };
+        assert!(t.fields.is_empty());
+        assert!(t.inherited[0].fields.is_empty());
+        assert_eq!(
+            t.truncated,
+            BTreeMap::from([
+                ("fields".to_string(), 1),
+                ("inherited:idl:Node".to_string(), 1)
+            ])
+        );
+    }
+
+    #[test]
+    fn field_list_entries_carry_their_first_sites() {
+        let conn = both();
+        let StateResponse::Fields(l) = query(&conn, "Element.*", &Default::default()).unwrap()
+        else {
+            panic!()
+        };
+        let entries: Vec<_> = l
+            .fields
+            .iter()
+            .map(|e| {
+                (
+                    e.row.anchor.as_str(),
+                    e.writes.len(),
+                    e.unclassified.len(),
+                    e.row.writes,
+                )
+            })
+            .collect();
+        assert_eq!(entries, [("concept-node-document", 2, 1, 2)]);
     }
 
     #[test]

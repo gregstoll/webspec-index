@@ -86,7 +86,13 @@ pub const QUERY_HTML: &str = r##"<pre><code class="idl">partial interface <dfn d
 <div data-algorithm=""><p>The <dfn id="document-open-steps">document open steps</dfn> are:</p><ol>
 <li><p>Set <var>document</var>'s <a href="#is-initial-about:blank">is initial <code>about:blank</code></a> to false.</p></li>
 <li><p>Set <var>d</var>'s <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a> to <var>x</var>.</p></li>
-<li><p>Add <var>s</var> to <var>s</var>'s <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a>'s <a href="#open-dialogs-list">open dialogs list</a>.</p></li></ol></div>"##;
+<li><p>Add <var>s</var> to <var>s</var>'s <a href="https://dom.spec.whatwg.org/#concept-node-document">node document</a>'s <a href="#open-dialogs-list">open dialogs list</a>.</p></li></ol></div>
+<h3 id="sandboxing">Sandboxing</h3>
+<p>A <dfn id="sandboxing-flag-set">sandboxing flag set</dfn> is a set of zero or more of the following flags, which are used to restrict abilities:</p>
+<dl><dt>The <dfn id="sandboxed-navigation-browsing-context-flag">sandboxed navigation browsing context flag</dfn></dt><dd><p>This flag prevents content from navigating.</p></dd></dl>
+<div data-algorithm=""><p>To <dfn id="parse-a-sandboxing-directive">parse a sandboxing directive</dfn> into <var>output</var>:</p><ol>
+<li><p>Set <var>output</var>'s <a href="#sandboxed-navigation-browsing-context-flag">sandboxed navigation browsing context flag</a>.</p></li>
+<li><p>Unset <var>output</var>'s <a href="#sandboxed-navigation-browsing-context-flag">sandboxed navigation browsing context flag</a>.</p></li></ol></div>"##;
 
 /// In-memory DB holding the given specs, indexed offline with the grammar only
 /// (empty catalog), so query tests do not change when the bundled catalog grows.

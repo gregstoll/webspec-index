@@ -111,6 +111,8 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_state_counts_target ON state_occurrence_counts(target_spec, target_anchor);
         CREATE INDEX IF NOT EXISTS idx_state_fields_anchor ON state_fields(anchor);
         CREATE INDEX IF NOT EXISTS idx_state_types_anchor ON state_types(anchor);
+        CREATE INDEX IF NOT EXISTS idx_state_members_set ON state_members(set_key);
+        CREATE INDEX IF NOT EXISTS idx_state_sites_opaque ON state_sites(snapshot_id) WHERE class = 'opaque_write';
         CREATE TABLE IF NOT EXISTS state_coverage (
             snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
             coverage_json TEXT NOT NULL
@@ -615,6 +617,7 @@ pub fn load_edges(conn: &Connection, snapshots: &[i64]) -> Result<Vec<StoredEdge
 
 const FIELD_COLUMNS: &str = "f.snapshot_id, f.anchor, f.name, f.names_json, f.owners_json, \
     f.owner_basis, f.field_basis, f.type_json, f.initial_json, f.decl_section, f.decl_text, f.issues_json";
+const FIELD_COLUMN_COUNT: usize = 12;
 
 fn stored_field(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredField> {
     Ok(StoredField {
@@ -641,7 +644,7 @@ pub fn fields_by_anchor(
     anchor: &str,
 ) -> Result<Vec<StoredField>> {
     let sql = format!(
-        "SELECT {FIELD_COLUMNS} FROM state_fields f WHERE f.anchor = ?1 AND f.snapshot_id IN ({}) \
+        "SELECT {FIELD_COLUMNS} FROM state_fields f WHERE f.anchor = ?1 AND +f.snapshot_id IN ({}) \
          ORDER BY f.snapshot_id",
         id_list(snapshots)
     );
@@ -659,30 +662,15 @@ pub fn fields_by_owner_keys(
     let mut out = Vec::new();
     for chunk in owner_keys.chunks(500) {
         let sql = format!(
-            "SELECT o.owner_key, {FIELD_COLUMNS} FROM state_field_owners o \
+            "SELECT {FIELD_COLUMNS}, o.owner_key FROM state_field_owners o \
              JOIN state_fields f ON f.snapshot_id = o.snapshot_id AND f.anchor = o.anchor \
-             WHERE o.owner_key IN ({}) AND o.snapshot_id IN ({}) ORDER BY f.snapshot_id, f.anchor",
+             WHERE o.owner_key IN ({}) AND +o.snapshot_id IN ({}) ORDER BY f.snapshot_id, f.anchor",
             placeholders(1, chunk.len()),
             id_list(snapshots)
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |row| {
-            let key: String = row.get(0)?;
-            let field = StoredField {
-                snapshot_id: row.get(1)?,
-                anchor: row.get(2)?,
-                name: row.get(3)?,
-                names_json: row.get(4)?,
-                owners_json: row.get(5)?,
-                owner_basis: row.get(6)?,
-                field_basis: row.get(7)?,
-                type_json: row.get(8)?,
-                initial_json: row.get(9)?,
-                decl_section: row.get(10)?,
-                decl_text: row.get(11)?,
-                issues_json: row.get(12)?,
-            };
-            Ok((key, field))
+            Ok((row.get(FIELD_COLUMN_COUNT)?, stored_field(row)?))
         })?;
         for row in rows {
             out.push(row?);
@@ -749,7 +737,7 @@ pub fn members_by_set_keys(
     for chunk in set_keys.chunks(500) {
         let sql = format!(
             "SELECT {MEMBER_COLUMNS} FROM state_members WHERE set_key IN ({}) \
-             AND snapshot_id IN ({}) ORDER BY snapshot_id, name, anchor",
+             AND +snapshot_id IN ({}) ORDER BY snapshot_id, name, anchor",
             placeholders(1, chunk.len()),
             id_list(snapshots)
         );
@@ -788,6 +776,21 @@ fn stored_site(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredSite> {
     })
 }
 
+/// `(?1, ?2), (?3, ?4), …` for `count` target pairs.
+fn target_values(count: usize) -> String {
+    (0..count)
+        .map(|i| format!("(?{}, ?{})", 2 * i + 1, 2 * i + 2))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn target_params(targets: &[(String, String)]) -> Vec<&str> {
+    targets
+        .iter()
+        .flat_map(|(spec, anchor)| [spec.as_str(), anchor.as_str()])
+        .collect()
+}
+
 /// Every site targeting `spec#anchor`, ordered by `(spec, subject, step_path)`.
 pub fn sites_for_target(
     conn: &Connection,
@@ -795,14 +798,36 @@ pub fn sites_for_target(
     spec: &str,
     anchor: &str,
 ) -> Result<Vec<StoredSite>> {
-    let sql = format!(
-        "{SITE_SELECT} WHERE st.target_spec = ?1 AND st.target_anchor = ?2 \
-         AND st.snapshot_id IN ({}) ORDER BY sp.name, st.subject_anchor, st.step_path, st.site_id",
-        id_list(snapshots)
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([spec, anchor], stored_site)?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+    sites_for_targets(conn, snapshots, &[(spec.to_string(), anchor.to_string())])
+}
+
+/// Every site targeting one of `targets`, ordered by target, then
+/// `(spec, subject, step_path)`. The `+` keeps the target index in use whether
+/// or not planner statistics exist.
+pub fn sites_for_targets(
+    conn: &Connection,
+    snapshots: &[i64],
+    targets: &[(String, String)],
+) -> Result<Vec<StoredSite>> {
+    let mut out = Vec::new();
+    for chunk in targets.chunks(400) {
+        let sql = format!(
+            "{SITE_SELECT} WHERE (st.target_spec, st.target_anchor) IN (VALUES {}) \
+             AND +st.snapshot_id IN ({}) ORDER BY st.target_spec, st.target_anchor, sp.name, \
+             st.subject_anchor, st.step_path, st.site_id",
+            target_values(chunk.len()),
+            id_list(snapshots)
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(target_params(chunk)),
+            stored_site,
+        )?;
+        for row in rows {
+            out.push(row?);
+        }
+    }
+    Ok(out)
 }
 
 /// Number of sites of one class and op targeting `spec#anchor`.
@@ -823,22 +848,15 @@ pub fn site_counts_for_targets(
 ) -> Result<Vec<SiteCount>> {
     let mut out = Vec::new();
     for chunk in targets.chunks(400) {
-        let values = (0..chunk.len())
-            .map(|i| format!("(?{}, ?{})", 2 * i + 1, 2 * i + 2))
-            .collect::<Vec<_>>()
-            .join(",");
         let sql = format!(
             "SELECT target_spec, target_anchor, class, op, COUNT(*) FROM state_sites \
-             WHERE (target_spec, target_anchor) IN (VALUES {values}) AND snapshot_id IN ({}) \
+             WHERE (target_spec, target_anchor) IN (VALUES {}) AND +snapshot_id IN ({}) \
              GROUP BY target_spec, target_anchor, class, op",
+            target_values(chunk.len()),
             id_list(snapshots)
         );
-        let params: Vec<&str> = chunk
-            .iter()
-            .flat_map(|(spec, anchor)| [spec.as_str(), anchor.as_str()])
-            .collect();
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        let rows = stmt.query_map(rusqlite::params_from_iter(target_params(chunk)), |row| {
             Ok(SiteCount {
                 spec: row.get(0)?,
                 anchor: row.get(1)?,
@@ -858,29 +876,42 @@ pub fn site_counts_for_targets(
 pub fn read_count(conn: &Connection, snapshots: &[i64], spec: &str, anchor: &str) -> Result<u32> {
     let sql = format!(
         "SELECT COALESCE(SUM(count), 0) FROM state_occurrence_counts \
-         WHERE target_spec = ?1 AND target_anchor = ?2 AND class = 'read' AND snapshot_id IN ({})",
+         WHERE target_spec = ?1 AND target_anchor = ?2 AND class = 'read' AND +snapshot_id IN ({})",
         id_list(snapshots)
     );
     Ok(conn.query_row(&sql, [spec, anchor], |row| row.get(0))?)
 }
 
-/// `opaque_write` sites whose target text contains `name` (ASCII case-insensitive).
+/// `opaque_write` sites whose target text contains one of `names` (ASCII case-insensitive).
 pub fn opaque_writes_like(
     conn: &Connection,
     snapshots: &[i64],
-    name: &str,
+    names: &[String],
 ) -> Result<Vec<StoredSite>> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let likes = (1..=names.len())
+        .map(|i| format!("st.target_text LIKE ?{i} ESCAPE '\\'"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
     let sql = format!(
-        "{SITE_SELECT} WHERE st.class = 'opaque_write' AND st.target_text LIKE ?1 ESCAPE '\\' \
-         AND st.snapshot_id IN ({}) ORDER BY sp.name, st.subject_anchor, st.step_path, st.site_id",
+        "{SITE_SELECT} WHERE st.class = 'opaque_write' AND st.snapshot_id IN ({}) AND ({likes}) \
+         ORDER BY sp.name, st.subject_anchor, st.step_path, st.site_id",
         id_list(snapshots)
     );
-    let escaped = name
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
+    let patterns: Vec<String> = names
+        .iter()
+        .map(|name| {
+            let escaped = name
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        })
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([format!("%{escaped}%")], stored_site)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(patterns), stored_site)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
