@@ -1,7 +1,5 @@
 //! Cuts a slice out of the stored section markdown (spec §8): omitted runs of step items become
 //! one marker line each, everything else is copied byte for byte.
-use std::collections::HashMap;
-
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use serde::Serialize;
 
@@ -138,19 +136,23 @@ pub fn render_view(markdown: &str, index: &SliceIndex, slice: &Slice) -> Rendere
         return unaligned(items.len());
     }
 
-    let position: HashMap<&str, usize> = items
-        .iter()
-        .enumerate()
-        .map(|(i, item)| (item.path.as_str(), i))
-        .collect();
+    // Runs come in document order, and a path can repeat (sibling lists in one step each count
+    // from 1), so each run is looked up after the previous one.
+    let find = |path: &str, from: usize| {
+        items[from..]
+            .iter()
+            .position(|item| item.path == path)
+            .map(|i| from + i)
+    };
     let mut replacements: Vec<(usize, usize, String)> = Vec::with_capacity(slice.omitted.len());
+    let mut next = 0;
     for run in &slice.omitted {
-        let (Some(&first), Some(&last)) = (
-            position.get(run.first.as_str()),
-            position.get(run.last.as_str()),
-        ) else {
+        let Some((first, last)) =
+            find(&run.first, next).and_then(|first| Some((first, find(&run.last, first)?)))
+        else {
             return unaligned(items.len());
         };
+        next = last + 1;
         let (first, last) = (&items[first], &items[last]);
         let start = line_start(markdown, first.start);
         // An item nested in a container may start inside the indentation before its list marker.
@@ -166,7 +168,6 @@ pub fn render_view(markdown: &str, index: &SliceIndex, slice: &Slice) -> Rendere
         replacements.push((start, end, marker));
     }
 
-    replacements.sort_unstable_by_key(|&(start, _, _)| start);
     let mut content = String::with_capacity(markdown.len());
     let mut copied = 0;
     for (start, end, marker) in &replacements {
@@ -277,6 +278,30 @@ mod tests {
                 .ends_with("> 2. second\n\n- [step 2 omitted: no use of *x*]\n"),
             "{}",
             view.content
+        );
+    }
+
+    #[test]
+    fn repeated_paths_resolve_in_document_order() {
+        let md = "1. A:\n\n    1. B.\n    2. C *x*.\n\n    Otherwise:\n\n    1. D.\n    2. E.\n    3. F *x*.\n";
+        let index = slice_index(
+            "go",
+            &[
+                ("1", &[]),
+                ("1.1", &[]),
+                ("1.2", &["x"]),
+                ("1.1", &[]),
+                ("1.2", &[]),
+                ("1.3", &["x"]),
+            ],
+            &[],
+            &[],
+        );
+        let view = render_view(md, &index, &slice(&index, &involving_x()).unwrap());
+        assert_eq!(view.rendering, Rendering::Aligned);
+        assert_eq!(
+            view.content,
+            "1. A:\n\n    - [step 1.1 omitted: no use of *x*]\n\n    2. C *x*.\n\n    Otherwise:\n\n    - [steps 1.1–1.2 omitted: no use of *x*]\n\n    3. F *x*.\n"
         );
     }
 
