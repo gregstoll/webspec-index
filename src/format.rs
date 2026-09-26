@@ -6,6 +6,7 @@ use crate::model::{
     ListEntry, PrDiffResult, QueryResult, RefEntry, RefsResult, SearchResult, TraceDetail,
     TraceHop, TraceResult,
 };
+use crate::state::slice::{content_part, SliceResult};
 
 #[cfg(test)]
 use crate::model::{AnchorEntry, SearchEntry};
@@ -34,6 +35,22 @@ pub fn refs_command(spec_id: &str, direction: &str, total: usize, pr: Option<i64
 /// Refs sections list every ref below `REFS_LIST_THRESHOLD`; at or above it they
 /// show the count and a `refs` command (carrying `--pr` when `pr` is set).
 pub fn query(result: &QueryResult, pr: Option<i64>) -> String {
+    query_with_content_part(
+        result,
+        result
+            .content
+            .as_ref()
+            .map(|c| format!("## Content\n\n{c}")),
+        pr,
+    )
+}
+
+/// `query` with `content_part` (heading included) in place of the `## Content` section.
+fn query_with_content_part(
+    result: &QueryResult,
+    content_part: Option<String>,
+    pr: Option<i64>,
+) -> String {
     let mut md = String::new();
 
     md.push_str(&format!("# {}#{}\n\n", result.spec, result.anchor));
@@ -46,9 +63,8 @@ pub fn query(result: &QueryResult, pr: Option<i64>) -> String {
 
     md.push_str(&format!("**SHA**: {}\n\n", result.sha));
 
-    if let Some(content) = &result.content {
-        md.push_str("## Content\n\n");
-        md.push_str(content);
+    if let Some(part) = content_part {
+        md.push_str(&part);
         md.push_str("\n\n");
     }
 
@@ -126,7 +142,28 @@ pub fn query_with_effects(
     catalog: Option<&Catalog>,
     pr: Option<i64>,
 ) -> String {
-    let mut markdown = query(&result.query, pr);
+    let markdown = query(&result.query, pr);
+    append_effects_summary(markdown, result, catalog)
+}
+
+/// Format a query result whose content is a view of the algorithm: the view's heading and summary
+/// replace `## Content`, and `result.query.content` holds the view's rendered steps.
+pub fn query_view_with_effects(
+    result: &QueryWithEffects,
+    slice: &SliceResult,
+    catalog: Option<&Catalog>,
+    pr: Option<i64>,
+) -> String {
+    let content = result.query.content.as_deref().unwrap_or("");
+    let markdown = query_with_content_part(&result.query, Some(content_part(slice, content)), pr);
+    append_effects_summary(markdown, result, catalog)
+}
+
+fn append_effects_summary(
+    mut markdown: String,
+    result: &QueryWithEffects,
+    catalog: Option<&Catalog>,
+) -> String {
     if let Some(effects) = result.effects_result() {
         markdown.push('\n');
         markdown.push_str(&crate::effects::render::summary_markdown(&effects, catalog));
@@ -899,6 +936,48 @@ mod tests {
         assert_eq!(
             query(&content_fixture(), None),
             "# TEST#navigate\n\n**navigate** (Algorithm)\n\n**SHA**: abc123\n\n## Content\n\nTo **navigate** a [navigable](#foo)\n\n## Navigation\n\n- Parent: `section-7`\n"
+        );
+    }
+
+    fn view_fixture() -> (QueryWithEffects, SliceResult) {
+        use crate::state::slice::{render_view, slice, slice_result, ViewRequest};
+        let content = "To go:\n\n1. A *x*.\n2. B.\n";
+        let index =
+            crate::state::testing::slice_index("go", &[("1", &["x"]), ("2", &[])], &[], &[]);
+        let view = ViewRequest {
+            involving: vec!["x".into()],
+            ..Default::default()
+        };
+        let s = slice(&index, &view).unwrap();
+        let rendered = render_view(content, &index, &s);
+        let mut query = content_fixture();
+        query.content = Some(rendered.content.clone());
+        let result = slice_result("TEST#go".into(), &index, s, &rendered);
+        (
+            QueryWithEffects {
+                query,
+                effects: None,
+                effects_status: None,
+            },
+            result,
+        )
+    }
+
+    #[test]
+    fn query_view_replaces_the_content_heading_and_keeps_the_rest() {
+        let (query, slice) = view_fixture();
+        let plain = query_with_effects(&query, None, None);
+        let viewed = query_view_with_effects(&query, &slice, None, None);
+        assert!(plain.contains("## Content\n\n"));
+        assert!(!viewed.contains("## Content\n\n"));
+        assert!(
+            viewed.contains("## Content — steps involving *x*\n\nKept "),
+            "{viewed}"
+        );
+        assert_eq!(
+            plain.split("## Navigation").nth(1),
+            viewed.split("## Navigation").nth(1),
+            "navigation and refs unchanged"
         );
     }
 

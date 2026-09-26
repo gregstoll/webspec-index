@@ -49,3 +49,14 @@ fn effects_rebuild_requires_all() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--all"));
 }
+
+#[test]
+fn query_views_reject_pr_previews_before_any_network_access() {
+    let output = cli(&["query", "HTML#navigate", "--pr", "1", "--involving", "url"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("slice_unavailable:") && !stderr.contains("slice_slice"),
+        "{stderr}"
+    );
+}

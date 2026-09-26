@@ -1,9 +1,12 @@
 use std::process::ExitCode;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use moz_cli_version_check::VersionChecker;
 
+use webspec_index::state::slice::{
+    apply_view, validate_shape, FeedingSelector, SliceError, SliceErrorCode, ViewRequest,
+};
 use webspec_index::{content_filter, format, model};
 
 #[derive(Parser, Debug)]
@@ -117,10 +120,9 @@ struct QueryEffectsArgs {
     #[arg(
         long,
         value_enum,
-        default_value = "auto",
-        help = "Possible-effects analysis: auto, cached, or off"
+        help = "Possible-effects analysis: auto (default; off in views), cached, or off"
     )]
-    effects: EffectsModeArg,
+    effects: Option<EffectsModeArg>,
 
     #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
     rules: Vec<String>,
@@ -243,6 +245,14 @@ enum Command {
         full            — keep absolute URLs\n  \
         none            — emit link text only, no URL or bracket markup\n\n\
         Use --no-notes to drop Note / Example / Warning / Issue advisement blocks.\n\n\
+        Views of one algorithm (the spec's wording, whole steps dropped, every omission marked):\n  \
+        --involving VAR[,VAR]   steps that use the variables and variables derived from them\n  \
+        --feeding STEP[:VAR]    earlier steps that define the variables step STEP uses\n  \
+        --steps PATH[,PATH]     these steps with their substeps\n  \
+        --depth N               outline: steps down to depth N (combines with the others)\n  \
+        webspec-index query HTML#navigate --involving historyHandling\n  \
+        webspec-index query HTML#navigate --feeding 24.9.1\n  \
+        webspec-index query HTML#navigate --depth 1\n\n\
         Use --pr to query against a PR preview — WHATWG specs (via whatpr.org) or\n\
         TC39 proposals (via the PR's built index.html). Sections not modified by\n\
         the PR fall back to the merge base.\n\
@@ -277,6 +287,22 @@ enum Command {
             help = "Strip Note / Example / Warning / Issue advisement blocks from content"
         )]
         no_notes: bool,
+
+        #[arg(long, value_delimiter = ',', value_name = "VAR", conflicts_with_all = ["feeding", "steps", "diff"],
+              help = "View: steps involving these variables and the variables derived from them")]
+        involving: Vec<String>,
+
+        #[arg(long, value_name = "STEP[:VAR,…]", conflicts_with_all = ["involving", "steps", "diff"],
+              help = "View: earlier steps that feed the variables of STEP")]
+        feeding: Option<String>,
+
+        #[arg(long, value_delimiter = ',', value_name = "PATH", conflicts_with_all = ["involving", "feeding", "diff"],
+              help = "View: these steps with their substeps")]
+        steps: Vec<String>,
+
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..), conflicts_with = "diff",
+              help = "View: outline to this step depth")]
+        depth: Option<u32>,
 
         #[command(flatten)]
         effect_options: QueryEffectsArgs,
@@ -830,7 +856,7 @@ fn is_llm_environment() -> bool {
 fn print_llm_help() {
     print!(
         r#"webspec-index: Query WHATWG/W3C/TC39 web specifications
-query <SPEC#anchor|URL> [--links short(default)|full|none] [--no-notes] [--effects auto|cached|off] [--rules PATH] [--environment NAME] [--pr N] [--diff] [--format json|markdown]
+query <SPEC#anchor|URL> [--involving VAR|--feeding STEP[:VAR]|--steps PATH] [--depth N] [--links short(default)|full|none] [--no-notes] [--effects auto|cached|off] [--rules PATH] [--environment NAME] [--pr N] [--diff] [--format json|markdown]
 search <Q> [-s SPEC] [-l N(20)] [--pr N (requires -s)] [--format json|markdown]
 exists <SPEC#anchor|URL> [--pr N] exit:0=found,1=not
 anchors <GLOB> [-s SPEC] [-l N(50)] [--pr N (requires -s)]
@@ -853,6 +879,7 @@ SPEC#anchor examples: HTML#navigate, DOM#concept-tree, CSS-GRID#grid-container
 Full URL also works: https://html.spec.whatwg.org/#navigate
 --pr N: query against a PR preview (WHATWG specs or TC39 proposals); --diff: show diff vs merge base (requires --pr; #anchor optional with --diff)
 Ex: query HTML#navigate|search "tree order" -s DOM|anchors "*-tree" -s DOM
+Ex: query HTML#navigate --involving historyHandling|query HTML#navigate --feeding 24.9.1|query HTML#navigate --depth 1
 Ex: refs HTML#navigate -d incoming|refs Window.navigation|graph HTML#navigate --graph-format mermaid
 Ex: trace HTML#dom-location-assign HTML#event-navigateerror --format markdown|trace A B -d compact
 Ex: idl Window.navigation|idl Window.open()|idl HTML#dom-window-navigation
@@ -860,6 +887,43 @@ Ex: state HTML#is-initial-about:blank|state "Element.node document"|state Docume
 Ex: query HTML#navigate --pr 1234|query HTML --pr 1234 --diff|query proposal-defer-import-eval --pr 85 --diff
 "#
     );
+}
+
+/// The view the query flags select, normalized and checked so that selector errors surface before
+/// any lookup; `None` without view flags.
+fn view_request(
+    involving: Vec<String>,
+    feeding: Option<String>,
+    steps: Vec<String>,
+    depth: Option<u32>,
+) -> anyhow::Result<Option<ViewRequest>> {
+    if involving.is_empty() && feeding.is_none() && steps.is_empty() && depth.is_none() {
+        return Ok(None);
+    }
+    let feeding = feeding
+        .as_deref()
+        .map(FeedingSelector::parse)
+        .transpose()
+        .map_err(|e| anyhow!("{e}"))?;
+    let view = ViewRequest {
+        involving,
+        feeding,
+        steps,
+        depth,
+    };
+    validate_shape(&view).map(Some).map_err(|e| anyhow!("{e}"))
+}
+
+/// Views print the spec's wording, so effects are off in them unless asked for.
+fn effects_mode(
+    arg: Option<EffectsModeArg>,
+    has_view: bool,
+) -> webspec_index::effects::EffectsMode {
+    match arg {
+        Some(mode) => mode.into(),
+        None if has_view => webspec_index::effects::EffectsMode::Off,
+        None => webspec_index::effects::EffectsMode::Auto,
+    }
 }
 
 impl Command {
@@ -934,8 +998,25 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             force_update,
             links,
             no_notes,
+            involving,
+            feeding,
+            steps,
+            depth,
             effect_options,
         } => {
+            let view = view_request(involving, feeding, steps, depth)?;
+            if view.is_some() && pr.is_some() {
+                return Err(anyhow!(
+                    "{}",
+                    SliceError {
+                        code: SliceErrorCode::Unavailable,
+                        message:
+                            "views need the indexed trunk snapshot; PR previews have no slice index"
+                                .into(),
+                        candidates: vec![],
+                    }
+                ));
+            }
             let pr_opts = pr.map(|n| model::PrOpts {
                 pr_number: n,
                 force_update,
@@ -953,7 +1034,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 return Ok(ExitCode::SUCCESS);
             }
             let options = webspec_index::effects::EffectsOptions {
-                mode: effect_options.effects.into(),
+                mode: effects_mode(effect_options.effects, view.is_some()),
                 rule_paths: effect_options.rules.clone(),
                 environment: effect_options.environment,
                 ..Default::default()
@@ -964,6 +1045,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 options,
             )
             .await?;
+            let slice = match &view {
+                Some(view) => {
+                    let conn = rusqlite::Connection::open(webspec_index::db::get_db_path())?;
+                    Some(apply_view(&conn, &mut result.query, view).map_err(|e| anyhow!("{e}"))?)
+                }
+                None => None,
+            };
             let links_mode: content_filter::LinksMode = links.into();
             if links_mode != content_filter::LinksMode::Full || no_notes {
                 let registry = webspec_index::spec_registry::SpecRegistry::new();
@@ -977,6 +1065,12 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             match cli.format {
                 OutputFormat::Json => {
                     let mut v = serde_json::to_value(&result).context("serialization failed")?;
+                    if let (Some(slice), Some(object)) = (&slice, v.as_object_mut()) {
+                        object.insert(
+                            "slice".into(),
+                            serde_json::to_value(slice).context("serialization failed")?,
+                        );
+                    }
                     apply_refs_summary(
                         &mut v,
                         &spec_id,
@@ -1002,10 +1096,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     let catalog = result.effects.as_ref().and_then(|_| {
                         webspec_index::effects::default_catalog(&effect_options.rules).ok()
                     });
-                    print!(
-                        "{}",
-                        format::query_with_effects(&result, catalog.as_ref(), pr)
-                    );
+                    let markdown = match &slice {
+                        Some(slice) => {
+                            format::query_view_with_effects(&result, slice, catalog.as_ref(), pr)
+                        }
+                        None => format::query_with_effects(&result, catalog.as_ref(), pr),
+                    };
+                    print!("{markdown}");
                 }
             }
             Ok(ExitCode::SUCCESS)
@@ -1770,12 +1867,85 @@ mod cli_effect_tests {
             cli.command,
             Command::Query {
                 effect_options: QueryEffectsArgs {
-                    effects: EffectsModeArg::Off,
+                    effects: Some(EffectsModeArg::Off),
                     ..
                 },
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn query_view_flags_parse_and_conflict() {
+        let cli = Cli::try_parse_from([
+            "webspec-index",
+            "query",
+            "HTML#navigate",
+            "--involving",
+            "url,historyHandling",
+            "--depth",
+            "1",
+        ])
+        .unwrap();
+        let Command::Query {
+            involving,
+            depth,
+            effect_options,
+            ..
+        } = cli.command
+        else {
+            panic!()
+        };
+        assert_eq!(involving, ["url", "historyHandling"]);
+        assert_eq!(depth, Some(1));
+        assert_eq!(effect_options.effects, None);
+        for args in [
+            vec!["--involving", "x", "--steps", "1"],
+            vec!["--feeding", "3", "--involving", "x"],
+            vec!["--steps", "1", "--diff"],
+            vec!["--depth", "0"],
+        ] {
+            let mut all = vec!["webspec-index", "query", "HTML#navigate"];
+            all.extend(args.iter().copied());
+            assert!(Cli::try_parse_from(all.clone()).is_err(), "{all:?}");
+        }
+    }
+
+    #[test]
+    fn view_request_and_effects_default() {
+        assert_eq!(view_request(vec![], None, vec![], None).unwrap(), None);
+        let v = view_request(vec![], Some("24.9.1:historyEntry".into()), vec![], None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(v.feeding.unwrap().variables, ["historyEntry"]);
+        assert!(view_request(vec![], Some("x.y".into()), vec![], None)
+            .unwrap_err()
+            .to_string()
+            .starts_with("slice_invalid_selector"));
+        for (involving, steps) in [
+            (vec![], vec!["abc".to_string()]),
+            (vec!["".to_string()], vec![]),
+            (vec!["*".to_string()], vec![]),
+        ] {
+            let e = view_request(involving.clone(), None, steps.clone(), None)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                e.starts_with("slice_invalid_selector"),
+                "{involving:?} {steps:?}: {e}"
+            );
+        }
+        let v = view_request(vec!["*url*".into(), "url".into()], None, vec![], Some(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v.involving, ["url"], "normalized before the lookup");
+        use webspec_index::effects::EffectsMode;
+        assert_eq!(effects_mode(None, false), EffectsMode::Auto);
+        assert_eq!(effects_mode(None, true), EffectsMode::Off);
+        assert_eq!(
+            effects_mode(Some(EffectsModeArg::Cached), true),
+            EffectsMode::Cached
+        );
     }
 
     #[test]
