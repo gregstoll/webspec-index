@@ -24,6 +24,10 @@ name = "incremental_parity"
 required-features = ["native"]
 
 [[example]]
+name = "slice_stats"
+required-features = ["native"]
+
+[[example]]
 name = "state_golden"
 required-features = ["native"]
 
