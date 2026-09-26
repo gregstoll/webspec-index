@@ -36,8 +36,9 @@ pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fuzz")
 }
 
-const PROMOTABLE: [&str; 16] = [
+const PROMOTABLE: [&str; 19] = [
     "C1", "C2", "C3", "S1", "S2", "S3", "M0", "M1", "M2", "M4", "R1", "R2", "N1", "T1", "A1", "D1",
+    "E1", "E2", "E3",
 ];
 
 /// Oracle-computed values the regression test compares the product against.

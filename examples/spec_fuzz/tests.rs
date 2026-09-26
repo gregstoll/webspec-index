@@ -1,13 +1,20 @@
 //! Harness self-tests (design §11): oracle regions, quiet on clean input, fires on planted defects,
 //! dedupe and determinism.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use rusqlite::OptionalExtension;
 use webspec_index::content_filter::LinksMode;
+use webspec_index::effects::bundled::default_catalog;
+use webspec_index::effects::model::EffectsOptions;
+use webspec_index::effects::service::{publish, PublishMode};
 use webspec_index::model::ParsedSection;
 
 use crate::check::{self, SpecInput, SpecResult};
-use crate::invariants::{self, query, Ctx, Invariant, Outcome, SectionCtx, SpecCtx};
+use crate::invariants::{
+    self, check_e1, check_e2, check_e3, query, Ctx, Invariant, Outcome, SectionCtx, SpecCtx,
+};
 use crate::oracle::{self, Shape};
 
 const SPEC: &str = "HTML";
@@ -547,4 +554,197 @@ fn one_record_per_signature_with_the_smallest_representative() {
     let rec = store.findings.values().next().unwrap();
     assert_eq!((rec.count, rec.anchor.as_str()), (2, "inner"));
     assert_eq!(rec.more_anchors, vec!["TEST#outer"]);
+}
+
+// ── 6. E1–E3: effects storage invariants ───────────────────────────────────────────────────────
+
+/// The multi/ fixtures used by Task 7 and later effect tests.
+const MULTI: [(&str, &str, &str); 3] = [
+    (
+        "DOM",
+        "https://dom.spec.whatwg.org/",
+        include_str!("../../tests/fixtures/effects/multi/alpha.html"),
+    ),
+    (
+        "INFRA",
+        "https://infra.spec.whatwg.org/",
+        include_str!("../../tests/fixtures/effects/multi/beta.html"),
+    ),
+    (
+        "URL",
+        "https://url.spec.whatwg.org/",
+        include_str!("../../tests/fixtures/effects/multi/gamma.html"),
+    ),
+];
+
+/// Seed an in-memory DB with the multi/ fixtures, publish effects, and return the connection
+/// together with a map from spec name to snapshot_id.
+fn effects_db() -> (rusqlite::Connection, BTreeMap<String, i64>) {
+    use webspec_index::db;
+    use webspec_index::db::effects as storage;
+    use webspec_index::parse;
+    use webspec_index::parse::steps::{extract_step_structure, STRUCTURE_VERSION};
+
+    let conn = db::open_in_memory().expect("open in-memory DB");
+    let mut ids = BTreeMap::new();
+    for (spec, base_url, html) in MULTI {
+        let spec_id = db::write::insert_or_get_spec(&conn, spec, base_url, "test").unwrap();
+        let snap_id =
+            db::write::insert_snapshot(&conn, spec_id, "hash:test", "2026-01-01").unwrap();
+        let parsed = parse::parse_spec(html, spec, base_url).unwrap();
+        db::write::insert_sections_bulk(&conn, snap_id, &parsed.sections).unwrap();
+        db::write::insert_refs_bulk(&conn, snap_id, &parsed.references).unwrap();
+        let structure = extract_step_structure(html, spec, base_url, "hash:test");
+        storage::store_structure(
+            &conn,
+            snap_id,
+            STRUCTURE_VERSION,
+            &serde_json::to_string(&structure).unwrap(),
+        )
+        .unwrap();
+        ids.insert(spec.to_owned(), snap_id);
+    }
+    let catalog = default_catalog(&[]).unwrap();
+    publish(
+        &conn,
+        &catalog,
+        &EffectsOptions::default(),
+        PublishMode::Rebuild,
+        BTreeMap::new(),
+    )
+    .expect("publish effects");
+    (conn, ids)
+}
+
+#[test]
+fn e1_passes_on_consistent_db() {
+    let (conn, ids) = effects_db();
+    for (spec, &snap_id) in &ids {
+        let base = MULTI
+            .iter()
+            .find(|(s, _, _)| *s == spec)
+            .map(|(_, b, _)| *b)
+            .unwrap_or("");
+        assert!(
+            matches!(check_e1(&conn, spec, snap_id, base), Outcome::Pass),
+            "E1 failed for {spec}"
+        );
+    }
+}
+
+#[test]
+fn e1_fails_after_corrupting_fragment() {
+    let (conn, ids) = effects_db();
+    let snap_dom = ids["DOM"];
+    let snap_infra = ids["INFRA"];
+
+    let infra_payload: Vec<u8> = conn
+        .query_row(
+            "SELECT payload FROM effect_fragments WHERE snapshot_id=?1",
+            [snap_infra],
+            |r| r.get(0),
+        )
+        .unwrap();
+    conn.execute(
+        "UPDATE effect_fragments SET payload=?1 WHERE snapshot_id=?2",
+        rusqlite::params![infra_payload, snap_dom],
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            check_e1(&conn, "DOM", snap_dom, "https://dom.spec.whatwg.org/"),
+            Outcome::Fail(_)
+        ),
+        "E1 should fail after corrupting DOM fragment with INFRA payload"
+    );
+    assert!(
+        matches!(
+            check_e1(&conn, "INFRA", snap_infra, "https://infra.spec.whatwg.org/"),
+            Outcome::Pass
+        ),
+        "E1 should still pass for INFRA"
+    );
+}
+
+#[test]
+fn e2_passes_on_consistent_db() {
+    let (conn, _) = effects_db();
+    assert!(
+        matches!(check_e2(&conn, "DOM"), Outcome::Pass),
+        "E2 failed for DOM"
+    );
+}
+
+#[test]
+fn e2_fails_after_deleting_summary_row() {
+    let (conn, _) = effects_db();
+    let key_to_delete: Option<String> = conn
+        .query_row(
+            "SELECT subject_key FROM effect_summaries WHERE spec='DOM' LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap();
+    let key_to_delete = key_to_delete.expect("DOM has at least one summary row");
+    let deleted = conn
+        .execute(
+            "DELETE FROM effect_summaries WHERE subject_key=?1",
+            rusqlite::params![key_to_delete],
+        )
+        .unwrap();
+    assert!(deleted > 0, "no row deleted");
+    assert!(
+        matches!(check_e2(&conn, "DOM"), Outcome::Fail(_)),
+        "E2 should fail after deleting a DOM summary row"
+    );
+}
+
+#[test]
+fn e3_passes_on_consistent_db() {
+    let (conn, _) = effects_db();
+    assert!(
+        matches!(
+            check_e3(&conn, "DOM"),
+            Outcome::Pass | Outcome::NotApplicable
+        ),
+        "E3 failed for DOM"
+    );
+}
+
+#[test]
+fn e3_fails_after_replacing_summary_payload() {
+    let (conn, _) = effects_db();
+    let dom_key: Option<String> = conn
+        .query_row(
+            "SELECT subject_key FROM effect_summaries WHERE spec='DOM' LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap();
+    let Some(dom_key) = dom_key else {
+        return;
+    };
+    let other_payload: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT payload FROM effect_summaries WHERE spec='INFRA' LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap();
+    let Some(other_payload) = other_payload else {
+        return;
+    };
+    conn.execute(
+        "UPDATE effect_summaries SET payload=?1, digest=x'deadbeef' WHERE subject_key=?2",
+        rusqlite::params![other_payload, dom_key],
+    )
+    .unwrap();
+    assert!(
+        matches!(check_e3(&conn, "DOM"), Outcome::Fail(_)),
+        "E3 should detect a corrupted summary payload (wrong digest)"
+    );
 }

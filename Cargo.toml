@@ -20,6 +20,10 @@ name = "effects_parity"
 required-features = ["native"]
 
 [[example]]
+name = "incremental_parity"
+required-features = ["native"]
+
+[[example]]
 name = "state_golden"
 required-features = ["native"]
 
@@ -55,7 +59,7 @@ markup5ever_rcdom = "0.38"
 reqwest = { version = "0.13", features = ["gzip", "json"], optional = true }
 
 # Database
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled", "backup"] }
 
 # Serialization
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

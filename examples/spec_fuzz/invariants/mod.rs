@@ -1,6 +1,7 @@
 //! Invariant registry, contexts and outcomes (design §6, §13 extension point).
 
 mod content;
+pub mod effects;
 mod freshness;
 pub mod query;
 mod structure;
@@ -18,6 +19,8 @@ use webspec_index::spec_registry::SpecRegistry;
 use crate::index::Stored;
 use crate::oracle::{self, Md, Region, SourceDoc, SrcText, N};
 
+#[cfg(test)]
+pub use effects::{check_e1, check_e2, check_e3};
 #[cfg(test)]
 pub use freshness::d1_diff;
 pub use query::callout_links;
@@ -119,6 +122,9 @@ pub trait Invariant: Sync {
 pub fn all() -> Vec<&'static dyn Invariant> {
     vec![
         &freshness::D1,
+        &effects::E1,
+        &effects::E2,
+        &effects::E3,
         &content::C1,
         &content::C2,
         &content::C3,
