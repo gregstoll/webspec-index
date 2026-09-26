@@ -235,16 +235,9 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
 
     let tx = conn.unchecked_transaction()?;
     // Order matters: children before the snapshots they reference.
-    for table in [
-        "state_coverage",
-        "state_occurrence_counts",
-        "state_sites",
-        "state_members",
-        "state_field_owners",
-        "state_fields",
-        "state_type_edges",
-        "state_types",
-        "state_models",
+    // State tables are listed by STATE_TABLES (children of snapshots, so before
+    // effects tables and snapshots itself).
+    let effect_and_schema_tables = [
         "effect_sites",
         "effect_graph",
         "effect_local_matches",
@@ -255,7 +248,11 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
         "sections",
         "snapshots",
         "update_checks",
-    ] {
+    ];
+    for table in super::state::STATE_TABLES
+        .iter()
+        .chain(effect_and_schema_tables.iter())
+    {
         if has_table(&tx, table)? {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }
@@ -920,5 +917,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn purge_clears_all_state_tables() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::state::testing::index_offline(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            crate::state::testing::MINI,
+        )
+        .unwrap();
+        // Pre-condition: state tables have content.
+        let coverage: i64 = conn
+            .query_row("SELECT COUNT(*) FROM state_coverage", [], |r| r.get(0))
+            .unwrap();
+        assert!(coverage > 0, "state_coverage must have rows before purge");
+
+        set_indexed_version(&conn, "old").unwrap();
+        purge_if_version_changed(&conn, "other").unwrap();
+
+        for table in crate::db::state::STATE_TABLES {
+            let rows: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, 0, "{table} should be empty after purge");
+        }
     }
 }

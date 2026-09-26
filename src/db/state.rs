@@ -252,10 +252,9 @@ pub fn store_state(conn: &Connection, snapshot_id: i64, state: &StateSpec) -> Re
         for field in &state.model.fields {
             let anchor = format!("{}#{}", field.anchor.spec, field.anchor.anchor);
             let (owners_json, owner_basis) = match &field.owner {
-                Owner::Known { types, basis } => (
-                    serde_json::to_string(types)?,
-                    Some(owner_basis_str(basis).to_string()),
-                ),
+                Owner::Known { types, basis } => {
+                    (serde_json::to_string(types)?, Some(owner_basis_str(basis)))
+                }
                 Owner::Unknown { hint } => (
                     serde_json::to_string(&serde_json::json!({"unknown": hint}))?,
                     None,
@@ -441,14 +440,14 @@ fn super_basis_str(basis: &crate::state::SuperBasis) -> String {
     }
 }
 
-fn owner_basis_str(basis: &crate::state::OwnerBasis) -> &'static str {
+fn owner_basis_str(basis: &crate::state::OwnerBasis) -> String {
     use crate::state::OwnerBasis;
     match basis {
-        OwnerBasis::DfnFor => "dfn_for",
-        OwnerBasis::DeclarationSentence => "declaration_sentence",
-        OwnerBasis::PropertyList => "property_list",
-        OwnerBasis::StructItems => "struct_items",
-        OwnerBasis::Override { .. } => "override",
+        OwnerBasis::DfnFor => "dfn_for".to_string(),
+        OwnerBasis::DeclarationSentence => "declaration_sentence".to_string(),
+        OwnerBasis::PropertyList => "property_list".to_string(),
+        OwnerBasis::StructItems => "struct_items".to_string(),
+        OwnerBasis::Override { rule_id } => format!("override:{rule_id}"),
     }
 }
 
@@ -994,5 +993,156 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sites, again, "store replaces, never duplicates");
+    }
+
+    #[test]
+    fn algorithm_sites_persist_amendment_columns() {
+        let conn = conn();
+        let spec_id = crate::db::write::insert_or_get_spec(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+        )
+        .unwrap();
+        let snapshot =
+            crate::db::write::insert_snapshot(&conn, spec_id, "hash:t", "2026-09-25").unwrap();
+        let state = crate::state::testing::extract_html(crate::state::testing::MINI, "HTML");
+        store_state(&conn, snapshot, &state).unwrap();
+
+        // Algorithm sites that came from a classified statement must carry
+        // non-NULL segment_id, body_id, and a valid byte span.
+        let rows: Vec<(String, String, String, i64, i64)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT site_id, segment_id, body_id, span_start, span_end \
+                     FROM state_sites \
+                     WHERE snapshot_id=?1 AND context='algorithm' \
+                       AND segment_id IS NOT NULL AND span_start IS NOT NULL \
+                     LIMIT 10",
+                )
+                .unwrap();
+            stmt.query_map([snapshot], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        // MINI has at least one classified algorithm site (the set-to-false step).
+        assert!(
+            !rows.is_empty(),
+            "expected algorithm sites with segment_id and span"
+        );
+        for (site_id, segment_id, body_id, span_start, span_end) in &rows {
+            assert!(
+                !segment_id.is_empty(),
+                "segment_id must be non-empty for {site_id}"
+            );
+            assert!(
+                !body_id.is_empty(),
+                "body_id must be non-empty for {site_id}"
+            );
+            assert!(
+                span_end >= span_start,
+                "span_end must be >= span_start for {site_id}"
+            );
+        }
+        // Verify span slices into the segment text stored in state_sites.text.
+        // `text` is the full segment text; span_start..span_end is the statement within it.
+        let (segment_id, span_start, span_end, text): (String, i64, i64, String) = conn
+            .query_row(
+                "SELECT segment_id, span_start, span_end, text FROM state_sites \
+                 WHERE snapshot_id=?1 AND context='algorithm' AND span_start IS NOT NULL \
+                 LIMIT 1",
+                [snapshot],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        let start = span_start as usize;
+        let end = span_end as usize;
+        assert!(
+            end <= text.len() && !text[start..end].trim().is_empty(),
+            "text[span_start..span_end] must be non-empty for segment {segment_id}"
+        );
+    }
+
+    #[test]
+    fn owner_basis_override_round_trips_with_rule_id() {
+        use crate::state::model::{
+            AnchorTarget, CoverageCounters, FieldBasis, FieldDef, ObjectModel, Owner, OwnerBasis,
+            OwnerRef, OwnerVia, StateSpec, TypeExpr,
+        };
+        let conn = conn();
+        let spec_id = crate::db::write::insert_or_get_spec(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+        )
+        .unwrap();
+        let snapshot =
+            crate::db::write::insert_snapshot(&conn, spec_id, "hash:ov", "2026-09-25").unwrap();
+        let field_anchor = AnchorTarget {
+            spec: "HTML".to_string(),
+            anchor: "test-field".to_string(),
+        };
+        let owner_type_key = crate::state::TypeKey::Anchor(AnchorTarget {
+            spec: "HTML".to_string(),
+            anchor: "some-type".to_string(),
+        });
+        let state = StateSpec {
+            representation_version: crate::state::STATE_VERSION.to_string(),
+            spec: "HTML".to_string(),
+            snapshot_sha: "hash:ov".to_string(),
+            model: ObjectModel {
+                types: vec![],
+                fields: vec![FieldDef {
+                    anchor: field_anchor.clone(),
+                    name: "testField".to_string(),
+                    names: vec!["testField".to_string()],
+                    owner: Owner::Known {
+                        types: vec![OwnerRef {
+                            key: owner_type_key.clone(),
+                            via: OwnerVia::Declaration,
+                        }],
+                        basis: OwnerBasis::Override {
+                            rule_id: "rule42".to_string(),
+                        },
+                    },
+                    field_basis: FieldBasis::Declared,
+                    declared_type: TypeExpr::Unknown,
+                    initial: None,
+                    declaration: None,
+                }],
+                members: vec![],
+                reflections: vec![],
+            },
+            sources: vec![],
+            statements: vec![],
+            occurrences: vec![],
+            prose_mentions: Default::default(),
+            coverage: CoverageCounters::default(),
+            issues: vec![],
+        };
+        store_state(&conn, snapshot, &state).unwrap();
+        let owner_basis: Option<String> = conn
+            .query_row(
+                "SELECT owner_basis FROM state_fields WHERE snapshot_id=?1",
+                [snapshot],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            owner_basis.as_deref(),
+            Some("override:rule42"),
+            "OwnerBasis::Override must be stored as override:<rule_id>"
+        );
     }
 }

@@ -131,26 +131,24 @@ fn prune(conn: &Connection, providers: &[String], specs: &[String]) -> Result<()
          OR sp.provider NOT IN ({prov_placeholders}){spec_clause}"
     );
     conn.execute(&sql, rusqlite::params_from_iter(&params))?;
-    conn.execute_batch(
-        "DELETE FROM sections WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
+    // Build per-snapshot DELETEs from STATE_TABLES (single source of truth).
+    let mut batch = crate::db::state::STATE_TABLES
+        .iter()
+        .map(|t| format!("DELETE FROM {t} WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);"))
+        .collect::<Vec<_>>()
+        .join("\n         ");
+    batch.push_str(
+        "\n         DELETE FROM sections WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM refs WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM idl_defs WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM effect_anchors WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM effect_structures WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_coverage WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_occurrence_counts WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_sites WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_members WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_field_owners WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_fields WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_type_edges WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_types WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
-         DELETE FROM state_models WHERE snapshot_id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM snapshots WHERE id IN (SELECT id FROM doomed_snapshots);
          DELETE FROM specs WHERE id NOT IN (SELECT spec_id FROM snapshots);
          DELETE FROM effect_summary_cache WHERE spec <> '' AND spec NOT IN (SELECT name FROM specs);
          DROP TABLE doomed_snapshots;",
-    )?;
+    );
+    conn.execute_batch(&batch)?;
     Ok(())
 }
 

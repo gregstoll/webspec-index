@@ -238,22 +238,17 @@ fn delete_snapshot_children(
     snapshot_filter: &str,
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<()> {
-    for table in [
-        "state_coverage",
-        "state_occurrence_counts",
-        "state_sites",
-        "state_members",
-        "state_field_owners",
-        "state_fields",
-        "state_type_edges",
-        "state_types",
-        "state_models",
+    let effect_and_schema_tables = [
         "effect_anchors",
         "effect_structures",
         "refs",
         "idl_defs",
         "sections",
-    ] {
+    ];
+    for table in super::state::STATE_TABLES
+        .iter()
+        .chain(effect_and_schema_tables.iter())
+    {
         let sql = format!(
             "DELETE FROM {table} WHERE snapshot_id IN \
              (SELECT id FROM snapshots WHERE {snapshot_filter})"

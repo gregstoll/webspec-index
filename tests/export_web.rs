@@ -140,7 +140,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         let rows: i64 = conn
             .query_row(&format!("SELECT COUNT(*) FROM {kept}"), [], |r| r.get(0))
             .unwrap();
-        assert!(rows >= 0, "{kept} should exist in export");
+        assert!(rows > 0, "{kept} should have rows in export");
     }
     let snapshots: i64 = conn
         .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))

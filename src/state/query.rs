@@ -483,6 +483,17 @@ fn parse_enum<T: serde::de::DeserializeOwned>(value: &str) -> Option<T> {
         .or_else(|| serde_json::from_value(serde_json::Value::String(value.to_string())).ok())
 }
 
+/// Decode an `owner_basis` column value, handling the `override:<rule_id>` form
+/// that cannot be decoded by the generic `parse_enum` helper.
+fn parse_owner_basis(value: &str) -> Option<crate::state::OwnerBasis> {
+    if let Some(rule_id) = value.strip_prefix("override:") {
+        return Some(crate::state::OwnerBasis::Override {
+            rule_id: rule_id.to_string(),
+        });
+    }
+    parse_enum(value)
+}
+
 struct TypeInfo {
     name: String,
     names: BTreeSet<String>,
@@ -1110,7 +1121,7 @@ impl<'a> Scope<'a> {
             url,
             owners,
             owner_hint,
-            owner_basis: field.row.owner_basis.as_deref().and_then(parse_enum),
+            owner_basis: field.row.owner_basis.as_deref().and_then(parse_owner_basis),
             field_basis: parse_enum(&field.row.field_basis),
             declared_type: field.declared_type(),
             initial: field.initial(),
