@@ -13,7 +13,6 @@ use crate::state::model::{Occurrence, OccurrenceClass};
 /// the link and that lies in the same sentence), then classify as
 /// `Unclassified` if the clause has a verb and was not consumed, or `Read`
 /// otherwise.
-#[allow(dead_code)]
 pub(crate) fn classify(source: &StatementSource, parsed: &ParsedSource) -> Vec<Occurrence> {
     source
         .links
@@ -45,7 +44,6 @@ pub(crate) fn classify(source: &StatementSource, parsed: &ParsedSource) -> Vec<O
 /// separates its start from `link_start` in the source text).  If that clause
 /// has a verb and was not consumed by the grammar → `Unclassified`; otherwise
 /// → `Read`.
-#[allow(dead_code)]
 fn fallback_class(
     source: &StatementSource,
     parsed: &ParsedSource,
@@ -65,7 +63,6 @@ fn fallback_class(
 }
 
 /// Returns `true` if no `. ` or `;` appears in `text[clause_start..link_start]`.
-#[allow(dead_code)]
 fn same_sentence(text: &str, clause_start: usize, link_start: usize) -> bool {
     if clause_start >= link_start {
         return true;

@@ -3,15 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::model::{ParsedIdlDefinition, ParsedSection};
 use crate::parse::steps::{AnchorTarget, InlineTokenKind, LinkSpan, StructuralSpec, TextSpan};
 use crate::state::declare::{self, NameBindings};
 use crate::state::ir::{
-    self, Expr, Hop, MutationOp, Path, Root, SetForm, SourceContext, Statement, StatementKind,
-    StatementSource,
+    self, Expr, Hop, InitForm, MutationOp, OpaqueReason, Path, ProseRole, Root, SetForm,
+    SourceContext, Statement, StatementKind, StatementSource,
 };
 use crate::state::model::{
     CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
@@ -113,11 +112,71 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     }
 }
 
-/// The snake_case serde tag of a unit enum variant.
-fn tag<T: Serialize>(value: &T) -> String {
-    match serde_json::to_value(value) {
-        Ok(serde_json::Value::String(tag)) => tag,
-        _ => "other".to_string(),
+fn set_form_name(form: SetForm) -> &'static str {
+    match form {
+        SetForm::To => "to",
+        SetForm::Flag => "flag",
+        SetForm::Passive => "passive",
+        SetForm::Chained => "chained",
+    }
+}
+
+fn op_name(op: &MutationOp) -> &'static str {
+    match op {
+        MutationOp::Append => "append",
+        MutationOp::Prepend => "prepend",
+        MutationOp::Extend => "extend",
+        MutationOp::Insert => "insert",
+        MutationOp::Remove => "remove",
+        MutationOp::Replace => "replace",
+        MutationOp::Empty => "empty",
+        MutationOp::Clear => "clear",
+        MutationOp::MapSet => "map_set",
+        MutationOp::MapRemove => "map_remove",
+        MutationOp::Enqueue => "enqueue",
+        MutationOp::Dequeue => "dequeue",
+        MutationOp::Increment => "increment",
+        MutationOp::Decrement => "decrement",
+    }
+}
+
+fn init_form_name(form: InitForm) -> &'static str {
+    match form {
+        InitForm::WhoseList => "whose_list",
+        InitForm::WithItsSetTo => "with_its_set_to",
+        InitForm::WithList => "with_list",
+        InitForm::DlEntries => "dl_entries",
+    }
+}
+
+fn reason_name(reason: OpaqueReason) -> &'static str {
+    match reason {
+        OpaqueReason::UnparsedTarget => "unparsed_target",
+        OpaqueReason::PronounRoot => "pronoun_root",
+        OpaqueReason::ValueIsInvocation => "value_is_invocation",
+        OpaqueReason::UnsupportedForm => "unsupported_form",
+        OpaqueReason::Other => "other",
+    }
+}
+
+fn class_name(class: OccurrenceClass) -> &'static str {
+    match class {
+        OccurrenceClass::Write => "write",
+        OccurrenceClass::Init => "init",
+        OccurrenceClass::ReadPath => "read_path",
+        OccurrenceClass::Read => "read",
+        OccurrenceClass::Unclassified => "unclassified",
+    }
+}
+
+fn role_name(role: ProseRole) -> &'static str {
+    match role {
+        ProseRole::Steps => "steps",
+        ProseRole::Getter => "getter",
+        ProseRole::Setter => "setter",
+        ProseRole::Method => "method",
+        ProseRole::Constructor => "constructor",
+        ProseRole::Normative => "normative",
     }
 }
 
@@ -162,16 +221,16 @@ fn statement_key(kind: &StatementKind) -> String {
         StatementKind::Let { .. } => "let".to_string(),
         StatementKind::Set { targets, form, .. } => {
             let shape = targets.first().map_or("other".to_string(), path_shape);
-            format!("set:{}:{shape}", tag(form))
+            format!("set:{}:{shape}", set_form_name(*form))
         }
         StatementKind::Mutate { op, target, .. } => {
-            format!("mutate:{}:{}", tag(op), path_shape(target))
+            format!("mutate:{}:{}", op_name(op), path_shape(target))
         }
-        StatementKind::Init { form, .. } => format!("init:{}", tag(form)),
+        StatementKind::Init { form, .. } => format!("init:{}", init_form_name(*form)),
         StatementKind::Opaque { reason, verb, .. } => {
             format!(
                 "opaque:{}:{}",
-                tag(reason),
+                reason_name(*reason),
                 verb.as_deref().unwrap_or("none")
             )
         }
@@ -185,7 +244,11 @@ fn count_statements(statements: &[Statement], coverage: &mut CoverageCounters) {
             .entry(statement_key(&statement.kind))
             .or_default() += 1;
         match &statement.kind {
-            StatementKind::Set { .. } => {
+            StatementKind::Set { .. }
+            | StatementKind::Mutate {
+                op: MutationOp::MapSet,
+                ..
+            } => {
                 coverage.set_total += 1;
                 coverage.set_structured += 1;
             }
@@ -252,7 +315,7 @@ fn count_occurrences(
             if owned {
                 *coverage
                     .occurrences
-                    .entry(tag(&occurrence.class))
+                    .entry(class_name(occurrence.class).to_string())
                     .or_default() += 1;
             }
             let is_field = fields.contains_key(anchor) || concept_ids.contains(anchor);
@@ -424,7 +487,7 @@ fn site(
     let (context, role) = match &source.context {
         SourceContext::Algorithm { .. } => ("algorithm", None),
         SourceContext::BranchLabel { .. } => ("branch_label", None),
-        SourceContext::Prose { role, .. } => ("prose", Some(tag(role))),
+        SourceContext::Prose { role, .. } => ("prose", Some(role_name(*role).to_string())),
     };
     let (segment_id, body_id) = match &source.context {
         SourceContext::Algorithm {
@@ -494,6 +557,18 @@ fn clause_verb(
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// The last occurrence of `word` in `haystack` that is not part of a longer word.
+fn rfind_word(haystack: &str, word: &str) -> Option<usize> {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    haystack.rmatch_indices(word).map(|(at, _)| at).find(|&at| {
+        !haystack[..at].chars().next_back().is_some_and(is_word)
+            && !haystack[at + word.len()..]
+                .chars()
+                .next()
+                .is_some_and(is_word)
+    })
+}
+
 fn last_hop_is(path: &Path, link_id: &str) -> bool {
     matches!(path.hops.last(), Some(Hop::Field { link_id: id, .. }) if id == link_id)
 }
@@ -530,8 +605,8 @@ fn path_start(source: &StatementSource, path: &Path, from: usize, write: &LinkSp
             .map(|t| t.span.start)
             .next_back(),
         Root::Link { link_id, .. } => link_span_start(source, link_id),
-        Root::This => before.rfind("this").map(|at| from + at),
-        Root::Opaque { text } => before.rfind(text.as_str()).map(|at| from + at),
+        Root::This => rfind_word(before, "this").map(|at| from + at),
+        Root::Opaque { text } => rfind_word(before, text).map(|at| from + at),
         Root::Implicit => None,
     };
     let start = root.map_or(first_hop, |root| root.min(first_hop)).max(from);
@@ -574,7 +649,11 @@ fn write_parts(
                 (SetForm::Flag, Expr::Literal(Literal::Bool(false))) => "unset",
                 _ => "set",
             };
-            let separator = (*form != SetForm::Flag).then_some(" to ");
+            let separator = match form {
+                SetForm::Flag => None,
+                SetForm::Passive => Some(" must be set to "),
+                SetForm::To | SetForm::Chained => Some(" to "),
+            };
             (op.to_string(), path, separator, false)
         }
         StatementKind::Mutate {
@@ -589,7 +668,7 @@ fn write_parts(
                 _ => None,
             };
             let before = separator.is_none() && operand.is_some();
-            (tag(op), Some(target), separator, before)
+            (op_name(op).to_string(), Some(target), separator, before)
         }
         _ => return fallback(),
     };
@@ -859,6 +938,35 @@ mod tests {
                 "HTML#is-initial-about:blank"
             )
         );
+    }
+
+    #[test]
+    fn subscripted_set_counts_as_a_structured_set() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="run">run</dfn> given <var>x</var>:</p><ol>
+<li><p>Set <var>x</var>[<var>k</var>] to v.</p></li></ol></div>"##;
+        let coverage = extract(html, "HTML").coverage;
+        assert_eq!(
+            coverage.statements.get("mutate:map_set:var_subscript"),
+            Some(&1)
+        );
+        assert_eq!((coverage.set_total, coverage.set_structured), (1, 1));
+    }
+
+    #[test]
+    fn passive_and_pronoun_root_target_texts() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="run">run</dfn> given <var>d</var>:</p><ol>
+<li><p><var>d</var>'s <a href="#p">p</a> must be set to 1.</p></li>
+<li><p>Set this item's <a href="#q">q</a> to 2, and set its <a href="#r">r</a> to 3.</p></li></ol></div>"##;
+        let sites = derive_sites(&extract(html, "HTML"));
+        let texts = |anchor: &str| {
+            let site = sites
+                .iter()
+                .find(|s| s.target.as_ref().is_some_and(|t| t.anchor == anchor))
+                .unwrap_or_else(|| panic!("no site for {anchor}: {sites:#?}"));
+            (site.target_text.clone(), site.value_text.clone())
+        };
+        assert_eq!(texts("p"), ("*d*'s p".to_string(), Some("1".to_string())));
+        assert_eq!(texts("r"), ("its r".to_string(), Some("3".to_string())));
     }
 
     #[test]
