@@ -304,14 +304,16 @@ impl State {
                 {
                     return None;
                 }
-                let result = crate::effects::get_effect_preview(&request).map(|result| {
-                    let catalog = crate::effects::default_catalog(&request.options.rule_paths).ok();
-                    let markdown = editor_summary_markdown(&result, catalog.as_ref());
-                    CachedEffect {
-                        summary: result,
-                        markdown,
-                    }
-                });
+                let result = crate::effects::service::get_effect_preview_with_refresh(&request)
+                    .map(|result| {
+                        let catalog =
+                            crate::effects::default_catalog(&request.options.rule_paths).ok();
+                        let markdown = editor_summary_markdown(&result, catalog.as_ref());
+                        CachedEffect {
+                            summary: result,
+                            markdown,
+                        }
+                    });
                 Some(result)
             })
             .await;

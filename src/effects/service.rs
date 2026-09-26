@@ -21,6 +21,8 @@ use super::model::*;
 use crate::db;
 use crate::db::effects::{self as storage, FragmentKey, Publication};
 use crate::parse::steps::{StructuralSpec, STRUCTURE_VERSION};
+#[cfg(feature = "native")]
+use crate::refresh::EffectsOutcome;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -432,12 +434,24 @@ fn load_sources(
     Ok(sources)
 }
 
+/// The effects thread count: `WEBSPEC_EFFECTS_THREADS`, else
+/// [`std::thread::available_parallelism`].
+#[cfg(feature = "native")]
+pub(crate) fn effects_threads() -> usize {
+    std::env::var("WEBSPEC_EFFECTS_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
+}
+
 /// Map `items` on the effects thread pool.
 ///
-/// `threads` overrides the thread count; `None` reads `WEBSPEC_EFFECTS_THREADS`
-/// and falls back to [`std::thread::available_parallelism`]. Without the
-/// `native` feature this is a serial loop, so wasm and lib-only builds are
-/// unaffected.
+/// `threads` overrides [`effects_threads`]. Without the `native` feature this
+/// is a serial loop, so wasm and lib-only builds are unaffected.
 fn par_map<T: Sync, U: Send>(
     items: &[T],
     threads: Option<usize>,
@@ -446,18 +460,8 @@ fn par_map<T: Sync, U: Send>(
     #[cfg(feature = "native")]
     {
         use rayon::prelude::*;
-        let thread_count: usize = threads.unwrap_or_else(|| {
-            std::env::var("WEBSPEC_EFFECTS_THREADS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or_else(|| {
-                    std::thread::available_parallelism()
-                        .map(|n| n.get())
-                        .unwrap_or(1)
-                })
-        });
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(thread_count)
+            .num_threads(threads.unwrap_or_else(effects_threads))
             .build()
             .expect("rayon thread pool");
         pool.install(|| items.par_iter().map(map).collect())
@@ -590,6 +594,104 @@ pub fn publish(
         }
     }
     Err(snapshot_changed())
+}
+
+/// Publish incrementally when the estimated rebuild of the stale fragments fits
+/// in `budget`. The caller holds the refresh lock.
+#[cfg(feature = "native")]
+pub(crate) fn publish_within_budget(
+    conn: &Connection,
+    catalog: &Catalog,
+    options: &EffectsOptions,
+    budget: std::time::Duration,
+) -> Result<EffectsOutcome, RequestError> {
+    let (digest, environment) = (&catalog.content_digest, &options.environment);
+    if publication_is_current(conn, digest, environment)? {
+        return Ok(EffectsOutcome::Current);
+    }
+    let stale = stale_structure_bytes(conn, digest, environment)?;
+    let estimate = crate::refresh::estimate_rebuild(&stale, effects_threads());
+    if estimate > budget {
+        return Ok(EffectsOutcome::OverBudget {
+            estimate_ms: estimate.as_millis() as u64,
+        });
+    }
+    publish_outcome(publish(
+        conn,
+        catalog,
+        options,
+        PublishMode::Incremental,
+        BTreeMap::new(),
+    ))
+}
+
+/// The outcome of a publish that was allowed to run.
+#[cfg(feature = "native")]
+pub(crate) fn publish_outcome(
+    published: Result<PublishReport, RequestError>,
+) -> Result<EffectsOutcome, RequestError> {
+    match published {
+        Ok(report) if report.published => Ok(EffectsOutcome::Rebuilt),
+        Ok(_) => Ok(EffectsOutcome::Current),
+        Err(error)
+            if error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["issue"] == "snapshot_changed") =>
+        {
+            Ok(EffectsOutcome::SnapshotChanged)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Make the publication current within `budget`: wait for the refresh lock
+/// (or for another process to publish), then rebuild inline when the estimate
+/// fits.
+#[cfg(feature = "native")]
+pub fn ensure_publication(
+    conn: &Connection,
+    catalog: &Catalog,
+    options: &EffectsOptions,
+    budget: std::time::Duration,
+) -> Result<EffectsOutcome, RequestError> {
+    let current = || publication_is_current(conn, &catalog.content_digest, &options.environment);
+    if current()? {
+        return Ok(EffectsOutcome::Current);
+    }
+    let deadline = std::time::Instant::now() + budget;
+    let _guard = loop {
+        if let Some(guard) =
+            crate::db::lock::try_claim(conn, std::process::id(), chrono::Utc::now())
+                .map_err(failure)?
+        {
+            break guard;
+        }
+        if current()? {
+            return Ok(EffectsOutcome::Current);
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Ok(EffectsOutcome::LockTimeout);
+        }
+        std::thread::sleep(crate::refresh::LOCK_POLL.min(deadline - now));
+    };
+    publish_within_budget(conn, catalog, options, budget)
+}
+
+/// [`ensure_publication`] within the inline budget, loading the catalog of
+/// `options` only when the publication is stale.
+#[cfg(feature = "native")]
+pub fn ensure_current_publication(
+    conn: &Connection,
+    options: &EffectsOptions,
+) -> Result<EffectsOutcome, RequestError> {
+    let digest = catalog_digest(&options.rule_paths)?;
+    if publication_is_current(conn, &digest, &options.environment)? {
+        return Ok(EffectsOutcome::Current);
+    }
+    let catalog = default_catalog(&options.rule_paths)?;
+    ensure_publication(conn, &catalog, options, crate::refresh::inline_budget())
 }
 
 /// One publish attempt; `None` when the corpus moved before the write.
@@ -853,6 +955,13 @@ thread_local! {
     static ANALYSES: RefCell<VecDeque<(AnalysisKey, Rc<AnalysisArtifact>)>> = const { RefCell::new(VecDeque::new()) };
 }
 
+/// Drop this thread's linked graph and analyses.
+#[cfg(feature = "native")]
+pub(crate) fn clear_caches() {
+    LINKED.with(|cell| cell.borrow_mut().take());
+    ANALYSES.with(|cell| cell.borrow_mut().clear());
+}
+
 fn linked_key(publication: &Publication) -> (String, String) {
     (
         publication.semantic_key.clone(),
@@ -902,21 +1011,37 @@ fn linked_graph(
 }
 
 /// The linked graph of the current publication. A stale publication is never
-/// served: `Cached` and `Off` get `None`, `Auto` gets `snapshot_changed`.
+/// served: `Cached` and `Off` get `None`; `Auto` rebuilds it inline within the
+/// inline budget (native builds) and otherwise gets `snapshot_changed`.
 fn graph_for(
     conn: &Connection,
     options: &EffectsOptions,
 ) -> Result<Option<(Publication, Rc<Graph>)>, RequestError> {
     let digest = catalog_digest(&options.rule_paths)?;
-    match current_publication(conn, &digest, &options.environment)? {
-        Some(publication) => {
-            let graph = linked_graph(conn, &publication, None, &options.rule_paths)?;
-            Ok(Some((publication, graph)))
+    if let Some(publication) = current_publication(conn, &digest, &options.environment)? {
+        let graph = linked_graph(conn, &publication, None, &options.rule_paths)?;
+        return Ok(Some((publication, graph)));
+    }
+    match options.mode {
+        EffectsMode::Auto => {
+            #[cfg(feature = "native")]
+            {
+                let catalog = default_catalog(&options.rule_paths)?;
+                let outcome =
+                    ensure_publication(conn, &catalog, options, crate::refresh::inline_budget())?;
+                if matches!(outcome, EffectsOutcome::Current | EffectsOutcome::Rebuilt) {
+                    if let Some(publication) =
+                        current_publication(conn, &digest, &options.environment)?
+                    {
+                        let graph =
+                            linked_graph(conn, &publication, Some(&catalog), &options.rule_paths)?;
+                        return Ok(Some((publication, graph)));
+                    }
+                }
+            }
+            Err(stale_publication())
         }
-        None => match options.mode {
-            EffectsMode::Auto => Err(stale_publication()),
-            EffectsMode::Cached | EffectsMode::Off => Ok(None),
-        },
+        EffectsMode::Cached | EffectsMode::Off => Ok(None),
     }
 }
 
@@ -1104,6 +1229,20 @@ pub fn get_effect_preview(request: &EffectsRequest) -> Result<EffectSummaryResul
     match get_cached_effect_preview(request)? {
         Some(summary) => Ok(summary),
         None => get_effect_summary(request),
+    }
+}
+
+/// [`get_effect_preview`] after [`ensure_current_publication`]: a publication
+/// still stale afterwards serves `request.options.mode` as usual.
+#[cfg(feature = "native")]
+pub fn get_effect_preview_with_refresh(
+    request: &EffectsRequest,
+) -> Result<EffectSummaryResult, RequestError> {
+    let conn = db::open_or_create_db().map_err(failure)?;
+    ensure_current_publication(&conn, &request.options)?;
+    match get_cached_effect_preview_on(&conn, request)? {
+        Some(summary) => Ok(summary),
+        None => get_effect_summary_on(&conn, request),
     }
 }
 
@@ -2067,10 +2206,33 @@ mod tests {
                     .is_none(),
                 "stale rows are never served"
             );
+            assert_eq!(
+                ensure_publication(&conn, &catalog, &options, std::time::Duration::ZERO).unwrap(),
+                EffectsOutcome::OverBudget {
+                    estimate_ms: crate::refresh::estimate_rebuild(
+                        &stale_structure_bytes(
+                            &conn,
+                            &catalog.content_digest,
+                            &options.environment
+                        )
+                        .unwrap(),
+                        effects_threads()
+                    )
+                    .as_millis() as u64
+                }
+            );
             let mut auto = request.clone();
             auto.options.mode = EffectsMode::Auto;
-            let error = get_effect_summary_on(&conn, &auto).unwrap_err();
-            assert_eq!(error.details.unwrap()["issue"], "snapshot_changed");
+            assert!(matches!(
+                get_effect_summary_on(&conn, &auto).unwrap().effects_status,
+                EffectsStatus::Ready { .. }
+            ));
+            assert!(
+                get_cached_effect_preview_on(&conn, &request)
+                    .unwrap()
+                    .is_some(),
+                "auto rebuilt the publication inline"
+            );
         }
 
         #[test]

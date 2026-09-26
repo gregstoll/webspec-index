@@ -160,6 +160,11 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS markdown_memo (
             snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
             payload     BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS refresh_lock (
+            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            pid        INTEGER NOT NULL,
+            started_at TEXT NOT NULL
         );",
     )?;
 

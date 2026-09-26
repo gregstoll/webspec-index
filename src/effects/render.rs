@@ -303,7 +303,7 @@ fn escape_html(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn status_text(status: &EffectsStatus) -> &'static str {
+fn status_text(status: &EffectsStatus) -> String {
     match status {
         EffectsStatus::Ready {
             coverage: Coverage::Partial,
@@ -311,10 +311,14 @@ fn status_text(status: &EffectsStatus) -> &'static str {
         } => "Partial analysis: additional effects may exist.",
         EffectsStatus::Ready { .. } => "",
         EffectsStatus::Pending { .. } => "Analysis is pending.",
+        EffectsStatus::Unavailable { issues, .. } if issues.contains(&IssueCode::SnapshotChanged) => {
+            "Effects are out of date after an index update. Run `webspec-index effects --all` to rebuild them."
+        }
         EffectsStatus::Unavailable { .. } => "Analysis is unavailable.",
         EffectsStatus::Error { .. } => "Analysis failed.",
         EffectsStatus::Disabled { .. } => "Analysis is disabled.",
     }
+    .to_owned()
 }
 
 pub fn summary_markdown(result: &EffectSummaryResult, catalog: Option<&Catalog>) -> String {
@@ -882,6 +886,16 @@ pub fn explanation_markdown(result: &ExplainEffectsResult, catalog: Option<&Cata
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn snapshot_changed_names_the_command() {
+        let status = EffectsStatus::Unavailable {
+            semantics: Semantics::May,
+            issues: vec![IssueCode::SnapshotChanged],
+            omitted: 0,
+        };
+        assert!(status_text(&status).contains("webspec-index effects --all"));
+    }
 
     #[test]
     fn scheduling_labels_use_spec_terminology() {

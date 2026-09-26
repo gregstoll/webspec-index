@@ -25,6 +25,8 @@ pub mod lsp;
 pub mod model;
 #[deny(clippy::iter_over_hash_type)]
 pub mod parse;
+#[cfg(feature = "native")]
+pub mod refresh;
 pub mod render;
 pub mod semantics;
 #[cfg(feature = "native")]
@@ -145,6 +147,27 @@ async fn ensure_indexed_for_spec_name(
     spec_name: &str,
     base_url_hint: Option<&str>,
 ) -> Result<(i64, String)> {
+    let (snapshot_id, name, _) = ensure_indexed_with_effects(
+        conn,
+        registry,
+        spec_name,
+        base_url_hint,
+        refresh::EffectsRefresh::Off,
+    )
+    .await?;
+    Ok((snapshot_id, name))
+}
+
+/// Resolve `spec_name`, refresh it with its dependencies (waiting at most the
+/// inline budget for another refresh), and return its stored snapshot.
+#[cfg(feature = "native")]
+async fn ensure_indexed_with_effects(
+    conn: &Connection,
+    registry: &spec_registry::SpecRegistry,
+    spec_name: &str,
+    base_url_hint: Option<&str>,
+    effects: refresh::EffectsRefresh,
+) -> Result<(i64, String, refresh::EffectsOutcome)> {
     let meta = resolve_spec_metadata(conn, registry, spec_name, base_url_hint);
     let (canonical_name, base_url, provider) = match meta {
         Ok(m) => m,
@@ -167,8 +190,22 @@ async fn ensure_indexed_for_spec_name(
             resolve_spec_metadata(conn, registry, spec_name, base_url_hint)?
         }
     };
-    let snapshot_id = fetch::ensure_indexed(conn, &canonical_name, &base_url, &provider).await?;
-    Ok((snapshot_id, canonical_name))
+    if provider == "itu" {
+        let snapshot_id =
+            fetch::ensure_indexed(conn, &canonical_name, &base_url, &provider).await?;
+        return Ok((
+            snapshot_id,
+            canonical_name,
+            refresh::EffectsOutcome::NotRequested,
+        ));
+    }
+    db::write::insert_or_get_spec(conn, &canonical_name, &base_url, &provider)?;
+    let options =
+        refresh::RefreshOptions::new(refresh::LockPolicy::Wait(refresh::inline_budget()), effects);
+    let report = refresh::refresh_for_query(conn, &canonical_name, &options).await?;
+    let snapshot_id = db::queries::get_snapshot(conn, &canonical_name)?
+        .with_context(|| format!("{canonical_name}: no snapshot to serve"))?;
+    Ok((snapshot_id, canonical_name, report.effects))
 }
 
 fn assemble_query_result(
@@ -312,6 +349,27 @@ pub async fn query_section(
     spec_anchor: &str,
     pr: Option<&model::PrOpts>,
 ) -> Result<model::QueryResult> {
+    query_section_with_refresh(spec_anchor, pr, refresh::EffectsRefresh::Off).await
+}
+
+/// [`query_section`], refreshing the effects publication as `effects` asks
+/// along with the spec and its dependencies. PR queries never touch effects.
+#[cfg(feature = "native")]
+pub async fn query_section_with_refresh(
+    spec_anchor: &str,
+    pr: Option<&model::PrOpts>,
+    effects: refresh::EffectsRefresh,
+) -> Result<model::QueryResult> {
+    Ok(query_section_refreshed(spec_anchor, pr, effects).await?.0)
+}
+
+/// [`query_section_with_refresh`] plus what the refresh did to effects.
+#[cfg(feature = "native")]
+pub(crate) async fn query_section_refreshed(
+    spec_anchor: &str,
+    pr: Option<&model::PrOpts>,
+    effects: refresh::EffectsRefresh,
+) -> Result<(model::QueryResult, refresh::EffectsOutcome)> {
     let (spec_name, anchor, base_url_hint) = parse_spec_anchor(spec_anchor)?;
     let conn = db::open_or_create_db()?;
     let registry = spec_registry::SpecRegistry::new();
@@ -338,14 +396,23 @@ pub async fn query_section(
                     .flatten()
             })
             .ok_or_else(|| anyhow::anyhow!("Section not found: {}#{}", canonical_name, anchor))?;
-        assemble_query_result(&conn, &canonical_name, pr_snap, section)
+        let query = assemble_query_result(&conn, &canonical_name, pr_snap, section)?;
+        Ok((query, refresh::EffectsOutcome::NotRequested))
     } else {
-        let (snap_id, name) =
-            ensure_indexed_for_spec_name(&conn, &registry, &spec_name, base_url_hint.as_deref())
-                .await?;
+        let (snap_id, name, outcome) = ensure_indexed_with_effects(
+            &conn,
+            &registry,
+            &spec_name,
+            base_url_hint.as_deref(),
+            effects,
+        )
+        .await?;
         let section = db::queries::get_section(&conn, snap_id, &anchor)?
             .ok_or_else(|| anyhow::anyhow!("Section not found: {}#{}", name, anchor))?;
-        assemble_query_result(&conn, &name, snap_id, section)
+        Ok((
+            assemble_query_result(&conn, &name, snap_id, section)?,
+            outcome,
+        ))
     }
 }
 

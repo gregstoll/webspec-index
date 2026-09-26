@@ -18,8 +18,14 @@ struct LspClient {
 }
 
 impl LspClient {
-    fn start(db_path: &std::path::Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_webspec-index"))
+    /// `inline_budget_ms` overrides the budget within which the server
+    /// rebuilds stale effects itself.
+    fn start(db_path: &std::path::Path, inline_budget_ms: Option<&str>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_webspec-index"));
+        if let Some(budget) = inline_budget_ms {
+            command.env("WEBSPEC_EFFECTS_INLINE_BUDGET_MS", budget);
+        }
+        let mut child = command
             .arg("lsp")
             .env("SPEC_INDEX_TEST_DB", db_path)
             .env("CODEX_SANDBOX", "1")
@@ -307,7 +313,8 @@ fn fixture_db() -> TempDir {
 #[test]
 fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     let db = fixture_db();
-    let mut client = LspClient::start(&db.path().join("index.db"));
+    // No inline budget: the server leaves the rebuild to `effects --all`.
+    let mut client = LspClient::start(&db.path().join("index.db"), Some("0"));
     let initialized = client.request(
         1,
         "initialize",
@@ -348,7 +355,7 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
                 |row| row.get::<_, bool>(0)
             )
             .unwrap(),
-        "a cold automatic hint must not publish effects"
+        "a cold automatic hint over the inline budget must not publish effects"
     );
     let lenses = client.request(
         10,
@@ -528,7 +535,7 @@ fn lsp_effect_hint_refreshes_once_then_serves_cached_details() {
     // A persistent read failure must not feed a refresh/resubmission loop.
     conn.execute("UPDATE effect_fragments SET payload = X'00'", [])
         .unwrap();
-    let mut client = LspClient::start(&db.path().join("index.db"));
+    let mut client = LspClient::start(&db.path().join("index.db"), None);
     client.request(
         1,
         "initialize",

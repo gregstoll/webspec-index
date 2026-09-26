@@ -167,8 +167,7 @@ struct EffectsArgs {
 
     #[arg(
         long,
-        requires = "all",
-        help = "Build effects from scratch instead of incrementally"
+        help = "Build effects from scratch instead of incrementally (with --all)"
     )]
     rebuild: bool,
 
@@ -1226,20 +1225,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             providers,
             effect_options,
         } => {
-            let results =
-                webspec_index::update_specs(spec.as_deref(), force, refetch, &providers).await?;
-            if effect_options.effects == UpdateEffectsMode::Auto {
-                webspec_index::effects::recompute_effects(
-                    &webspec_index::effects::RecomputeEffectsRequest {
-                        schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
-                        options: webspec_index::effects::EffectsOptions {
-                            rule_paths: effect_options.rules,
-                            environment: effect_options.environment,
-                            ..Default::default()
-                        },
-                    },
-                )?;
-            }
+            let conn = webspec_index::db::open_or_create_db()?;
+            let lock = webspec_index::refresh::hold_lock(&conn).await?;
+            let results = webspec_index::refresh::while_holding(&lock, async {
+                let results =
+                    webspec_index::update_specs(spec.as_deref(), force, refetch, &providers)
+                        .await?;
+                if effect_options.effects == UpdateEffectsMode::Auto {
+                    recompute_effects(effect_options.rules, effect_options.environment)?;
+                }
+                anyhow::Ok(results)
+            })
+            .await?;
+            drop(lock);
             webspec_index::refresh_planner_stats();
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
@@ -1257,19 +1255,17 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             providers,
             effect_options,
         } => {
-            let results = webspec_index::reparse_specs(spec.as_deref(), &providers).await?;
-            if effect_options.effects == UpdateEffectsMode::Auto {
-                webspec_index::effects::recompute_effects(
-                    &webspec_index::effects::RecomputeEffectsRequest {
-                        schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
-                        options: webspec_index::effects::EffectsOptions {
-                            rule_paths: effect_options.rules,
-                            environment: effect_options.environment,
-                            ..Default::default()
-                        },
-                    },
-                )?;
-            }
+            let conn = webspec_index::db::open_or_create_db()?;
+            let lock = webspec_index::refresh::hold_lock(&conn).await?;
+            let results = webspec_index::refresh::while_holding(&lock, async {
+                let results = webspec_index::reparse_specs(spec.as_deref(), &providers).await?;
+                if effect_options.effects == UpdateEffectsMode::Auto {
+                    recompute_effects(effect_options.rules, effect_options.environment)?;
+                }
+                anyhow::Ok(results)
+            })
+            .await?;
+            drop(lock);
             webspec_index::refresh_planner_stats();
             let output: Vec<model::UpdateEntry> = results
                 .into_iter()
@@ -1316,6 +1312,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             if all && (step.is_some() || step_id.is_some() || body_id.is_some() || has_filter) {
                 anyhow::bail!("--all cannot be combined with subject selectors or filters");
             }
+            // clap's `requires = "all"` accepts `--rebuild` alone, so check it here.
+            if rebuild && !all {
+                anyhow::bail!("--rebuild requires --all");
+            }
 
             let budgets = effects::DiscoveryBudgets {
                 max_bodies,
@@ -1334,11 +1334,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     schema_version: effects::EFFECTS_SCHEMA_VERSION,
                     options,
                 };
+                let conn = webspec_index::db::open_or_create_db()?;
+                let lock = webspec_index::refresh::hold_lock(&conn).await?;
                 let result = if rebuild {
                     effects::rebuild_effects(&request)?
                 } else {
                     effects::recompute_effects(&request)?
                 };
+                drop(lock);
                 print_output(&cli.format, &result, |_| {
                     format!(
                         "Effects graph built: {} bodies, {} relationships.\n",
@@ -1632,6 +1635,19 @@ fn apply_refs_summary(
         let cmd = format::refs_command(spec_id, direction, total, pr);
         v[field] = serde_json::json!({"total": total, "command": cmd});
     }
+}
+
+/// Publish effects incrementally after `update`/`reparse`.
+fn recompute_effects(rule_paths: Vec<String>, environment: String) -> anyhow::Result<()> {
+    webspec_index::effects::recompute_effects(&webspec_index::effects::RecomputeEffectsRequest {
+        schema_version: webspec_index::effects::EFFECTS_SCHEMA_VERSION,
+        options: webspec_index::effects::EffectsOptions {
+            rule_paths,
+            environment,
+            ..Default::default()
+        },
+    })?;
+    Ok(())
 }
 
 fn parse_ref_kind(kind: Option<&str>) -> anyhow::Result<Option<model::RefKind>> {

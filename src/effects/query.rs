@@ -124,7 +124,14 @@ pub async fn query_section_with_effects(
     pr: Option<&PrOpts>,
     options: EffectsOptions,
 ) -> anyhow::Result<QueryWithEffects> {
-    let query = crate::query_section(spec_anchor, pr).await?;
+    use crate::refresh::{inline_budget, EffectsOutcome, EffectsRefresh};
+    let effects = match (options.mode, pr) {
+        (EffectsMode::Auto, None) => EffectsRefresh::Inline {
+            budget: inline_budget(),
+        },
+        _ => EffectsRefresh::Off,
+    };
+    let (query, outcome) = crate::query_section_refreshed(spec_anchor, pr, effects).await?;
     if options.mode == EffectsMode::Off {
         return Ok(QueryWithEffects {
             query,
@@ -141,6 +148,31 @@ pub async fn query_section_with_effects(
         });
     }
 
+    let wrapped = if matches!(
+        outcome,
+        EffectsOutcome::OverBudget { .. }
+            | EffectsOutcome::LockTimeout
+            | EffectsOutcome::SnapshotChanged
+    ) {
+        QueryWithEffects {
+            query,
+            effects: Some(Vec::new()),
+            effects_status: Some(snapshot_changed_status()),
+        }
+    } else {
+        preview(query, options)
+    };
+    if matches!(
+        &wrapped.effects_status,
+        Some(EffectsStatus::Unavailable { issues, .. }) if issues.contains(&IssueCode::SnapshotChanged)
+    ) {
+        eprintln!("note: effects are out of date; run `webspec-index effects --all`");
+    }
+    Ok(wrapped)
+}
+
+#[cfg(feature = "native")]
+fn preview(query: QueryResult, options: EffectsOptions) -> QueryWithEffects {
     let request = EffectsRequest {
         schema_version: EFFECTS_SCHEMA_VERSION,
         subject: SubjectSelector {
@@ -160,12 +192,24 @@ pub async fn query_section_with_effects(
             .unwrap_or_else(|| super::get_effect_summary(&request))
     });
     match summary {
-        Ok(result) => Ok(attach_summary(query, result)),
-        Err(_) => Ok(QueryWithEffects {
+        Ok(result) => attach_summary(query, result),
+        Err(error)
+            if error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["issue"] == "snapshot_changed") =>
+        {
+            QueryWithEffects {
+                query,
+                effects: Some(Vec::new()),
+                effects_status: Some(snapshot_changed_status()),
+            }
+        }
+        Err(_) => QueryWithEffects {
             query,
             effects: Some(Vec::new()),
             effects_status: Some(error_status()),
-        }),
+        },
     }
 }
 

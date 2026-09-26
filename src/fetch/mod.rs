@@ -2,7 +2,7 @@
 pub mod freshness;
 pub mod github;
 pub mod itu;
-mod pipeline;
+pub(crate) mod pipeline;
 pub mod pr;
 pub mod snapshot;
 pub mod tc39_pr;
@@ -116,7 +116,7 @@ fn is_fresh(last_checked: &DateTime<Utc>, now: &DateTime<Utc>) -> bool {
 /// Whether the cached index was produced by the current build. A new release
 /// (bumped `INDEX_VERSION`) makes this false, forcing a re-parse even when the
 /// upstream HTML is unchanged.
-fn index_is_current(state: &queries::UpdateCheckState) -> bool {
+pub(crate) fn index_is_current(state: &queries::UpdateCheckState) -> bool {
     state.index_version.as_deref() == Some(parse::INDEX_VERSION)
 }
 
@@ -239,7 +239,7 @@ fn sync_from_html(
 
 /// The markdown memo of `snapshot_id`'s last parse. A missing or undecodable
 /// memo is empty: it only saves work, the parse is the same without it.
-fn previous_memo(conn: &Connection, snapshot_id: Option<i64>) -> Result<MarkdownMemo> {
+pub(crate) fn previous_memo(conn: &Connection, snapshot_id: Option<i64>) -> Result<MarkdownMemo> {
     let Some(snapshot_id) = snapshot_id else {
         return Ok(MarkdownMemo::new());
     };
@@ -255,7 +255,7 @@ fn decode_stored_memo(payload: Option<Vec<u8>>) -> MarkdownMemo {
 /// Whether `snapshot_id` can be served without re-parsing: it must have both a
 /// current structure (step IR) and a current state model (correct
 /// `STATE_VERSION` and bundled catalog digest).
-fn snapshot_is_reusable(conn: &Connection, snapshot_id: i64) -> Result<bool> {
+pub(crate) fn snapshot_is_reusable(conn: &Connection, snapshot_id: i64) -> Result<bool> {
     Ok(
         crate::db::effects::has_structure(conn, snapshot_id, parse::steps::STRUCTURE_VERSION)?
             && crate::db::state::has_state_model(
@@ -299,7 +299,7 @@ pub fn index_html(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_parsed_html(
+pub(crate) fn write_parsed_html(
     conn: &Connection,
     spec_id: i64,
     spec_name: &str,
@@ -436,7 +436,7 @@ fn document_url(base_url: &str) -> String {
 /// The freshness check for a spec. `conditional` sends the stored validators
 /// and source hash, so an unchanged source costs a `304` or a hash compare;
 /// without it the document is downloaded unconditionally, with no time limit.
-fn candidate_for(
+pub(crate) fn candidate_for(
     spec_id: i64,
     spec_name: &str,
     base_url: &str,
@@ -494,7 +494,7 @@ pub(crate) struct AppliedFreshness {
 
 impl AppliedFreshness {
     /// Print the notes to stderr and keep the changed document.
-    fn print_notes(self) -> Option<ChangedHtml> {
+    pub(crate) fn print_notes(self) -> Option<ChangedHtml> {
         for note in &self.notes {
             eprintln!("note: {note}");
         }
@@ -949,7 +949,7 @@ enum PreparedHtml {
 }
 
 /// Parse `jobs` off the async runtime. Results are in job order.
-async fn parse_chunk(jobs: Vec<ParseJob>, threads: usize) -> Vec<Result<ParsedHtml>> {
+pub(crate) async fn parse_chunk(jobs: Vec<ParseJob>, threads: usize) -> Vec<Result<ParsedHtml>> {
     if jobs.is_empty() {
         return Vec::new();
     }

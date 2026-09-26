@@ -1,4 +1,6 @@
 pub mod effects;
+#[cfg(feature = "native")]
+pub mod lock;
 pub mod queries;
 pub mod schema;
 pub mod snapshot_diff;
