@@ -3,7 +3,7 @@ use std::path::Path;
 use webspec_index::db;
 use webspec_index::effects::service::{publish, PublishMode};
 use webspec_index::effects::{default_catalog, EffectsOptions};
-use webspec_index::export::{export_web, ExportOptions};
+use webspec_index::export::{export_web, ExportOptions, Manifest};
 
 /// One algorithm per spec, so the publication has rows for each.
 fn store_structure(conn: &rusqlite::Connection, snapshot_id: i64, spec: &str, anchor: &str) {
@@ -80,6 +80,21 @@ fn seeded_db(path: &Path) -> (rusqlite::Connection, i64) {
     (conn, html_snap)
 }
 
+fn joined_db(
+    dir: &std::path::Path,
+    out: &std::path::Path,
+    manifest: &Manifest,
+) -> rusqlite::Connection {
+    let mut joined = Vec::new();
+    for i in 0..manifest.chunks {
+        joined.extend(std::fs::read(out.join(format!("{i:04}.bin"))).unwrap());
+    }
+    let joined_path = dir.join("joined.db");
+    std::fs::write(&joined_path, &joined).unwrap();
+    rusqlite::Connection::open_with_flags(&joined_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap()
+}
+
 fn options() -> ExportOptions {
     ExportOptions {
         providers: vec!["whatwg".into(), "w3c".into(), "tc39".into()],
@@ -127,17 +142,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         serde_json::from_str(&std::fs::read_to_string(out.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(written.sha256, manifest.sha256);
 
-    let mut joined = Vec::new();
-    for i in 0..manifest.chunks {
-        joined.extend(std::fs::read(out.join(format!("{i:04}.bin"))).unwrap());
-    }
-    let joined_path = dir.path().join("joined.db");
-    std::fs::write(&joined_path, &joined).unwrap();
-    let conn = rusqlite::Connection::open_with_flags(
-        &joined_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let conn = joined_db(dir.path(), &out, &manifest);
     let page_size: u32 = conn
         .query_row("PRAGMA page_size", [], |r| r.get(0))
         .unwrap();
@@ -287,4 +292,41 @@ fn export_specs_filter_keeps_only_listed_specs() {
 
     assert_eq!(manifest.specs.len(), 1, "only HTML should be in the export");
     assert_eq!(manifest.specs[0].name, "HTML");
+}
+
+#[test]
+fn exported_db_answers_state_requests_without_state_models() {
+    use webspec_index::state::testing::{base_url, index_offline, QUERY_DOM, QUERY_HTML};
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("index.db");
+    {
+        let (conn, _) = seeded_db(&src);
+        for (spec, html) in [("DOM", QUERY_DOM), ("HTML", QUERY_HTML)] {
+            index_offline(&conn, spec, base_url(spec), html).unwrap();
+        }
+        conn.execute(
+            "UPDATE specs SET provider = 'whatwg' WHERE name IN ('DOM', 'HTML')",
+            [],
+        )
+        .unwrap();
+        publish_effects(&conn);
+    }
+    let out = dir.path().join("web");
+    let manifest = export_web(&src, &out, &options()).unwrap();
+    let conn = joined_db(dir.path(), &out, &manifest);
+    let has_models: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'state_models'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(has_models, 0);
+    let v: serde_json::Value = serde_json::from_str(&webspec_index::api::handle_json(
+        &conn,
+        r#"{"type":"state","selector":"Element.node document"}"#,
+    ))
+    .unwrap();
+    assert_eq!(v["type"], "state_field", "{v}");
+    assert_eq!(v["result"]["writes"].as_array().unwrap().len(), 2);
 }

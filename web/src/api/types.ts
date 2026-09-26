@@ -423,6 +423,19 @@ export interface FlowResult {
   issues: FlowIssue[];
 }
 
+// --- State types ---
+
+export type StateOccurrenceOp = string;
+
+export interface StateSite { spec: string; subject: string; step_path: string | null; step_id: string | null; context: 'algorithm' | 'branch_label' | 'prose' | 'reflection'; role: string | null; op: StateOccurrenceOp; receiver: string; target: string; value: string | null; text: string; basis: string; constructed: string | null }
+export interface StateStatus { state: 'ready'; semantics: Semantics; coverage: Coverage; issues: string[]; counts: { writes: number; inits: number; unclassified: number; possible_unlinked: number; reads: number } }
+export interface StateFieldResult { field: { spec: string; anchor: string; name: string; url: string; owners: { type: string; name: string | null; via: string; indexed: boolean }[]; owner_hint: string | null; owner_basis: string | null; field_basis: string | null; declared_type: unknown; initial: unknown | null; declaration: { section: string; text: string } | null }; found_on: { type: string; path: string[] } | null; writes: StateSite[]; inits?: StateSite[]; unclassified: { count: number; items: StateSite[] }; possible_unlinked: StateSite[]; declared: StateSite[]; reflects?: { content_attribute: string | null; name: string; basis: string }; status: StateStatus }
+export interface StateFieldRow { spec: string; anchor: string; name: string; declared_type: unknown; initial: unknown | null; basis: string; writes: number; inits: number; unclassified: number }
+export interface StateTypeResult { key: string; name: string; kind: string; anchors: { spec: string; anchor: string; role: string }[]; supertypes: string[]; includes: { name: string; spec: string }[]; fields: StateFieldRow[]; dfn_for_only: StateFieldRow[]; members: { spec: string; anchor: string; name: string; adds: number; removes: number }[]; inherited: { from: string; name: string; fields: StateFieldRow[]; dfn_for_only: StateFieldRow[] }[]; truncated: Record<string, number>; status: StateStatus }
+export interface StateMemberResult { member: { spec: string; anchor: string; name: string; set: string; set_name: string | null; declaration: { section: string; text: string } }; adds: StateSite[]; removes: StateSite[]; unclassified: { count: number; items: StateSite[] }; status: StateStatus }
+export interface StateFieldListResult { selector: string; total: number; fields: { row: StateFieldRow; owners: StateFieldResult['field']['owners']; found_on: StateFieldResult['found_on']; writes: StateSite[]; inits: StateSite[]; unclassified: StateSite[] }[]; status: StateStatus }
+export interface StateCoverageResult { spec: string; snapshot_sha: string; counters: Record<string, unknown> }
+
 // --- Request union ---
 
 export type Request =
@@ -448,7 +461,9 @@ export type Request =
   | { type: 'effects'; subject: SubjectSelector; filter?: EffectFilter }
   | { type: 'effects_explain'; subject: SubjectSelector }
   | { type: 'effects_paths'; subject: SubjectSelector; effect_id: string; limit?: number }
-  | { type: 'flow'; target: string };
+  | { type: 'flow'; target: string }
+  | { type: 'state'; selector: string; include_inits?: boolean; unclassified?: boolean; limit?: number }
+  | { type: 'state_coverage'; spec: string };
 
 // --- Error (flat, no result wrapper) ---
 
@@ -476,4 +491,9 @@ export type Response =
   | { type: 'effects'; result: EffectSummaryResult }
   | { type: 'effects_explain'; result: ExplainEffectsResult }
   | { type: 'effects_paths'; result: ExplainEffectsResult }
-  | { type: 'flow'; result: FlowResult };
+  | { type: 'flow'; result: FlowResult }
+  | { type: 'state_field'; result: StateFieldResult }
+  | { type: 'state_type'; result: StateTypeResult }
+  | { type: 'state_member'; result: StateMemberResult }
+  | { type: 'state_fields'; result: StateFieldListResult }
+  | { type: 'state_coverage'; result: StateCoverageResult };
