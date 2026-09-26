@@ -37,7 +37,7 @@ impl FeedingSelector {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Slice {
     pub view: ViewRequest,
     /// Seeds first, then derived variables in fixed-point order.
@@ -71,6 +71,7 @@ pub enum VarBasis {
     Let,
     Set,
     Mutate,
+    Feeds,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -281,13 +282,307 @@ pub fn validate_shape(view: &ViewRequest) -> Result<ViewRequest, SliceError> {
     Ok(view)
 }
 
+/// What a selector keeps, before `depth` cuts it and omitted steps are grouped into runs.
+struct Selection {
+    kept: Vec<Option<StepRole>>,
+    /// Definition edge kinds per step, in `DefKind` order; empty unless the selector records them.
+    edges: Vec<Vec<DefKind>>,
+    /// Reason of the runs the selector omits.
+    reason: String,
+}
+
 /// The view of one algorithm that `view` selects.
 pub fn slice(index: &SliceIndex, view: &ViewRequest) -> Result<Slice, SliceError> {
     let view = validate_shape(view)?;
-    if view.feeding.is_some() || !view.steps.is_empty() || view.depth.is_some() {
-        return Err(SliceError::invalid("not implemented"));
+    let size = subtree_sizes(index);
+    let (mut slice, selection) = if let Some(feeding) = &view.feeding {
+        backward(index, feeding)?
+    } else if !view.steps.is_empty() {
+        select_steps(index, &view.steps, &size)?
+    } else if !view.involving.is_empty() {
+        forward(index, &view.involving)?
+    } else {
+        let selection = Selection {
+            kept: vec![Some(StepRole::Selected); index.steps.len()],
+            edges: Vec::new(),
+            reason: String::new(),
+        };
+        (Slice::default(), selection)
+    };
+    slice.view = view;
+    Ok(finish(index, slice, selection, &size))
+}
+
+/// Applies `depth`, then fills in the kept steps and the omitted runs.
+fn finish(index: &SliceIndex, mut slice: Slice, mut sel: Selection, size: &[u32]) -> Slice {
+    slice.omitted = match slice.view.depth {
+        None => omitted_runs(index, &sel.kept, size, &|_| (sel.reason.clone(), 0)),
+        Some(depth) => {
+            let depth = depth as usize;
+            // in_slice_before[i]: steps before step i whose role puts them in the slice.
+            let mut in_slice_before = vec![0u32; index.steps.len() + 1];
+            for (i, role) in sel.kept.iter().enumerate() {
+                let in_slice = matches!(
+                    role,
+                    Some(
+                        StepRole::Match
+                            | StepRole::Inherited
+                            | StepRole::Target
+                            | StepRole::Definition
+                    )
+                );
+                in_slice_before[i + 1] = in_slice_before[i] + u32::from(in_slice);
+            }
+            for (i, role) in sel.kept.iter_mut().enumerate() {
+                if index.depth(i) > depth {
+                    *role = None;
+                }
+            }
+            let reason = |group: &[usize]| {
+                if index.depth(group[0]) <= depth {
+                    return (sel.reason.clone(), 0);
+                }
+                let hidden: u32 = group
+                    .iter()
+                    .map(|&g| in_slice_before[g + size[g] as usize] - in_slice_before[g])
+                    .sum();
+                let text = if hidden > 0 {
+                    format!("below depth {depth}, {hidden} in slice")
+                } else {
+                    format!("below depth {depth}")
+                };
+                (text, hidden)
+            };
+            omitted_runs(index, &sel.kept, size, &reason)
+        }
+    };
+    slice.steps = kept_steps(index, &sel);
+    slice
+}
+
+/// The step at `path`, or `UnknownStep` listing the top-level paths and the children of the
+/// deepest existing proper prefix of `path`.
+fn step_at(index: &SliceIndex, path: &str) -> Result<usize, SliceError> {
+    index.step_by_path(path).ok_or_else(|| {
+        let prefixes = std::iter::successors(Some(path), |p| p.rsplit_once('.').map(|(p, _)| p));
+        let parent = prefixes.skip(1).find_map(|p| index.step_by_path(p));
+        let top = index.children(None);
+        let below = parent.map(|p| index.children(Some(p))).unwrap_or_default();
+        SliceError {
+            code: SliceErrorCode::UnknownStep,
+            message: format!("step {path} does not exist in {}", index.anchor),
+            candidates: dedupe(
+                top.iter()
+                    .chain(&below)
+                    .map(|&i| index.steps[i].path.clone()),
+            ),
+        }
+    })
+}
+
+/// Step selection (spec §6.7): each named step with its subtree, and its enclosing steps.
+fn select_steps(
+    index: &SliceIndex,
+    paths: &[String],
+    size: &[u32],
+) -> Result<(Slice, Selection), SliceError> {
+    let mut kept = vec![None; index.steps.len()];
+    for path in paths {
+        let i = step_at(index, path)?;
+        kept[i..i + size[i] as usize].fill(Some(StepRole::Selected));
     }
-    forward(index, view)
+    keep_context(index, &mut kept);
+    let selection = Selection {
+        kept,
+        edges: Vec::new(),
+        reason: format!("outside {}", paths.join(", ")),
+    };
+    Ok((Slice::default(), selection))
+}
+
+fn is_definition(kind: DefKind) -> bool {
+    matches!(
+        kind,
+        DefKind::Let | DefKind::Set | DefKind::Mutate | DefKind::Store
+    )
+}
+
+/// Backward slice (spec §6.6).
+fn backward(
+    index: &SliceIndex,
+    feeding: &FeedingSelector,
+) -> Result<(Slice, Selection), SliceError> {
+    let target = step_at(index, &feeding.step)?;
+    let path = &index.steps[target].path;
+    let mentions = &index.steps[target].mentions;
+    let seeds: Vec<u32> = if feeding.variables.is_empty() {
+        mentions.clone()
+    } else {
+        feeding
+            .variables
+            .iter()
+            .map(|name| {
+                index
+                    .var(name)
+                    .filter(|v| mentions.contains(v))
+                    .ok_or_else(|| SliceError {
+                        code: SliceErrorCode::InvalidSelector,
+                        message: format!("*{name}* is not mentioned by step {path}"),
+                        candidates: mentions.iter().map(|&v| index.name(v).to_owned()).collect(),
+                    })
+            })
+            .collect::<Result<_, _>>()?
+    };
+
+    let n = index.steps.len();
+    let mut definitions_of: Vec<Vec<usize>> = vec![Vec::new(); index.vars.len()];
+    for (e, edge) in index.edges.iter().enumerate() {
+        if let Some(v) = edge.var.filter(|_| is_definition(edge.kind)) {
+            definitions_of[v as usize].push(e);
+        }
+    }
+
+    let mut in_set = vec![false; index.vars.len()];
+    let mut members: Vec<u32> = Vec::new();
+    let mut variables: Vec<SliceVariable> = Vec::new();
+    let mut queue = std::collections::VecDeque::new();
+    for &v in &seeds {
+        in_set[v as usize] = true;
+        members.push(v);
+        queue.push_back(v);
+        variables.push(SliceVariable {
+            name: index.name(v).to_owned(),
+            basis: VarBasis::Seed,
+            step: None,
+            from: Vec::new(),
+        });
+    }
+    let mut kept: Vec<Option<StepRole>> = vec![None; n];
+    let mut edges: Vec<Vec<DefKind>> = vec![Vec::new(); n];
+    kept[target] = Some(StepRole::Target);
+    while let Some(v) = queue.pop_front() {
+        for &e in &definitions_of[v as usize] {
+            let edge = &index.edges[e];
+            let step = edge.step as usize;
+            if step >= target {
+                continue;
+            }
+            kept[step] = Some(StepRole::Definition);
+            if !edges[step].contains(&edge.kind) {
+                edges[step].push(edge.kind);
+            }
+            for &u in &edge.uses {
+                if in_set[u as usize] {
+                    continue;
+                }
+                in_set[u as usize] = true;
+                members.push(u);
+                queue.push_back(u);
+                variables.push(SliceVariable {
+                    name: index.name(u).to_owned(),
+                    basis: VarBasis::Feeds,
+                    step: Some(index.steps[step].path.clone()),
+                    from: vec![index.name(v).to_owned()],
+                });
+            }
+        }
+    }
+    for kinds in &mut edges {
+        kinds.sort_by_key(|&k| k as u8);
+    }
+    keep_context(index, &mut kept);
+
+    let mut bound = vec![false; index.vars.len()];
+    for edge in &index.edges {
+        if matches!(edge.kind, DefKind::Let | DefKind::Set | DefKind::Mutate) {
+            if let Some(v) = edge.var {
+                bound[v as usize] = true;
+            }
+        }
+    }
+    let mut inputs: Vec<String> = members
+        .iter()
+        .filter(|&&v| !bound[v as usize])
+        .map(|&v| index.name(v).to_owned())
+        .collect();
+    inputs.sort();
+
+    let later_definitions = index
+        .edges
+        .iter()
+        .filter(|e| e.step as usize >= target && is_definition(e.kind))
+        .filter_map(|e| {
+            let v = e.var.filter(|&v| in_set[v as usize])?;
+            Some(LaterDefinition {
+                step: index.steps[e.step as usize].path.clone(),
+                variable: index.name(v).to_owned(),
+                kind: e.kind,
+            })
+        })
+        .collect();
+
+    let unfollowed = index
+        .edges
+        .iter()
+        .filter(|e| e.kind == DefKind::Opaque && (e.step as usize) < target)
+        .filter_map(|e| {
+            let variables = names_in(index, &e.uses, &in_set);
+            (!variables.is_empty()).then(|| Unfollowed {
+                step: index.steps[e.step as usize].path.clone(),
+                reason: UnfollowedReason::OpaqueStatement,
+                variables,
+            })
+        })
+        .collect();
+
+    let reason = if feeding.variables.is_empty() {
+        format!("does not feed step {path}")
+    } else {
+        format!(
+            "does not feed {} in step {path}",
+            or_list(&feeding.variables)
+        )
+    };
+    let slice = Slice {
+        variables,
+        unfollowed,
+        rebound: rebound(index, &members),
+        inputs: Some(inputs),
+        later_definitions: Some(later_definitions),
+        ..Default::default()
+    };
+    Ok((
+        slice,
+        Selection {
+            kept,
+            edges,
+            reason,
+        },
+    ))
+}
+
+/// Slice variables `Let`-bound at more than one step, in `members` order.
+fn rebound(index: &SliceIndex, members: &[u32]) -> Vec<Rebound> {
+    members
+        .iter()
+        .filter_map(|&v| {
+            let mut steps: Vec<u32> = index
+                .edges
+                .iter()
+                .filter(|e| e.kind == DefKind::Let && e.var == Some(v))
+                .map(|e| e.step)
+                .collect();
+            steps.sort_unstable();
+            steps.dedup();
+            (steps.len() > 1).then(|| Rebound {
+                name: index.name(v).to_owned(),
+                steps: steps
+                    .iter()
+                    .map(|&s| index.steps[s as usize].path.clone())
+                    .collect(),
+            })
+        })
+        .collect()
 }
 
 /// `*a*`, `*a* or *b*`, `*a*, *b* or *c*`.
@@ -308,11 +603,11 @@ fn names_in(index: &SliceIndex, vars: &[u32], in_set: &[bool]) -> Vec<String> {
 }
 
 /// Forward slice (spec §6.3–6.5).
-fn forward(index: &SliceIndex, view: ViewRequest) -> Result<Slice, SliceError> {
+fn forward(index: &SliceIndex, involving: &[String]) -> Result<(Slice, Selection), SliceError> {
     let mut in_set = vec![false; index.vars.len()];
     let mut variables: Vec<SliceVariable> = Vec::new();
     let mut members: Vec<u32> = Vec::new();
-    for name in &view.involving {
+    for name in involving {
         let Some(v) = index.var(name) else {
             return Err(SliceError {
                 code: SliceErrorCode::UnknownVariable,
@@ -422,40 +717,19 @@ fn forward(index: &SliceIndex, view: ViewRequest) -> Result<Slice, SliceError> {
         }
     }
 
-    let rebound = members
-        .iter()
-        .filter_map(|&v| {
-            let mut steps: Vec<u32> = index
-                .edges
-                .iter()
-                .filter(|e| e.kind == DefKind::Let && e.var == Some(v))
-                .map(|e| e.step)
-                .collect();
-            steps.sort_unstable();
-            steps.dedup();
-            (steps.len() > 1).then(|| Rebound {
-                name: index.name(v).to_owned(),
-                steps: steps
-                    .iter()
-                    .map(|&s| index.steps[s as usize].path.clone())
-                    .collect(),
-            })
-        })
-        .collect();
-
-    let reason = format!("no use of {}", or_list(&view.involving));
-    let omitted = omitted_runs(index, &kept, &|_| (reason.clone(), 0));
-    Ok(Slice {
-        view,
+    let slice = Slice {
         variables,
-        steps: kept_steps(index, &kept),
-        omitted,
         stores,
         unfollowed,
-        rebound,
-        inputs: None,
-        later_definitions: None,
-    })
+        rebound: rebound(index, &members),
+        ..Default::default()
+    };
+    let selection = Selection {
+        kept,
+        edges: Vec::new(),
+        reason: format!("no use of {}", or_list(involving)),
+    };
+    Ok((slice, selection))
 }
 
 /// Keeps every not yet kept ancestor of a kept step as `Context`.
@@ -475,16 +749,17 @@ fn keep_context(index: &SliceIndex, kept: &mut [Option<StepRole>]) {
     }
 }
 
-fn kept_steps(index: &SliceIndex, kept: &[Option<StepRole>]) -> Vec<KeptStep> {
+fn kept_steps(index: &SliceIndex, sel: &Selection) -> Vec<KeptStep> {
     index
         .steps
         .iter()
-        .zip(kept)
-        .filter_map(|(step, role)| {
+        .zip(&sel.kept)
+        .enumerate()
+        .filter_map(|(i, (step, role))| {
             role.map(|role| KeptStep {
                 path: step.path.clone(),
                 role,
-                edges: Vec::new(),
+                edges: sel.edges.get(i).cloned().unwrap_or_default(),
             })
         })
         .collect()
@@ -505,9 +780,9 @@ fn subtree_sizes(index: &SliceIndex) -> Vec<u32> {
 fn omitted_runs(
     index: &SliceIndex,
     kept: &[Option<StepRole>],
+    size: &[u32],
     reason: &dyn Fn(&[usize]) -> (String, u32),
 ) -> Vec<OmittedRun> {
-    let size = subtree_sizes(index);
     let n = index.steps.len();
     // Slot 0 holds the root's children, slot i + 1 those of step i.
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); n + 1];
@@ -847,6 +1122,343 @@ mod tests {
             slice(&spaced, &involving(&["größe"])).unwrap().steps[0].path,
             "2"
         );
+    }
+
+    /// Backward-slice fixture after G3: definitions, stores into objects, a later definition.
+    fn navish() -> SliceIndex {
+        slice_index(
+            "navigate",
+            &[
+                ("1", &["documentResource"]),
+                ("2", &["initiator", "sourceDocument"]),
+                ("3", &["sourceDocument"]),
+                ("3.1", &["initiator", "navigable"]),
+                ("4", &["state", "referrerPolicy", "initiator"]),
+                ("4.1", &["state", "initiator"]),
+                ("5", &["entry", "url", "state"]),
+                ("6", &["navigable"]),
+                ("7", &["navigable", "entry", "historyHandling"]),
+                ("8", &["entry"]),
+                ("9", &["other"]),
+            ],
+            &[
+                ("2", DefKind::Let, Some("initiator"), &["sourceDocument"]),
+                ("3.1", DefKind::Set, Some("initiator"), &["navigable"]),
+                (
+                    "4",
+                    DefKind::Let,
+                    Some("state"),
+                    &["referrerPolicy", "initiator"],
+                ),
+                ("4", DefKind::Opaque, None, &["initiator"]),
+                ("4.1", DefKind::Store, Some("state"), &["initiator"]),
+                ("5", DefKind::Let, Some("entry"), &["url", "state"]),
+                ("6", DefKind::Store, Some("navigable"), &[]),
+                ("8", DefKind::Set, Some("entry"), &[]),
+            ],
+            &[],
+        )
+    }
+
+    fn feeding(text: &str) -> ViewRequest {
+        ViewRequest {
+            feeding: Some(FeedingSelector::parse(text).unwrap()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn backward_slice_follows_definitions_and_stores_before_the_target() {
+        let s = slice(&navish(), &feeding("7")).unwrap();
+        let vars: Vec<(&str, VarBasis, Option<&str>, Vec<String>)> = s
+            .variables
+            .iter()
+            .map(|v| (v.name.as_str(), v.basis, v.step.as_deref(), v.from.clone()))
+            .collect();
+        assert_eq!(
+            vars,
+            [
+                ("navigable", VarBasis::Seed, None, vec![]),
+                ("entry", VarBasis::Seed, None, vec![]),
+                ("historyHandling", VarBasis::Seed, None, vec![]),
+                (
+                    "state",
+                    VarBasis::Feeds,
+                    Some("5"),
+                    vec!["entry".to_string()]
+                ),
+                ("url", VarBasis::Feeds, Some("5"), vec!["entry".to_string()]),
+                (
+                    "initiator",
+                    VarBasis::Feeds,
+                    Some("4"),
+                    vec!["state".to_string()]
+                ),
+                (
+                    "referrerPolicy",
+                    VarBasis::Feeds,
+                    Some("4"),
+                    vec!["state".to_string()]
+                ),
+                (
+                    "sourceDocument",
+                    VarBasis::Feeds,
+                    Some("2"),
+                    vec!["initiator".to_string()]
+                ),
+            ]
+        );
+        let kept: Vec<(String, StepRole, Vec<DefKind>)> = s
+            .steps
+            .iter()
+            .map(|k| (k.path.clone(), k.role, k.edges.clone()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                ("2".into(), StepRole::Definition, vec![DefKind::Let]),
+                ("3".into(), StepRole::Context, vec![]),
+                ("3.1".into(), StepRole::Definition, vec![DefKind::Set]),
+                ("4".into(), StepRole::Definition, vec![DefKind::Let]),
+                ("4.1".into(), StepRole::Definition, vec![DefKind::Store]),
+                ("5".into(), StepRole::Definition, vec![DefKind::Let]),
+                ("6".into(), StepRole::Definition, vec![DefKind::Store]),
+                ("7".into(), StepRole::Target, vec![]),
+            ]
+        );
+        assert_eq!(runs(&s), [(None, "1", "1", 1), (None, "8", "9", 2)]);
+        assert_eq!(s.omitted[0].reason, "does not feed step 7");
+        assert_eq!(
+            s.inputs.as_deref().unwrap(),
+            [
+                "historyHandling",
+                "navigable",
+                "referrerPolicy",
+                "sourceDocument",
+                "url"
+            ]
+        );
+        assert_eq!(
+            s.later_definitions.as_deref().unwrap(),
+            [LaterDefinition {
+                step: "8".into(),
+                variable: "entry".into(),
+                kind: DefKind::Set
+            }]
+        );
+        assert_eq!(
+            s.unfollowed,
+            [Unfollowed {
+                step: "4".into(),
+                reason: UnfollowedReason::OpaqueStatement,
+                variables: vec!["initiator".into()]
+            }]
+        );
+        assert!(s.stores.is_empty());
+    }
+
+    #[test]
+    fn backward_slice_with_named_variables_and_errors() {
+        let index = navish();
+        let s = slice(&index, &feeding("7:historyHandling")).unwrap();
+        assert_eq!(roles(&s), [("7".to_string(), StepRole::Target)]);
+        assert_eq!(s.inputs.as_deref().unwrap(), ["historyHandling"]);
+        assert_eq!(runs(&s), [(None, "1", "6", 8), (None, "8", "9", 2)]);
+        assert_eq!(
+            s.omitted[0].reason,
+            "does not feed *historyHandling* in step 7"
+        );
+        let s = slice(&index, &feeding("7:entry,*navigable*")).unwrap();
+        assert_eq!(
+            s.omitted[0].reason,
+            "does not feed *entry* or *navigable* in step 7"
+        );
+        assert!(!s.variables.iter().any(|v| v.name == "historyHandling"));
+        for unmentioned in ["7:other", "7:url", "7:nope"] {
+            let e = slice(&index, &feeding(unmentioned)).unwrap_err();
+            assert_eq!(
+                (e.code, e.candidates.clone()),
+                (
+                    SliceErrorCode::InvalidSelector,
+                    vec!["navigable".into(), "entry".into(), "historyHandling".into()]
+                ),
+                "{unmentioned}"
+            );
+        }
+        let e = slice(&index, &feeding("3.4")).unwrap_err();
+        assert_eq!(e.code, SliceErrorCode::UnknownStep);
+        assert_eq!(
+            e.candidates,
+            ["1", "2", "3", "4", "5", "6", "7", "8", "9", "3.1"]
+        );
+    }
+
+    #[test]
+    fn steps_selector_keeps_subtrees_and_context() {
+        let index = navish();
+        let view = ViewRequest {
+            steps: vec!["3".into(), "4.1.".into()],
+            ..Default::default()
+        };
+        let s = slice(&index, &view).unwrap();
+        assert_eq!(s.view.steps, ["3", "4.1"]);
+        assert_eq!(
+            roles(&s),
+            [
+                ("3".to_string(), StepRole::Selected),
+                ("3.1".to_string(), StepRole::Selected),
+                ("4".to_string(), StepRole::Context),
+                ("4.1".to_string(), StepRole::Selected),
+            ]
+        );
+        assert_eq!(runs(&s), [(None, "1", "2", 2), (None, "5", "9", 5)]);
+        assert_eq!(s.omitted[0].reason, "outside 3, 4.1");
+        let e = slice(
+            &index,
+            &ViewRequest {
+                steps: vec!["12".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(e.code, SliceErrorCode::UnknownStep);
+    }
+
+    #[test]
+    fn depth_alone_and_under_a_slice() {
+        let index = navish();
+        let s = slice(
+            &index,
+            &ViewRequest {
+                depth: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(s.steps.len(), 9);
+        assert!(s.steps.iter().all(|k| k.role == StepRole::Selected));
+        assert_eq!(
+            runs(&s),
+            [(Some("3"), "3.1", "3.1", 1), (Some("4"), "4.1", "4.1", 1)]
+        );
+        assert!(s
+            .omitted
+            .iter()
+            .all(|r| r.reason == "below depth 1" && r.in_slice == 0));
+        let s = slice(
+            &index,
+            &ViewRequest {
+                depth: Some(1),
+                ..involving(&["initiator"])
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            roles(&s)
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .collect::<Vec<_>>(),
+            ["2", "3", "4", "5", "7", "8"]
+        );
+        let reasons: Vec<(&str, &str, u32)> = s
+            .omitted
+            .iter()
+            .map(|r| (r.first.as_str(), r.reason.as_str(), r.in_slice))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                ("1", "no use of *initiator*", 0),
+                ("3.1", "below depth 1, 1 in slice", 1),
+                ("4.1", "below depth 1, 1 in slice", 1),
+                ("6", "no use of *initiator*", 0),
+                ("9", "no use of *initiator*", 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn degenerate_views() {
+        let index = navish();
+        let s = slice(&index, &involving(&["documentResource"])).unwrap();
+        assert_eq!(roles(&s), [("1".to_string(), StepRole::Match)]);
+        assert_eq!(runs(&s), [(None, "2", "9", 10)]);
+        let s = slice(
+            &index,
+            &ViewRequest {
+                depth: Some(99),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!((s.steps.len(), s.omitted.len()), (11, 0));
+        let all = slice_index("go", &[("1", &["x"]), ("2", &["x"])], &[], &[]);
+        let s = slice(&all, &involving(&["x"])).unwrap();
+        assert!(s.omitted.is_empty());
+        let one = slice_index("go", &[("1", &["x"])], &[], &[]);
+        let s = slice(
+            &one,
+            &ViewRequest {
+                steps: vec!["1".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!((s.steps.len(), s.omitted.len()), (1, 0));
+        let bare = slice_index("go", &[("1", &[]), ("2", &["x"])], &[], &[]);
+        let s = slice(&bare, &feeding("1")).unwrap();
+        assert_eq!(roles(&s), [("1".to_string(), StepRole::Target)]);
+    }
+
+    #[test]
+    fn conservation_holds_for_every_view_kind() {
+        let index = navish();
+        let mut views = vec![
+            ViewRequest {
+                depth: Some(1),
+                ..Default::default()
+            },
+            ViewRequest {
+                depth: Some(2),
+                ..Default::default()
+            },
+        ];
+        for path in index.steps.iter().map(|s| s.path.clone()) {
+            views.push(ViewRequest {
+                feeding: Some(FeedingSelector {
+                    step: path.clone(),
+                    variables: vec![],
+                }),
+                ..Default::default()
+            });
+            views.push(ViewRequest {
+                steps: vec![path.clone()],
+                ..Default::default()
+            });
+        }
+        for name in &index.vars {
+            views.push(ViewRequest {
+                depth: Some(1),
+                ..involving(&[name.as_str()])
+            });
+        }
+        for view in views {
+            let s = slice(&index, &view).unwrap();
+            let omitted: u32 = s.omitted.iter().map(|r| r.steps).sum();
+            assert_eq!(s.steps.len() as u32 + omitted, 11, "{view:?}");
+            for k in &s.steps {
+                let i = index.step_by_path(&k.path).unwrap();
+                if let Some(p) = index.steps[i].parent {
+                    assert!(
+                        s.steps
+                            .iter()
+                            .any(|q| q.path == index.steps[p as usize].path),
+                        "context closure: {view:?} {}",
+                        k.path
+                    );
+                }
+            }
+        }
     }
 
     #[test]
