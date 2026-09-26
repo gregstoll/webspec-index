@@ -355,6 +355,14 @@ is reported under `Stored into object state, not followed` with the step, the ta
 slice variables in its value. The root variable does not join the slice. Use `--involving` from that
 root to follow it.
 
+Two alternative strategies are intentionally not used. **Co-mention** would include a step solely
+because it mentions a slice variable in a non-definition, non-match role alongside its own variables;
+this is omitted because it adds noise (every step that reads a slice variable would be kept, regardless
+of whether it contributes to the variable's definition chain). **Root taint** would add the root
+variable of a Store edge to the slice; this is omitted because propagating through object identity
+collapses unrelated fields — use a second `--involving` on the root variable to opt into that
+traversal explicitly.
+
 ### Backward slice: `--feeding STEP[:VAR,…]`
 
 Answers: "which earlier steps define the variables that step STEP uses?"
