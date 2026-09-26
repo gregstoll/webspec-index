@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {"name": "G3", "spec": "HTML", "anchor": "navigate", "view": {"feeding": {"step": "24.9.1"}},
+     "variable_set": ["navigable", "historyHandling", "userInvolvement", "historyEntry", "url", "documentState", "referrerPolicy", "initiatorOriginSnapshot", "documentResource", "initiatorBaseURLSnapshot", "sourceDocument"],
+     "kept": [["3","definition"],["4","definition"],["5","context"],["5.2","definition"],["6","context"],["6.3","definition"],["6.4","definition"],["13","context"],["13.1","definition"],["13.2","definition"],["14","definition"],["16","definition"],["24","context"],["24.4","definition"],["24.5","context"],["24.5.1","definition"],["24.5.2","definition"],["24.6","definition"],["24.9","context"],["24.9.1","target"]],
+     "omitted": [[null,"1","2",null],["5","5.1","5.1",1],["6","6.1","6.2",4],[null,"7","12",null],[null,"15","15",3],[null,"17","23",17],["24","24.1","24.3",5],["24","24.7","24.8",9]],
+     "inputs": ["documentResource", "navigable", "referrerPolicy", "sourceDocument", "url", "userInvolvement"],
+     "later_definitions": []},
+    {"name": "G4", "spec": "DOM", "anchor": "concept-node-insert", "view": {"involving": ["node"]},
+     "variables": ["node", "nodes", "count"],
+     "kept": [["1","match"],["2","match"],["3","match"],["4","match"],["4.1","inherited"],["4.2","match"],["5","context"],["5.1","match"],["5.2","match"],["7","match"],["7.1","match"],["7.2","match"],["7.3","match"],["7.4","match"],["7.6","match"],["7.7","match"],["8","match"],["11","match"],["11.1","match"],["12","match"]],
+     "omitted": [[null,"6","6",1],["7","7.5","7.5",1],["7.7","7.7.1","7.7.4",7],[null,"9","10",2]],
+     "stores": [["7.2","*parent*’s children",["node"]],["7.3","*parent*’s children",["node"]]],
+     "unfollowed_steps": [["7.7","loop_binding",["inclusiveDescendant"]],["11.1","loop_binding",["inclusiveDescendant"]]]},
+    {"name": "G5", "spec": "DOM", "anchor": "concept-node-insert", "view": {"involving": ["suppressObservers"]},
+     "variables": ["suppressObservers"], "kept": [["8","match"]]},
+    {"name": "G6", "spec": "HTML", "anchor": "navigate", "view": {"depth": 1},
+     "kept_count": 24, "all_reasons": "below depth 1"}
+  ]
+}
