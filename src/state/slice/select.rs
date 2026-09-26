@@ -102,6 +102,10 @@ pub struct OmittedRun {
     #[serde(skip_serializing_if = "is_zero")]
     pub in_slice: u32,
     pub reason: String,
+    /// Positions of the first and last step in `SliceIndex::steps`: paths repeat when a step holds
+    /// several lists, positions do not.
+    #[serde(skip)]
+    pub(crate) positions: (usize, usize),
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -797,7 +801,7 @@ fn omitted_runs(
             .and_then(|c| c.parse().ok())
             .unwrap_or(0)
     };
-    let mut runs: Vec<(usize, OmittedRun)> = Vec::new();
+    let mut runs: Vec<OmittedRun> = Vec::new();
     for parent in parents {
         let siblings = &children[parent.map_or(0, |p| p + 1)];
         // A sibling list after another in the same step numbers from 1 again; a run spanning both
@@ -810,21 +814,19 @@ fn omitted_runs(
                 continue;
             };
             let (text, in_slice) = reason(group);
-            runs.push((
-                first,
-                OmittedRun {
-                    parent: parent.map(|p| index.steps[p].path.clone()),
-                    first: index.steps[first].path.clone(),
-                    last: index.steps[last].path.clone(),
-                    steps: group.iter().map(|&g| size[g]).sum(),
-                    in_slice,
-                    reason: text,
-                },
-            ));
+            runs.push(OmittedRun {
+                parent: parent.map(|p| index.steps[p].path.clone()),
+                first: index.steps[first].path.clone(),
+                last: index.steps[last].path.clone(),
+                steps: group.iter().map(|&g| size[g]).sum(),
+                in_slice,
+                reason: text,
+                positions: (first, last),
+            });
         }
     }
-    runs.sort_by_key(|(first, _)| *first);
-    runs.into_iter().map(|(_, run)| run).collect()
+    runs.sort_by_key(|run| run.positions.0);
+    runs
 }
 
 #[cfg(test)]

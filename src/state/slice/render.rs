@@ -136,24 +136,13 @@ pub fn render_view(markdown: &str, index: &SliceIndex, slice: &Slice) -> Rendere
         return unaligned(items.len());
     }
 
-    // Runs come in document order, and a path can repeat (sibling lists in one step each count
-    // from 1), so each run is looked up after the previous one.
-    let find = |path: &str, from: usize| {
-        items[from..]
-            .iter()
-            .position(|item| item.path == path)
-            .map(|i| from + i)
-    };
+    // Aligned items and index steps correspond by position.
     let mut replacements: Vec<(usize, usize, String)> = Vec::with_capacity(slice.omitted.len());
-    let mut next = 0;
     for run in &slice.omitted {
-        let Some((first, last)) =
-            find(&run.first, next).and_then(|first| Some((first, find(&run.last, first)?)))
+        let (Some(first), Some(last)) = (items.get(run.positions.0), items.get(run.positions.1))
         else {
             return unaligned(items.len());
         };
-        next = last + 1;
-        let (first, last) = (&items[first], &items[last]);
         let start = line_start(markdown, first.start);
         // An item nested in a container may start inside the indentation before its list marker.
         let item = &markdown[first.start..];
@@ -306,6 +295,29 @@ mod tests {
     }
 
     #[test]
+    fn a_run_in_a_later_sibling_list_is_not_confused_with_a_kept_step() {
+        let md = "1. A:\n\n    1. B *x*.\n    2. C *x*.\n\n    Otherwise:\n\n    1. D.\n    2. E.\n\n2. F.\n";
+        let index = slice_index(
+            "go",
+            &[
+                ("1", &[]),
+                ("1.1", &["x"]),
+                ("1.2", &["x"]),
+                ("1.1", &[]),
+                ("1.2", &[]),
+                ("2", &[]),
+            ],
+            &[],
+            &[],
+        );
+        let view = render_view(md, &index, &slice(&index, &involving_x()).unwrap());
+        assert_eq!(
+            view.content,
+            "1. A:\n\n    1. B *x*.\n    2. C *x*.\n\n    Otherwise:\n\n    - [steps 1.1–1.2 omitted: no use of *x*]\n\n- [step 2 omitted: no use of *x*]\n"
+        );
+    }
+
+    #[test]
     fn misaligned_markdown_falls_back_to_full_content() {
         let md = "1. A *x*.\n2. B.\n3. C.\n4. Extra.\n";
         let index = slice_index("go", &[("1", &["x"]), ("2", &[]), ("3", &[])], &[], &[]);
@@ -325,6 +337,7 @@ mod tests {
             steps,
             in_slice: 0,
             reason: "no use of *x*".into(),
+            positions: (0, 0),
         };
         assert_eq!(
             marker_text(&run("15.2", "15.2", 1)),
