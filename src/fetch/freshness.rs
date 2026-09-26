@@ -18,6 +18,10 @@ pub(crate) struct Candidate {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub source_hash: Option<String>,
+    /// Whether [`FreshnessOptions::timeout`] caps the request. Only a
+    /// conditional check has a cached snapshot to fall back to; first-time
+    /// and forced downloads run to completion.
+    pub time_limited: bool,
 }
 
 #[derive(Debug)]
@@ -48,7 +52,7 @@ pub(crate) enum Freshness {
 
 #[derive(Debug, Clone)]
 pub struct FreshnessOptions {
-    /// Per request, body included.
+    /// Per time-limited request, body included.
     pub timeout: Duration,
     pub max_in_flight: usize,
     /// Serve `https://host/path` from `{origin}/host/path` instead (tests).
@@ -120,8 +124,10 @@ async fn check_one(candidate: &Candidate, options: &FreshnessOptions) -> Freshne
     let url = document_url(&candidate.base_url);
     let mut request = http_client()
         .get(effective_url(&url, options.origin.as_deref()))
-        .timeout(options.timeout)
         .header(reqwest::header::USER_AGENT, USER_AGENT);
+    if candidate.time_limited {
+        request = request.timeout(options.timeout);
+    }
     if let Some(etag) = &candidate.etag {
         request = request.header(IF_NONE_MATCH, etag);
     }
@@ -202,6 +208,7 @@ mod tests {
             etag: etag.map(Into::into),
             last_modified: None,
             source_hash: source_hash.map(Into::into),
+            time_limited: true,
         }
     }
 

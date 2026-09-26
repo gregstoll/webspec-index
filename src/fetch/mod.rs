@@ -435,7 +435,7 @@ fn document_url(base_url: &str) -> String {
 
 /// The freshness check for a spec. `conditional` sends the stored validators
 /// and source hash, so an unchanged source costs a `304` or a hash compare;
-/// without it the document is downloaded unconditionally.
+/// without it the document is downloaded unconditionally, with no time limit.
 fn candidate_for(
     spec_id: i64,
     spec_name: &str,
@@ -457,6 +457,7 @@ fn candidate_for(
         etag: validators.etag,
         last_modified: validators.last_modified,
         source_hash: validators.source_hash,
+        time_limited: conditional,
     }
 }
 
@@ -1990,5 +1991,51 @@ mod tests {
         let state = queries::get_update_check(&conn, dom).unwrap().unwrap();
         assert!(state.last_checked.timestamp() > 946_684_800);
         assert_eq!(state.etag.as_deref(), Some("\"d1\""));
+    }
+
+    #[tokio::test]
+    async fn only_conditional_checks_are_time_limited() {
+        let stub = testing::HttpStub::start();
+        let conn = db::open_test_db().unwrap();
+        let specs = vec![(
+            "DOM".to_string(),
+            "https://dom.spec.whatwg.org/".to_string(),
+            "whatwg".to_string(),
+        )];
+        stub.put(
+            "dom.spec.whatwg.org/",
+            "<h2 id=\"d\">D</h2>",
+            Some("\"d1\""),
+            None,
+        );
+        stub.delay(
+            "dom.spec.whatwg.org/",
+            std::time::Duration::from_millis(600),
+        );
+        let options = FreshnessOptions {
+            timeout: std::time::Duration::from_millis(200),
+            max_in_flight: 4,
+            origin: Some(stub.origin()),
+        };
+
+        let first = update_specs_with(&conn, &specs, false, false, &options).await;
+        assert!(matches!(first[0].1, Ok(Some(_))), "{:?}", first[0].1);
+        let forced = update_specs_with(&conn, &specs, true, true, &options).await;
+        assert!(matches!(forced[0].1, Ok(Some(_))), "{:?}", forced[0].1);
+
+        conn.execute(
+            "UPDATE update_checks SET last_checked = '2000-01-01T00:00:00+00:00'",
+            [],
+        )
+        .unwrap();
+        let checked = update_specs_with(&conn, &specs, false, false, &options).await;
+        assert!(matches!(checked[0].1, Ok(None)), "{:?}", checked[0].1);
+        let dom = write::insert_or_get_spec(&conn, "DOM", &specs[0].1, "whatwg").unwrap();
+        let state = queries::get_update_check(&conn, dom).unwrap().unwrap();
+        assert_eq!(
+            state.last_checked.timestamp(),
+            946_684_800,
+            "the timed-out check is not recorded"
+        );
     }
 }
