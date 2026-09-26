@@ -445,7 +445,7 @@ fn walk_for_partials(node: NodeRef<'_, Node>, buf: &mut String, out: &mut Vec<(S
 }
 
 /// Find the id of the nearest preceding `h2`–`h6` sibling.
-fn preceding_heading_id(el: &ElementRef<'_>) -> Option<String> {
+pub(crate) fn preceding_heading_id(el: &ElementRef<'_>) -> Option<String> {
     let mut sib = el.prev_sibling();
     while let Some(node) = sib {
         if let Some(sibling) = ElementRef::wrap(node) {

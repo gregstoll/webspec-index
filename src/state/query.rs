@@ -156,6 +156,8 @@ pub struct StatusCounts {
     pub unclassified: u32,
     pub possible_unlinked: u32,
     pub reads: u32,
+    #[serde(default)]
+    pub declared: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,7 +215,18 @@ pub struct StateFieldResult {
     pub possible_unlinked: Vec<SiteInfo>,
     /// Stage C: reflection and rule-declared writes.
     pub declared: Vec<SiteInfo>,
+    /// The content attribute an IDL attribute reflects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reflects: Option<ReflectsInfo>,
     pub status: StateStatus,
+}
+
+/// `content_attribute` is `SPEC#anchor`; `basis` is `[Reflect…]` or `prose`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectsInfo {
+    pub content_attribute: Option<String>,
+    pub name: String,
+    pub basis: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1174,15 +1187,18 @@ impl<'a> Scope<'a> {
             return Ok(StateResponse::Type(self.type_view(key)?));
         }
         let sites = self.sites_for_target(spec, anchor)?;
-        if !sites.is_empty() {
-            return Ok(StateResponse::Field(self.field_view(
+        let reflects = self.reflects(spec, anchor)?;
+        if !sites.is_empty() || reflects.is_some() {
+            let mut view = self.field_view(
                 spec,
                 anchor,
                 None,
                 None,
                 sites,
                 StateIssueCode::FieldNotDeclared,
-            )?));
+            )?;
+            view.reflects = reflects;
+            return Ok(StateResponse::Field(view));
         }
         let mut candidates = Vec::new();
         if let Some(title) = db::section_title(self.conn, &spec_ids, anchor)? {
@@ -1202,6 +1218,40 @@ impl<'a> Scope<'a> {
             ),
         )
         .with_candidates(candidates))
+    }
+
+    /// The content attribute `spec#anchor` reflects, from its `reflect` site.
+    fn reflects(&self, spec: &str, anchor: &str) -> anyhow::Result<Option<ReflectsInfo>> {
+        let subject = format!("{spec}#{anchor}");
+        let ids: Vec<i64> = self
+            .spec_ids(spec)
+            .into_iter()
+            .filter(|id| self.site_ids.contains(id))
+            .collect();
+        let stored = if ids.is_empty() {
+            Vec::new()
+        } else {
+            db::reflect_sites_for_subject(self.conn, &ids, &subject)?
+        };
+        let site = stored.into_iter().next().or_else(|| {
+            self.rule_sites
+                .iter()
+                .find(|site| {
+                    site.spec == spec
+                        && site.subject_anchor == subject
+                        && site.class == "declared"
+                        && site.op == "reflect"
+                })
+                .cloned()
+        });
+        Ok(site.map(|site| ReflectsInfo {
+            content_attribute: site
+                .target_spec
+                .zip(site.target_anchor)
+                .map(|(spec, anchor)| format!("{spec}#{anchor}")),
+            name: site.target_text,
+            basis: site.role.unwrap_or(site.basis),
+        }))
     }
 
     fn declared_field_view(
@@ -1257,6 +1307,7 @@ impl<'a> Scope<'a> {
             unclassified: groups.counts.unclassified,
             possible_unlinked: possible_count,
             reads,
+            declared: groups.declared_count,
         };
         Ok(StateFieldResult {
             field: info,
@@ -1273,6 +1324,7 @@ impl<'a> Scope<'a> {
             },
             possible_unlinked: possible,
             declared: groups.declared,
+            reflects: None,
             status: StateStatus::new(complete, issues, counts),
         })
     }
@@ -1484,6 +1536,7 @@ impl<'a> Scope<'a> {
                     unclassified: counts.unclassified,
                     possible_unlinked: 0,
                     reads,
+                    declared: 0,
                 },
             ),
         })
@@ -2123,6 +2176,30 @@ mod tests {
         assert_eq!(f.writes.len(), 1);
         assert_eq!(f.writes[0].text, "Set *x*'s reset to 1.");
         assert_eq!(f.status.coverage, Coverage::Partial);
+    }
+
+    #[test]
+    fn reflection_answers_on_content_and_idl_attribute_anchors() {
+        let conn = crate::state::testing::db_with(&[("HTML", crate::state::reflect::REFLECT_HTML)]);
+        let content = field(&conn, "HTML#attr-hyperlink-target");
+        assert!(content
+            .status
+            .issues
+            .contains(&StateIssueCode::FieldNotDeclared));
+        assert_eq!(content.declared.len(), 1);
+        assert_eq!(content.status.counts.declared, 1);
+        assert_eq!(content.declared[0].subject, "dom-a-target");
+        assert_eq!(content.declared[0].op, "reflect");
+        assert!(content.reflects.is_none());
+        let idl = field(&conn, "HTML#dom-a-target");
+        let reflects = idl.reflects.expect("reflects");
+        assert_eq!(reflects.name, "target");
+        assert_eq!(
+            reflects.content_attribute.as_deref(),
+            Some("HTML#attr-hyperlink-target")
+        );
+        assert_eq!(reflects.basis, "[Reflect]");
+        assert!(idl.declared.is_empty());
     }
 
     #[test]

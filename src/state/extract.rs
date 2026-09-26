@@ -17,9 +17,9 @@ use crate::state::ir::{
 };
 use crate::state::model::{
     CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
-    ReviewItem, Site, SiteClass, StateCatalog, StateSpec, TypeKey, TypeRef,
+    Reflection, ReviewItem, Site, SiteClass, StateCatalog, StateSpec, TypeKey, TypeRef,
 };
-use crate::state::{classify, prose, rules, types};
+use crate::state::{classify, prose, reflect, rules, types};
 
 /// Everything `extract_state` reads. The caller parses the document once and
 /// shares it with the section and structural extraction.
@@ -76,11 +76,13 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         &mut table,
         inputs.catalog,
     );
+    let reflections =
+        reflect::reflections(document, spec, base_url, inputs.idl_definitions, &table);
     let model = ObjectModel {
         types: table.types.into_values().collect(),
         fields: declared.fields,
         members: declared.members,
-        reflections: vec![],
+        reflections,
     };
 
     let (mut sources, mut branch_inits) = algorithm_sources(structure);
@@ -551,7 +553,42 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         ));
     }
     sites.extend(state.declared_sites.iter().cloned());
+    sites.extend(state.model.reflections.iter().filter_map(reflection_site));
     sites
+}
+
+/// The `Declared` reflect site of a reflection whose content attribute is known.
+fn reflection_site(reflection: &Reflection) -> Option<Site> {
+    let target = reflection.content_attribute.clone()?;
+    let subject = &reflection.idl_attribute;
+    Some(Site {
+        site_id: site_id(
+            &format!("{}#{}", subject.spec, subject.anchor),
+            &format!("{}#{}", target.spec, target.anchor),
+            SiteClass::Declared,
+        ),
+        class: SiteClass::Declared,
+        target: Some(target),
+        op: "reflect".to_string(),
+        subject: subject.clone(),
+        context: "reflection".to_string(),
+        role: Some(reflect::basis_label(&reflection.basis)),
+        constructed: None,
+        step_path: None,
+        step_id: None,
+        receiver: "this".to_string(),
+        target_text: reflection.content_attribute_name.clone(),
+        value_text: None,
+        text: format!(
+            "The {} IDL attribute reflects the {} content attribute.",
+            reflection.idl_attribute_name, reflection.content_attribute_name
+        ),
+        basis: "reflect".to_string(),
+        segment_id: None,
+        body_id: None,
+        span_start: None,
+        span_end: None,
+    })
 }
 
 /// A prose source's text from the start of its first statement's clause to

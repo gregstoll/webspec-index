@@ -830,6 +830,22 @@ pub fn sites_for_targets(
     Ok(out)
 }
 
+/// The `reflect` sites whose subject is `subject` (`SPEC#anchor`).
+pub fn reflect_sites_for_subject(
+    conn: &Connection,
+    snapshots: &[i64],
+    subject: &str,
+) -> Result<Vec<StoredSite>> {
+    let sql = format!(
+        "{SITE_SELECT} WHERE st.snapshot_id IN ({}) AND st.subject_anchor = ?1 \
+         AND st.class = 'declared' AND st.op = 'reflect' ORDER BY st.site_id",
+        id_list(snapshots)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([subject], stored_site)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Number of sites of one class and op targeting `spec#anchor`.
 #[derive(Debug, Clone)]
 pub struct SiteCount {

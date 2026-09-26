@@ -12,6 +12,7 @@ pub mod lookup;
 pub mod model;
 pub(crate) mod prose;
 pub mod query;
+pub(crate) mod reflect;
 pub mod render;
 pub(crate) mod rules;
 #[cfg(feature = "native")]

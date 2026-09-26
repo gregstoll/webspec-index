@@ -5,7 +5,7 @@ use std::fmt;
 pub use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
 pub use crate::state::catalog::StateCatalog;
 
-pub const STATE_VERSION: &str = "3";
+pub const STATE_VERSION: &str = "4";
 
 /// Canonical type identity. IDL types are keyed by IDL name, globally, so that
 /// `partial interface Document` in HTML and `interface Document` in DOM are one
@@ -253,6 +253,7 @@ pub enum Literal {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reflection {
     pub idl_attribute: AnchorTarget,
+    pub idl_attribute_name: String,
     pub content_attribute: Option<AnchorTarget>,
     pub content_attribute_name: String,
     pub basis: ReflectionBasis,

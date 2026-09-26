@@ -32,7 +32,21 @@ fn field(result: &StateFieldResult) -> String {
         .issues
         .contains(&StateIssueCode::FieldNotDeclared)
     {
-        out.push_str("- Not a declared field; sites target this anchor.\n");
+        match &result.reflects {
+            Some(reflects) => {
+                let _ = writeln!(
+                    out,
+                    "- Not a declared field.\n- Reflects: the `{}` content attribute ({}) — {}",
+                    reflects.name,
+                    reflects
+                        .content_attribute
+                        .as_deref()
+                        .unwrap_or("no content attribute definition"),
+                    reflects.basis
+                );
+            }
+            None => out.push_str("- Not a declared field; sites target this anchor.\n"),
+        }
     } else {
         let mut owner = format!(
             "- Owner: {}",
@@ -81,6 +95,14 @@ fn field(result: &StateFieldResult) -> String {
             "Possible unlinked writes",
             counts.possible_unlinked,
             &result.possible_unlinked,
+        );
+    }
+    if counts.declared > 0 {
+        site_group(
+            &mut out,
+            "Declared writes",
+            counts.declared,
+            &result.declared,
         );
     }
 
@@ -702,5 +724,24 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
             md.contains("- HTML#creating-a-new-browsing-context:1 — Let *document* be a new `Document`, with:\n  is initial `about:blank` → true\n"),
             "{md}"
         );
+    }
+
+    #[test]
+    fn reflection_lines() {
+        let conn = crate::state::testing::db_with(&[("HTML", crate::state::reflect::REFLECT_HTML)]);
+        let render = |selector: &str| {
+            response(&query(&conn, selector, &StateQueryOptions::default()).unwrap())
+        };
+        let md = render("HTML#attr-hyperlink-target");
+        assert!(
+            md.contains("### Declared writes (1)\n- HTML#dom-a-target — The target IDL attribute reflects the target content attribute.\n"),
+            "{md}"
+        );
+        let md = render("HTML#dom-a-target");
+        assert!(
+            md.contains("- Not a declared field.\n- Reflects: the `target` content attribute (HTML#attr-hyperlink-target) — [Reflect]\n"),
+            "{md}"
+        );
+        assert!(!md.contains("### Declared writes"), "{md}");
     }
 }
