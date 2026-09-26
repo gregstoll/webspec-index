@@ -541,6 +541,36 @@ enum Command {
         force_update: bool,
     },
 
+    /// Show which steps write a field, or the fields of a type
+    #[command(
+        long_about = "Show which algorithm steps and normative prose write a field,\n\
+        or list the fields of a type (with inherited fields).\n\n\
+        Selectors:\n  \
+        SPEC#anchor        field, set member or type anchor (a spec URL works too)\n  \
+        TYPE               IDL name or concept name, e.g. Document, navigable\n  \
+        TYPE.FIELD         field by name through inheritance, e.g. \"Element.node document\"\n  \
+        TYPE.GLOB          fields of TYPE by name or anchor, e.g. \"Document.*sandbox*\"\n  \
+        SPEC#GLOB          fields of a spec, e.g. \"HTML#*sandbox*\"\n\n\
+        Answers are may-semantics: a write site means the step may assign the field."
+    )]
+    State {
+        /// Field, type, or glob selector
+        selector: String,
+        #[arg(long, help = "Hide the initializations group")]
+        no_inits: bool,
+        #[arg(
+            long,
+            help = "List unclassified occurrences instead of only counting them"
+        )]
+        unclassified: bool,
+        #[arg(
+            long,
+            short,
+            help = "Sites per group (field view), fields (lists), or rows per table (type view)"
+        )]
+        limit: Option<u32>,
+    },
+
     /// Update specifications to latest versions
     #[command(long_about = "Update indexed specifications to latest versions.\n\n\
         Without --spec, updates all currently indexed specs. Uses a 24h\n\
@@ -1154,6 +1184,32 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 webspec_index::query_idl(&query, spec.as_deref(), limit, pr_opts.as_ref()).await?;
             print_output(&cli.format, &result, format::idl);
             Ok(ExitCode::SUCCESS)
+        }
+
+        Command::State {
+            selector,
+            no_inits,
+            unclassified,
+            limit,
+        } => {
+            let options = webspec_index::state::query::StateQueryOptions {
+                include_inits: !no_inits,
+                unclassified,
+                limit,
+            };
+            match webspec_index::state::service::state(&selector, &options).await? {
+                Ok(result) => {
+                    print_output(&cli.format, &result, webspec_index::state::render::response);
+                    Ok(ExitCode::SUCCESS)
+                }
+                Err(error) => {
+                    eprintln!("Error: {}", error.message);
+                    for candidate in &error.candidates {
+                        eprintln!("  {candidate}");
+                    }
+                    Ok(ExitCode::FAILURE)
+                }
+            }
         }
 
         Command::Update {

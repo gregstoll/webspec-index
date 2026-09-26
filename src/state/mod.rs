@@ -10,6 +10,9 @@ pub mod ir;
 pub mod lookup;
 pub mod model;
 pub mod query;
+pub mod render;
+#[cfg(feature = "native")]
+pub mod service;
 pub mod testing;
 pub(crate) mod typeexpr;
 pub(crate) mod types;

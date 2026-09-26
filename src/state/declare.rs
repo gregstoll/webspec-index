@@ -248,6 +248,26 @@ fn dfn_names(dfn: &ElementRef<'_>) -> (String, Vec<String>) {
     (name, names)
 }
 
+/// The dfn text with `<code>` runs in backticks, as markdown renders it.
+fn dfn_display_name(dfn: &ElementRef<'_>) -> String {
+    fn walk(node: ego_tree::NodeRef<'_, Node>, out: &mut String) {
+        match node.value() {
+            Node::Text(text) => out.push_str(text),
+            Node::Element(element) if element.name() == "code" => {
+                let code = ElementRef::wrap(node).map(|e| e.text().collect::<String>());
+                out.push('`');
+                out.push_str(code.as_deref().unwrap_or_default().trim());
+                out.push('`');
+            }
+            Node::Element(_) => node.children().for_each(|child| walk(child, out)),
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    dfn.children().for_each(|child| walk(child, &mut out));
+    norm(&out)
+}
+
 /// Concept dfns: `dfn[id]` without `data-dfn-type` or with `"dfn"`, not parameters, not in `<pre>`.
 pub(crate) fn concept_dfns(document: &Html) -> Vec<ConceptDfn> {
     static SEL: OnceLock<Selector> = OnceLock::new();
@@ -839,7 +859,8 @@ pub(crate) fn declare_fields(
             }
         };
 
-        let (name, names) = dfn_names(dfn);
+        let (_, names) = dfn_names(dfn);
+        let name = dfn_display_name(dfn);
         out.fields.push(FieldDef {
             anchor: AnchorTarget {
                 spec: spec.to_string(),
@@ -1028,6 +1049,8 @@ mod tests {
             f.declaration.as_ref().unwrap().section_anchor,
             "the-document-object"
         );
+        assert_eq!(f.name, "is initial `about:blank`");
+        assert_eq!(f.names, ["is initial about:blank"]);
     }
 
     #[test]

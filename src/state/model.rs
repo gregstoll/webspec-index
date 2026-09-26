@@ -4,7 +4,7 @@ use std::fmt;
 
 pub use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
 
-pub const STATE_VERSION: &str = "1";
+pub const STATE_VERSION: &str = "2";
 
 /// Canonical type identity. IDL types are keyed by IDL name, globally, so that
 /// `partial interface Document` in HTML and `interface Document` in DOM are one
@@ -115,7 +115,9 @@ pub enum SuperBasis {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldDef {
     pub anchor: AnchorTarget,
+    /// Display form: `<code>` runs in backticks.
     pub name: String,
+    /// Plain dfn text, then its `data-lt` alternatives.
     pub names: Vec<String>,
     pub owner: Owner,
     pub field_basis: FieldBasis,
