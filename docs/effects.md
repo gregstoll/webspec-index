@@ -49,6 +49,8 @@ webspec-index effects "HTML#navigate" --effect-id ef_7185cecba7f35a16 --max-dept
 
 Runtime YAML is maintained in a separate `webspec-semantics` package. The generated copy in `data/semantics` is embedded in the binary. Additional directories are merged with it using repeated `--rules PATH`; conflicting IDs and incompatible effect definitions are errors.
 
+State YAML lives under `state/` in the same package. A package is partitioned by its first path component: files under `state/` are loaded by the state layer, every other file by the effects loader. `--rules PATH` applies to both layers; a query-time `--rules` package passed to `state` may contain only `rules` (no `types` or `fields`). See [docs/state.md](state.md) for the state rule schema.
+
 This complete example adds a caller-scoped rule to the existing event vocabulary:
 
 ```yaml

@@ -52,6 +52,22 @@ for file in wsi.analyze("src/", recursive=True):
 section.to_dict()
 ```
 
+Field state (who writes a spec field):
+
+```python
+result = wsi.state("HTML#is-initial-about:blank")
+print(result["field"]["name"], result["status"]["coverage"])
+for site in result["writes"]:
+    print(site["subject"], site["step_path"], site["text"])
+
+coverage = wsi.state_coverage("HTML")
+print(coverage["counters"]["owner_resolved"], "/", coverage["counters"]["written_fields"])
+```
+
+`state(selector, include_inits=True, unclassified=False, limit=None)` accepts the same
+selectors as the CLI: `SPEC#anchor`, `TYPE`, `"TYPE.FIELD"`, `"TYPE.GLOB"`, or `"SPEC#GLOB"`.
+`state_coverage(spec)` returns the stored coverage counters for one spec.
+
 Possible specification effects use dedicated, versioned request dictionaries;
 the existing `query()` result remains unchanged:
 

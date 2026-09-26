@@ -62,6 +62,9 @@ The tool proves a route exists in the reference graph. It cannot know your scena
 route whether it is taken, from what each hop already carries:
 
 - **Guards.** Does a `- under:` condition contradict a scenario fact? That kills the route.
+  When a guard reads a field ("If *document*'s is initial `about:blank` is true"), run
+  `webspec-index state '<SPEC#field>'` to list who sets it before the guard runs. A guard
+  whose field is only set in an initialization never fires after construction.
 - **Arguments.** Does the step pass, or omit, an optional argument the callee branches on? An
   omitted argument frequently disables the branch the whole question turns on.
 - **Ordering.** Compare step numbers within a section. A call at step 20 runs before one at step 24,

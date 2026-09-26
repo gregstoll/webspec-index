@@ -63,6 +63,11 @@ webspec-index idl "HTML#dom-window-navigation"
 webspec-index idl "Window.navigation"
 webspec-index idl "Window.open()" --spec HTML
 
+# Query field state: who writes a field, and under what shape
+webspec-index state HTML#is-initial-about:blank --format markdown
+webspec-index state "Document.*sandbox*"
+webspec-index state Document
+
 # Query text with compact possible-effect summaries (default: up to 12 groups)
 webspec-index query "HTML#navigate"
 webspec-index query "HTML#navigate" --effects cached
@@ -92,7 +97,7 @@ webspec-index effects "HTML#navigate" --summary-only
 webspec-index effects --all
 webspec-index effects --all --rebuild
 
-# Export a chunked read-only database for the web UI
+# Export a chunked read-only database for the web UI (state tables included)
 webspec-index export-web --out DIR                      # all providers
 webspec-index export-web --out DIR --specs html,dom     # only HTML and DOM
 
@@ -221,6 +226,7 @@ See [editors/vscode/](editors/vscode/) and [editors/zed/](editors/zed/) for deta
 3. **Indexes** in SQLite with FTS5 for fast full-text search
 4. **Refreshes snapshots** on a 24h cadence with content-hash change detection
 5. **PR previews** fetch the PR build and its merge base (WHATWG: rendered pages from whatpr.org + commit-snapshots; TC39 proposals: committed `index.html` from the head/base repos via the GitHub API), storing both as separate snapshots for querying and diffing
+6. **State layer** — at index time, builds an object model (types, fields, owners, member sets) from structural declarations and a statement IR from algorithm step text, then joins them across specs at query time to list who writes each field
 
 ## Development
 

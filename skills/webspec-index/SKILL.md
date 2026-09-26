@@ -190,6 +190,26 @@ webspec-index idl 'navigation' --spec HTML --limit 5
 Queries structured WebIDL definitions directly. Supports exact anchors (`SPEC#anchor` or URL) and canonical names (`Interface.member`, `Interface.method()`).
 Use this first when the task is about API shape or IDL ownership, then use `refs` to see algorithm usage.
 
+### Query field state (who writes a field)
+
+```bash
+webspec-index state 'HTML#is-initial-about:blank' --format markdown
+webspec-index state 'Document' --format markdown
+webspec-index state 'Document.*sandbox*' --format markdown
+webspec-index state 'SPEC#anchor' | --coverage SPEC [--no-inits] [--unclassified] [-l N] [--rules PATH] [--format json|markdown]
+```
+
+Answers: who writes a spec field, under what grammar shape, and with what initial value.
+Answers use **may-semantics** — a listed site may set the field. Reads are counted, not listed.
+
+Selector forms:
+- `SPEC#anchor` of a field → field view (writes, inits, owner, type)
+- `SPEC#anchor` of a type → type view (all fields, tables per supertype)
+- `TYPE` (e.g. `Document`) → type view
+- `"TYPE.FIELD"` (e.g. `"Element.node document"`) → field view with inheritance path
+- `"TYPE.GLOB"` (e.g. `"Document.*sandbox*"`) → field list matching name or anchor
+- `--coverage SPEC` → coverage counters (owner resolution %, set structure %, unclassified %)
+
 ## Usage patterns for Gecko development
 
 ### Understanding what you're implementing
