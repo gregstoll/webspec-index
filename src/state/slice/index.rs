@@ -1,6 +1,6 @@
 use crate::parse::steps::{
     InlineToken, InlineTokenKind, LinkSpan, StructuralAlgorithm, StructuralBranch,
-    StructuralSegment, StructuralSpec,
+    StructuralSegment, StructuralSpec, TextSpan,
 };
 use crate::state::ir::{
     Expr, Hop, Path, Root, SourceContext, Statement, StatementKind, StatementSource,
@@ -284,7 +284,13 @@ fn build_one<'a, 's>(
         };
         match &placed.statement.kind {
             StatementKind::Let { var, value } => {
-                let names = value_vars(value, source);
+                // The value parse can stop early ("a new T created in *realm*") or skip link text,
+                // so every other variable the statement mentions is a use too.
+                let mut names = value_vars(value, source);
+                names.extend(
+                    in_span(&source.tokens, &source.links, &placed.statement.span)
+                        .filter(|name| name != var),
+                );
                 edges.push(edge(DefKind::Let, Some(var), uses_of(names), None));
             }
             StatementKind::Set { targets, value, .. } => {
@@ -320,11 +326,8 @@ fn build_one<'a, 's>(
             }
             StatementKind::Init { .. } => {}
             StatementKind::Opaque { .. } => {
-                let span = &placed.statement.span;
-                let names = mentioned(&source.tokens, &source.links)
-                    .filter(|token| span.start <= token.span.start && token.span.end <= span.end)
-                    .map(|token| token.source_text.as_str())
-                    .collect();
+                let names =
+                    in_span(&source.tokens, &source.links, &placed.statement.span).collect();
                 edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
             }
         }
@@ -452,6 +455,17 @@ fn mentioned<'a>(
     tokens.iter().filter(move |token| {
         token.kind == InlineTokenKind::Variable && links.iter().all(|link| link.span != token.span)
     })
+}
+
+/// Names of the variables mentioned inside `span`.
+fn in_span<'a>(
+    tokens: &'a [InlineToken],
+    links: &'a [LinkSpan],
+    span: &'a TextSpan,
+) -> impl Iterator<Item = &'a str> {
+    mentioned(tokens, links)
+        .filter(|token| span.start <= token.span.start && token.span.end <= span.end)
+        .map(|token| token.source_text.as_str())
 }
 
 /// Start of the `For each` clause that `token` is the loop variable of: the token is followed by
@@ -781,6 +795,29 @@ mod tests {
         let mut u = used(&index, &e);
         u.sort();
         assert_eq!(u, ["bar", "foo"]);
+    }
+
+    #[test]
+    fn variables_the_let_value_does_not_parse_are_uses() {
+        let index = one(
+            r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given <var>realm</var>, <var>type</var>, <var>month</var> and <var>source</var>:</p><ol>
+<li><p>Let <var>a</var> be a new <a href="#t">thing</a> object created in <var>realm</var>.</p></li>
+<li><p>Let <var>b</var> be a new <a href="#t">thing</a> object with its <a href="#f">f</a> set to <var>type</var>.</p></li>
+<li><p>Let <var>c</var> be the <a href="#days">number of days in month <var>month</var></a>.</p></li>
+<li><p>Let <var>d</var> be "x" if <var>source</var> is "list"; otherwise "y".</p></li>
+<li><p>Return <var>a</var>, <var>b</var>, <var>c</var> and <var>d</var>.</p></li></ol></div>
+<p><dfn id="t">thing</dfn> <dfn id="f">f</dfn> <dfn id="days">days</dfn></p>"##,
+        );
+        for (step, var, from) in [
+            ("1", "a", "realm"),
+            ("2", "b", "type"),
+            ("3", "c", "month"),
+            ("4", "d", "source"),
+        ] {
+            let e = edge(&index, step, DefKind::Let);
+            assert_eq!(index.name(e.var.unwrap()), var);
+            assert_eq!(used(&index, &e), [from], "step {step}");
+        }
     }
 
     #[test]
