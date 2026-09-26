@@ -790,10 +790,22 @@ fn omitted_runs(
         children[step.parent.map_or(0, |p| p as usize + 1)].push(i);
     }
     let parents = std::iter::once(None).chain((0..n).filter(|&i| kept[i].is_some()).map(Some));
+    let ordinal = |step: usize| -> u32 {
+        let path = &index.steps[step].path;
+        path.rsplit('.')
+            .next()
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0)
+    };
     let mut runs: Vec<(usize, OmittedRun)> = Vec::new();
     for parent in parents {
         let siblings = &children[parent.map_or(0, |p| p + 1)];
-        for group in siblings.split(|&child| kept[child].is_some()) {
+        // A sibling list after another in the same step numbers from 1 again; a run spanning both
+        // would have ambiguous first and last paths, so runs end at the restart.
+        let groups = siblings
+            .split(|&child| kept[child].is_some())
+            .flat_map(|group| group.chunk_by(|&a, &b| ordinal(a) < ordinal(b)));
+        for group in groups {
             let (Some(&first), Some(&last)) = (group.first(), group.last()) else {
                 continue;
             };
@@ -848,6 +860,29 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn runs_end_where_a_sibling_list_restarts_its_numbering() {
+        let index = slice_index(
+            "go",
+            &[
+                ("1", &[]),
+                ("1.1", &["x"]),
+                ("1.2", &[]),
+                ("1.3", &[]),
+                ("1.1", &[]),
+                ("1.2", &[]),
+                ("2", &["x"]),
+            ],
+            &[],
+            &[],
+        );
+        let s = slice(&index, &involving(&["x"])).unwrap();
+        assert_eq!(
+            runs(&s),
+            [(Some("1"), "1.2", "1.3", 2), (Some("1"), "1.1", "1.2", 2)]
+        );
     }
 
     #[test]
