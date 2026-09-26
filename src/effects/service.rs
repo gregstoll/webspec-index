@@ -797,8 +797,12 @@ fn publish_once(
                 .map(|key| (key.as_str(), fragment.spec.as_str()))
         })
         .collect();
+    // Populate sites from ALL current fragments (built + fresh). This ensures
+    // that when a spec is re-parsed and its fragment is rebuilt inline (before
+    // publish is called), its site partition is updated to reflect the new
+    // fragment content even though stale_entries considers it fresh.
     let mut sites = BTreeMap::new();
-    for (_, fragment) in &built {
+    for fragment in &fragments {
         sites.extend(fragment.sites.iter().map(|(k, s)| (k.clone(), s.clone())));
     }
     for (key, site) in &graph.sites {
@@ -806,7 +810,9 @@ fn publish_once(
             sites.insert(key.clone(), site.clone());
         }
     }
-    let mut partitions: Vec<String> = built.iter().map(|(entry, _)| entry.spec.clone()).collect();
+    // Include all fragment specs in the partition list so their site partitions
+    // are replaced with current content.
+    let mut partitions: Vec<String> = fragments.iter().map(|f| f.spec.clone()).collect();
     partitions.push(LINK_PARTITION.into());
     let indexed: HashSet<&str> = entries.iter().map(|entry| entry.spec.as_str()).collect();
     partitions.extend(

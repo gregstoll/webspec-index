@@ -754,4 +754,23 @@ mod tests {
         assert_eq!(report.effects, EffectsOutcome::LockTimeout);
         assert!(report.parsed.is_empty(), "the cached snapshot is served");
     }
+
+    #[tokio::test]
+    async fn always_refresh_stores_effect_sites_for_inline_built_fragments() {
+        // Regression test: when fragments are pre-built inline during parsing
+        // (EffectsRefresh::Always → FragmentContext is Some), the subsequent
+        // publish(Incremental) saw stale=[] and skipped storing sites because
+        // sites were only taken from the (empty) `built` list. Verify that
+        // effect_sites is non-empty after an Always refresh of a corpus that
+        // contains cross-spec links.
+        let (dir, _stub) = indexed_corpus_with_stub(&MULTI).await;
+        let conn = open(&dir);
+        let site_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM effect_sites", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            site_count > 0,
+            "EffectsRefresh::Always must store effect_sites, got 0"
+        );
+    }
 }
