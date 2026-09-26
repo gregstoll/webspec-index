@@ -43,7 +43,7 @@ webspec-index effects "HTML#navigate" --effect-id ef_7185cecba7f35a16 --max-dept
 
 “Continue the remaining steps in the current flow” describes one continuation edge, not the timing of the entire algorithm. Separately scheduled bodies are labeled at the boundary. All paths remain possible paths with unchecked feasibility.
 
-`query --effects cached` returns only valid stored analysis. `query --effects off` preserves the original query shape. An ordinary cache miss analyzes the indexed inputs and publishes reusable summaries. `update` refreshes effects and prepares representative paths after its indexing batch; `update --effects off` skips that work. Missing dependencies are reported, without recursively fetching them.
+`query --effects cached` returns only valid stored analysis. `query --effects off` preserves the original query shape. When a spec's content changed since the last publication, an ordinary query rebuilds effects inline within a time budget (default 5 s, overridden by `WEBSPEC_EFFECTS_INLINE_BUDGET_MS`). If the rebuild exceeds the budget or another rebuild is running, the result carries `effects.Unavailable` with `snapshot_changed: true` and a note to run `webspec-index effects --all`. `update` refreshes effects and prepares representative paths after its indexing batch; `update --effects off` skips that work. Missing dependencies are reported, without recursively fetching them.
 
 ## Rules
 
@@ -105,7 +105,7 @@ Rust exposes `effects::{get_effect_summary, explain_effects, recompute_effects}`
 
 Definition-only bodies have separate summaries and do not affect the defining step until invoked. Unsupported structures, unresolved calls and incomplete inputs remain explicit issues. PR effects, path-feasibility proofs, must-run-before assertions, and general validation of spec assertions are outside this release. Witness context is bounded and descriptive.
 
-The [effects benchmark](../examples/benchmark_effects.rs) measures a supplied corpus without fetching specifications or changing the normal index. The [path benchmark](../examples/benchmark_effect_paths.rs) measures explanation of a saved analysis artifact. Warm queries read materialized summaries; they do not parse source HTML, scan regex rules, or propagate the graph.
+The [effects benchmark](../examples/benchmark_effects.rs) measures a supplied corpus without fetching specifications or changing the normal index. The [path benchmark](../examples/benchmark_effect_paths.rs) measures explanation of a saved analysis artifact. Warm queries read materialized summaries; they do not parse source HTML, scan regex rules, or propagate the graph. `scripts/bench.py` covers the full incremental path: a first query after an HTML change (inline re-parse and rebuild), the subsequent cached query (≤20 ms), `effects --all` over the changed corpus (≤2.5 s / 500 MB), and `effects --all --rebuild` from scratch (≤5 s / 1 GB).
 
 Scheduling labels retain HTML terminology: “queue a task,” “queue a microtask,” and “enqueue steps on the session history traversal queue.” The compact machine key `queue: traversal` remains stable; it is expanded for human-facing output rather than displayed as an unexplained queue name.
 

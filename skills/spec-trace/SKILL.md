@@ -142,6 +142,15 @@ searchfox-cli --spec-refs '<url>'
 - Discard matches under `.claude/skills/` and `.agents/skills/`. In-tree skill documentation quotes
   spec URLs in its examples and is indexed as code, in both copies.
 
+## Effects data may be temporarily unavailable
+
+`query` output includes an `effects` field. When that field carries
+`"status": "Unavailable"` with `"snapshot_changed": true`, the spec's HTML was
+updated since effects were last built and the inline rebuild did not complete in
+time. The data is not wrong — it is absent. Run `webspec-index effects --all` to
+rebuild; subsequent queries serve fresh summaries. This state is transient and
+does not affect anchors, cross-references, or any non-effects output.
+
 ## Hard rules
 
 **Every quote comes from tool output.** `trace` and `refs` emit plain step text; use it as given.

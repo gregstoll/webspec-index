@@ -163,7 +163,7 @@ webspec-index update --force
 ```
 
 Fetches latest spec versions. Uses 24h cache unless `--force` is given. Specs are auto-fetched on first query, so you rarely need this.
-Specs are checked on a 24h cadence; re-indexing happens only when fetched HTML content changed.
+Each check covers the spec and its transitive dependencies; re-indexing happens only when HTML content changed. The first query of the day may take a few seconds while the check completes.
 
 ### Graph traversal
 

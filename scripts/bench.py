@@ -10,9 +10,7 @@ JSON result and a markdown table.
     python3 scripts/bench.py --skip-indexing    # runtime lookups only
     python3 scripts/bench.py --only query       # workloads whose name contains "query"
     python3 scripts/bench.py --full             # adds a one-shot reparse of every cached spec
-
-Indexing workloads rewrite the copy, so they run after the runtime ones and
-every invocation starts from a fresh copy unless --reuse-db is given.
+    python3 scripts/bench.py --network          # adds real conditional-GET batch (network access)
 
 Isolation:
   * The source database is copied with SQLite's online backup API (read-only
@@ -25,6 +23,10 @@ Isolation:
   * Every process runs under `unshare -rn` (no network namespace) when the
     kernel allows it; a workload that tries the network fails instead of
     silently timing a download.
+  * query-change workloads use a private html/ directory with a deterministically
+    edited copy of the HTML spec, served by a local HTTP stub that honours
+    If-None-Match. WEBSPEC_FETCH_ORIGIN points child processes at the stub.
+    The network guard is omitted for these workloads so they can reach localhost.
 
 Only the Python standard library is used. Per-run wall time is measured
 around spawn + wait; user/sys CPU come from wait4(2), peak RSS from GNU time
@@ -36,31 +38,96 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.server
 import json
 import math
 import os
 import platform
 import shutil
+import socket
 import sqlite3
 import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
+_STUB_ETAG = '"bench-1"'
+_STUB_HTML_PATH = "/html.spec.whatwg.org/"
+
+
+class _StubHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if self.path == _STUB_HTML_PATH:
+            if self.headers.get("If-None-Match", "") == _STUB_ETAG:
+                self.send_response(304)
+                self.send_header("ETag", _STUB_ETAG)
+                self.end_headers()
+            else:
+                body: bytes = self.server.html_body  # type: ignore[attr-defined]
+                self.send_response(200)
+                self.send_header("ETag", _STUB_ETAG)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        pass
+
+
+class StubServer:
+    """Local HTTP server that serves a deterministically edited HTML spec.
+
+    The served content is the cached HTML file with ``<!-- bench-edit -->``
+    appended, so it has a different content hash than what is stored in the
+    bench DB. ``WEBSPEC_FETCH_ORIGIN`` set to :attr:`origin` routes the binary's
+    fetch requests here instead of to the real spec host.
+    """
+
+    def __init__(self, html_dir: Path) -> None:
+        html_spec_dir = html_dir / "HTML"
+        html_files = list(html_spec_dir.glob("*.html"))
+        if not html_files:
+            raise FileNotFoundError(f"no cached HTML spec at {html_spec_dir}")
+        original = html_files[0].read_bytes()
+        body = original + b"\n<!-- bench-edit -->\n"
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _StubHandler)
+        srv.html_body = body  # type: ignore[attr-defined]
+        self._server = srv
+        self._port: int = srv.server_address[1]
+        self._thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def origin(self) -> str:
+        return f"http://127.0.0.1:{self._port}"
+
+    def stop(self) -> None:
+        self._server.shutdown()
+
 
 @dataclass
 class Workload:
     name: str
     args: list[str]
-    group: str  # "startup", "runtime" or "indexing"
+    group: str  # "startup", "runtime", "indexing", "indexing-full", "query-change", "network"
     runs: int | None = None
     warmup: int | None = None
     note: str = ""
+    fresh_db: bool = False    # copy source DB fresh before each run (not shared with other runs)
+    clear_memo: bool = False  # delete from markdown_memo before timing (implies fresh_db)
+    no_guard: bool = False    # skip the network guard (needed for stub workloads)
+    network_only: bool = False  # only run when --network is given
 
 
 WORKLOADS = [
@@ -95,9 +162,31 @@ WORKLOADS = [
     Workload("reparse-dom", ["reparse", "-s", "DOM", "--effects", "off"], "indexing"),
     Workload("reparse-html", ["reparse", "-s", "HTML", "--effects", "off"], "indexing"),
     Workload("effects-all", ["effects", "--all"], "indexing",
-             note="the effects graph build that `update`/`reparse` run after parsing"),
+             note="incremental effects build run by `update`/`reparse`"),
+    Workload("effects-all-full", ["effects", "--all", "--rebuild"], "indexing",
+             note="full effects rebuild from scratch (≤5 s / 1 GB gate)"),
+    Workload("reparse-html-memo-hit", ["reparse", "-s", "HTML", "--effects", "off"], "indexing",
+             runs=3, warmup=1, fresh_db=True,
+             note="re-parse HTML from cache with markdown memo hits (≤2.5 s gate)"),
+    Workload("reparse-html-cold", ["reparse", "-s", "HTML", "--effects", "off"], "indexing",
+             runs=3, warmup=1, fresh_db=True, clear_memo=True,
+             note="re-parse HTML from cache with cold memo"),
     Workload("reparse-all", ["reparse", "--effects", "off"], "indexing-full", runs=1, warmup=0,
-             note="every cached spec; only with --full"),
+             note="every cached spec in parallel; only with --full"),
+    Workload("query-after-html-change", ["query", "HTML#navigate"], "query-change",
+             runs=3, warmup=1, no_guard=True,
+             note="first query after HTML changed; triggers freshness check, re-parse and "
+                  "inline effects rebuild (≤4.5 s gate excluding network)"),
+    Workload("query-after-html-change-2nd", ["query", "HTML#navigate"], "query-change",
+             runs=3, warmup=0, no_guard=True,
+             note="second query after HTML changed; served from the new publication (≤20 ms gate)"),
+    Workload("effects-incremental-html", ["effects", "--all"], "query-change",
+             runs=3, warmup=1, no_guard=True,
+             note="incremental effects after HTML spec changed (≤2.5 s / 500 MB gate)"),
+    Workload("update-all-network", ["update", "--effects", "off"], "network",
+             runs=1, warmup=0, no_guard=True, fresh_db=True, network_only=True,
+             note="real conditional-GET freshness batch for all indexed specs; "
+                  "stale last_checked triggers one check per spec; opt-in with --network"),
 ]
 
 
@@ -249,6 +338,53 @@ def prepare_db(source: Path, work_dir: Path) -> Path:
     return target
 
 
+def prepare_stub_db(source: Path, work_dir: Path) -> Path:
+    """Like prepare_db, but sets last_checked stale for the HTML spec.
+
+    The returned DB, combined with WEBSPEC_FETCH_ORIGIN pointing at a
+    :class:`StubServer`, causes a query for an HTML anchor to trigger a
+    freshness check, download the (deterministically edited) stub HTML, and
+    re-parse and rebuild effects inline.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    target = work_dir / "index.db"
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        Path(f"{target}{suffix}").unlink(missing_ok=True)
+    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    dst = sqlite3.connect(target)
+    try:
+        src.backup(dst)
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        stale = "1970-01-01T00:00:00+00:00"
+        dst.execute("UPDATE update_checks SET last_checked = ?", (now,))
+        html_id = dst.execute(
+            "SELECT id FROM specs WHERE name = 'HTML'"
+        ).fetchone()
+        if html_id:
+            dst.execute(
+                "UPDATE update_checks SET last_checked = ? WHERE spec_id = ?",
+                (stale, html_id[0]),
+            )
+        dst.commit()
+    finally:
+        dst.close()
+        src.close()
+    html = work_dir / "html"
+    if html.is_symlink() or html.exists():
+        html.unlink()
+    html.symlink_to(source.parent / "html")
+    return target
+
+
+def clear_memo_table(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM markdown_memo")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def network_guard() -> list[str]:
     unshare = shutil.which("unshare")
     if unshare and subprocess.run([unshare, "-rn", "true"], capture_output=True).returncode == 0:
@@ -313,6 +449,8 @@ def main() -> int:
     p.add_argument("--skip-runtime", action="store_true")
     p.add_argument("--full", action="store_true",
                    help="also time a reparse of every cached spec (one run, minutes)")
+    p.add_argument("--network", action="store_true",
+                   help="include the real conditional-GET batch workload (hits the network)")
     p.add_argument("--reuse-db", action="store_true",
                    help="reuse the existing copy in --work-dir instead of taking a fresh one")
     args = p.parse_args()
@@ -339,6 +477,8 @@ def main() -> int:
         and not (args.skip_indexing and w.group.startswith("indexing"))
         and (args.full or w.group != "indexing-full")
         and not (args.skip_runtime and w.group in ("runtime", "startup"))
+        and (args.network or not w.network_only)
+        and not (args.skip_indexing and w.group == "query-change")
     ]
 
     if args.reuse_db and (args.work_dir / "index.db").exists():
@@ -347,30 +487,85 @@ def main() -> int:
         print(f"copying {source} -> {args.work_dir}/index.db", file=sys.stderr)
         db_path = prepare_db(source, args.work_dir)
 
-    env = dict(os.environ, SPEC_INDEX_TEST_DB=str(db_path), MOZTOOLS_UPDATE_CHECK="0")
+    base_env = dict(os.environ, SPEC_INDEX_TEST_DB=str(db_path), MOZTOOLS_UPDATE_CHECK="0")
     guard = network_guard()
     if not guard:
         print("warning: unshare -rn unavailable; running without a network guard", file=sys.stderr)
 
+    stub_workloads = [w for w in workloads if w.group == "query-change"]
+    normal_workloads = [w for w in workloads if w.group != "query-change"]
+
     results = []
-    with tempfile.TemporaryDirectory() as tmp:
-        for w in workloads:
-            indexing = w.group.startswith("indexing")
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+
+        for w in normal_workloads:
+            indexing = w.group.startswith("indexing") or w.group == "network"
             runs = w.runs or (args.indexing_runs if indexing else args.runs)
             warmup = w.warmup if w.warmup is not None else (
                 args.indexing_warmup if indexing else args.warmup)
-            cmd = guard + [str(binary)] + w.args
+            cmd_guard = [] if w.no_guard else guard
             res = Result(w)
+            fresh_dir = args.work_dir / f"fresh-{w.name}"
             for i in range(warmup + runs):
-                s = run_once(cmd, env, Path(tmp))
+                if w.fresh_db or w.clear_memo:
+                    cur_db = prepare_db(source, fresh_dir)
+                    if w.clear_memo:
+                        clear_memo_table(cur_db)
+                    run_env = dict(os.environ, SPEC_INDEX_TEST_DB=str(cur_db),
+                                   MOZTOOLS_UPDATE_CHECK="0")
+                else:
+                    run_env = base_env
+                cmd = cmd_guard + [str(binary)] + w.args
+                s = run_once(cmd, run_env, tmp)
                 if i >= warmup:
                     res.samples.append(s)
             st = res.stats()
             results.append(st)
-            print(f"{w.name:32} median {fmt_ms(st['wall_ms']['median']):>10}  "
+            print(f"{w.name:40} median {fmt_ms(st['wall_ms']['median']):>10}  "
                   f"p95 {fmt_ms(st['wall_ms']['p95']):>10}  rss {st['maxrss_kb_max'] / 1024:.0f} MB"
                   + ("" if st["exit_codes"] == [0] else f"  EXIT {st['exit_codes']}"),
                   file=sys.stderr)
+
+        if stub_workloads:
+            source_html = source.parent / "html"
+            try:
+                stub = StubServer(source_html)
+            except FileNotFoundError as exc:
+                print(f"warning: skipping query-change workloads: {exc}", file=sys.stderr)
+                stub = None
+            if stub is not None:
+                stub_chain_warmup = max(
+                    (w.warmup if w.warmup is not None else args.indexing_warmup)
+                    for w in stub_workloads
+                )
+                stub_chain_runs = max(
+                    (w.runs or args.indexing_runs) for w in stub_workloads
+                )
+                stub_results = {w.name: Result(w) for w in stub_workloads}
+                stub_work_dir = args.work_dir / "stub"
+                print(f"starting stub server at {stub.origin}", file=sys.stderr)
+                for i in range(stub_chain_warmup + stub_chain_runs):
+                    stub_db = prepare_stub_db(source, stub_work_dir)
+                    stub_env = dict(
+                        os.environ,
+                        SPEC_INDEX_TEST_DB=str(stub_db),
+                        MOZTOOLS_UPDATE_CHECK="0",
+                        WEBSPEC_FETCH_ORIGIN=stub.origin,
+                    )
+                    for w in stub_workloads:
+                        cmd = [str(binary)] + w.args
+                        s = run_once(cmd, stub_env, tmp)
+                        if i >= stub_chain_warmup:
+                            stub_results[w.name].samples.append(s)
+                stub.stop()
+                for w in stub_workloads:
+                    st = stub_results[w.name].stats()
+                    results.append(st)
+                    print(f"{w.name:40} median {fmt_ms(st['wall_ms']['median']):>10}  "
+                          f"p95 {fmt_ms(st['wall_ms']['p95']):>10}  rss {st['maxrss_kb_max'] / 1024:.0f} MB"
+                          + ("" if st["exit_codes"] == [0] else f"  EXIT {st['exit_codes']}"),
+                          file=sys.stderr)
 
     now = dt.datetime.now().astimezone()
     report = {

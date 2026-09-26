@@ -62,12 +62,15 @@ rows to the line after the comment (or the last line at end of file).
 
 `webspec-index update` prepares effects and representative paths after indexing
 by default. For an existing database or changed rules, run
-`webspec-index effects --all --summary-only`. Matching, propagation, per-step
-summaries, and representative paths are prepared during this maintenance
-operation. Hints, hovers, and category clicks only read stored results. They
-never build analyses or search the graph. Newly published results become
-available on the next editor request. Use the same rules/environment for
-indexing and LSP. Broader trace exploration remains available in the CLI/API.
+`webspec-index effects --all` (incremental — rebuilds only specs whose structure
+changed) or `webspec-index effects --all --rebuild` (from scratch). Matching,
+propagation, per-step summaries, and representative paths are prepared during
+this operation. Hints, hovers, and category clicks only read stored results.
+They never build analyses or search the graph. Newly published results become
+available on the next editor request. If a query returns no effects with
+`snapshot_changed`, the spec was updated and effects have not been rebuilt yet;
+run `webspec-index effects --all`. Use the same rules/environment for indexing
+and LSP. Broader trace exploration remains available in the CLI/API.
 
 The palette command **webspec-lens: Show Spec Effects** opens the native hover
 at the cursor; category rows open their prepared details in that same hover UI.
@@ -99,6 +102,8 @@ keyboard. Check the **webspec-lens** Output channel if the server fails to start
 To install manually instead: `cargo binstall webspec-index` or `cargo install webspec-index`.
 
 Spec data is fetched and cached automatically on first query — no setup step needed.
+The spec and its transitive dependencies are checked at most once per 24 h; the
+first query of the day may take a few seconds while the check completes.
 
 ## How it works
 

@@ -85,11 +85,12 @@ webspec-index effects "HTML#navigate" --step 20 --kind event.fire
 webspec-index effects "HTML#navigate" --effect-id ef_0123456789abcdef --limit 5
 webspec-index effects "HTML#navigate" --summary-only
 
-# Rebuild the effects graph for the indexed corpus. `update` and `reparse` do this
-# themselves; per-subject results are computed from the graph at query time.
-# Pattern-matching for specs missing from the local-match cache runs in parallel
-# (default: all cores; override with WEBSPEC_EFFECTS_THREADS=N).
+# Rebuild effects for the indexed corpus. `update` and `reparse` do this
+# automatically; per-subject results are computed from the stored graph at query time.
+# `effects --all` is incremental — only specs whose structure changed are reprocessed.
+# `effects --all --rebuild` builds the effects from scratch.
 webspec-index effects --all
+webspec-index effects --all --rebuild
 
 # Export a chunked read-only database for the web UI
 webspec-index export-web --out DIR                      # all providers
@@ -155,10 +156,10 @@ webspec-index clear-pr --all                    # remove all
 
 All commands support `--format json` (default) or `--format markdown`.
 
-Spec data is fetched and cached locally on first query — no setup needed.
-
-Spec refreshes are freshness-based: once checked, a spec is considered fresh for 24h.
-When refreshed, the CLI fetches live HTML and re-indexes only if content changed.
+Spec data is fetched and cached locally on first query — no setup needed. On each
+subsequent query, the spec and its transitive dependencies are checked at most once
+per 24 h; the first query of the day may take a few seconds. Re-indexing happens only
+when the HTML content changed.
 
 ## Web UI
 
@@ -193,7 +194,7 @@ Set up the site locally in three steps (after building the native binary):
 
 ```bash
 ./crates/webspec-index-wasm/build.sh
-webspec-index effects --all
+webspec-index effects --all --rebuild
 webspec-index export-web --out web/public/db --providers whatwg,w3c,tc39
 cd web && npm ci && npm run dev
 ```

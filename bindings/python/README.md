@@ -69,10 +69,17 @@ for explanation in details["explanations"]:
     print(explanation["effect_id"], explanation["witnesses"])
 ```
 
-`get_effect_summary()`, `explain_effects()`, and `recompute_effects()` are
-synchronous. Results are JSON-compatible dictionaries following effects schema
-version 1. Use `options.rule_paths` for additional local rule packages and
-`options.environment` to select host implementation mappings.
+`get_effect_summary()` and `explain_effects()` are synchronous. Results are
+JSON-compatible dictionaries following effects schema version 1. Use
+`options.rule_paths` for additional local rule packages and `options.environment`
+to select host implementation mappings.
+
+`recompute_effects()` triggers an incremental effects rebuild for the indexed
+corpus (equivalent to `webspec-index effects --all`). It returns when the
+publication is up to date. If a `get_effect_summary()` call returns
+`{"status": "Unavailable", "snapshot_changed": true}`, the spec's HTML was
+updated and effects have not been rebuilt yet; call `recompute_effects()` once to
+rebuild, then retry the query. Pass `rebuild=True` to build from scratch instead.
 
 Errors are raised as `webspec_index.WebspecError`.
 
