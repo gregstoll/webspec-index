@@ -355,13 +355,12 @@ is reported under `Stored into object state, not followed` with the step, the ta
 slice variables in its value. The root variable does not join the slice. Use `--involving` from that
 root to follow it.
 
-Two alternative strategies are intentionally not used. **Co-mention** would include a step solely
-because it mentions a slice variable in a non-definition, non-match role alongside its own variables;
-this is omitted because it adds noise (every step that reads a slice variable would be kept, regardless
-of whether it contributes to the variable's definition chain). **Root taint** would add the root
-variable of a Store edge to the slice; this is omitted because propagating through object identity
-collapses unrelated fields — use a second `--involving` on the root variable to opt into that
-traversal explicitly.
+Two alternative strategies are intentionally not used. **Co-mention** would add every variable
+co-mentioned in a segment with a slice variable to the slice; this is omitted because it collapses
+unrelated variable chains (navigate *historyHandling* grows from 9 to 58 of 67 matched steps; insert
+*parent* from 10 to 30 of 31). **Root taint** would add the root variable of a Store edge to the
+slice; this is omitted because propagating through object identity collapses unrelated fields — use
+a second `--involving` on the root variable to opt into that traversal explicitly.
 
 ### Backward slice: `--feeding STEP[:VAR,…]`
 
@@ -412,7 +411,7 @@ occurrences of *suppressObservers* in the algorithm are argument labels.
 
 - **Opaque statement.** A matched step has a mutation verb whose target the IR did not parse. Its
   uses include a slice variable, so it may assign a variable the slice does not follow. Listed under
-  `Not followed: … (opaque statement)`.
+  `Not followed: 7.3 has an unparsed statement using *x*`.
 - **Loop binding.** A matched step has a clause-initial `For each *x* (of|in|from)` and *x* is not
   in the slice. Sub-project 3's `ForEach` edges will replace this marker. Listed under `Not followed:
   … binds *x* in a loop`.

@@ -56,6 +56,15 @@ impl SliceIndex {
         self.steps.iter().position(|s| s.path == path)
     }
 
+    pub fn steps_by_path(&self, path: &str) -> Vec<usize> {
+        self.steps
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.path == path)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     pub fn children(&self, parent: Option<usize>) -> Vec<usize> {
         let parent = parent.map(|p| p as u32);
         (0..self.steps.len())

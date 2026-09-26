@@ -385,6 +385,7 @@ fn step_at(index: &SliceIndex, path: &str) -> Result<usize, SliceError> {
 }
 
 /// Step selection (spec §6.7): each named step with its subtree, and its enclosing steps.
+/// When a path occurs more than once, all occurrences are kept.
 fn select_steps(
     index: &SliceIndex,
     paths: &[String],
@@ -392,8 +393,14 @@ fn select_steps(
 ) -> Result<(Slice, Selection), SliceError> {
     let mut kept = vec![None; index.steps.len()];
     for path in paths {
-        let i = step_at(index, path)?;
-        kept[i..i + size[i] as usize].fill(Some(StepRole::Selected));
+        let positions = index.steps_by_path(path);
+        if positions.is_empty() {
+            step_at(index, path)?;
+            unreachable!();
+        }
+        for i in positions {
+            kept[i..i + size[i] as usize].fill(Some(StepRole::Selected));
+        }
     }
     keep_context(index, &mut kept);
     let selection = Selection {
@@ -416,7 +423,32 @@ fn backward(
     index: &SliceIndex,
     feeding: &FeedingSelector,
 ) -> Result<(Slice, Selection), SliceError> {
-    let target = step_at(index, &feeding.step)?;
+    let positions = index.steps_by_path(&feeding.step);
+    let target = match positions.as_slice() {
+        [] => return Err(step_at(index, &feeding.step).unwrap_err()),
+        &[i] => i,
+        _ => {
+            let candidates = positions
+                .iter()
+                .map(|&i| {
+                    index.steps[i]
+                        .parent
+                        .map(|p| index.steps[p as usize].path.clone())
+                        .unwrap_or_else(|| "(top level)".to_owned())
+                })
+                .collect();
+            return Err(SliceError {
+                code: SliceErrorCode::InvalidSelector,
+                message: format!(
+                    "step {} occurs {} times in {}",
+                    feeding.step,
+                    positions.len(),
+                    index.anchor
+                ),
+                candidates,
+            });
+        }
+    };
     let path = &index.steps[target].path;
     let mentions = &index.steps[target].mentions;
     let seeds: Vec<u32> = if feeding.variables.is_empty() {
@@ -864,9 +896,8 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn runs_end_where_a_sibling_list_restarts_its_numbering() {
-        let index = slice_index(
+    fn repeated_path_index() -> SliceIndex {
+        slice_index(
             "go",
             &[
                 ("1", &[]),
@@ -879,11 +910,64 @@ mod tests {
             ],
             &[],
             &[],
-        );
+        )
+    }
+
+    #[test]
+    fn runs_end_where_a_sibling_list_restarts_its_numbering() {
+        let index = repeated_path_index();
         let s = slice(&index, &involving(&["x"])).unwrap();
         assert_eq!(
             runs(&s),
             [(Some("1"), "1.2", "1.3", 2), (Some("1"), "1.1", "1.2", 2)]
+        );
+    }
+
+    #[test]
+    fn steps_keeps_all_occurrences_of_a_repeated_path() {
+        let index = repeated_path_index();
+        let s = slice(
+            &index,
+            &ViewRequest {
+                steps: vec!["1.1".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let paths: Vec<&str> = s.steps.iter().map(|k| k.path.as_str()).collect();
+        assert_eq!(
+            paths.iter().filter(|&&p| p == "1.1").count(),
+            2,
+            "both occurrences of 1.1 must be kept"
+        );
+        assert!(
+            s.steps
+                .iter()
+                .filter(|k| k.path == "1.1")
+                .all(|k| k.role == StepRole::Selected),
+            "all 1.1 occurrences must be Selected"
+        );
+    }
+
+    #[test]
+    fn feeding_rejects_ambiguous_repeated_path() {
+        let index = repeated_path_index();
+        let e = slice(
+            &index,
+            &ViewRequest {
+                feeding: Some(FeedingSelector {
+                    step: "1.1".into(),
+                    variables: vec![],
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(e.code, SliceErrorCode::InvalidSelector);
+        assert!(
+            e.message.contains("1.1") && e.message.contains("2 times"),
+            "unexpected message: {}",
+            e.message
         );
     }
 

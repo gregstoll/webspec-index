@@ -104,8 +104,9 @@ baseline and new observations from this run:
 
 ## State slicing (sub-project 2, 2026-09-26)
 
-Recorded at commit `90c3689` (HEAD at S17 run time), index version 0.13.2.
-Binary: `target/release/webspec-index` (36 MB, built from HEAD at 15:42).
+Queries and storage recorded at commit `72cd4af` plus the FINAL-sp2 fixes to
+`src/state/slice/{index,select}.rs` (the view path is unchanged since `90c3689`), index version
+0.13.2. Export recorded at `90c3689`.
 
 AMD Ryzen 9 9950X (16 cores / 32 threads), 89.7 GiB, Linux 7.0.0, governor `performance`,
 rustc 1.99.0-nightly.
@@ -113,71 +114,83 @@ rustc 1.99.0-nightly.
 ### Step 2 — fresh measurement copy and reparse
 
 Source DB: `~/.cache/webspec-slice-base/index.db` (1.639 GB, 550 snapshots, STATE_VERSION "4").
-The new binary (STATE_VERSION "5") purged state tables on open; `reparse` rebuilt state_slices.
-HTML was not reparsed: the base's cached HTML file name (`24e7c47e…html`) does not match the
-snapshot SHA stored in the DB (`hash:7f3e9f83…`), so the binary reported "no cache file found,
-skipping". All other 549 specs with matching cache files were reparsed successfully.
+The new binary (STATE_VERSION "5") purged state tables on open; `reparse` rebuilt state_slices
+for 549 specs in `real 17.2s user 30.5s sys 3.7s`. HTML's cache file in the base
+(`html/HTML/24e7c47e…html`) does not match its stored content hash (`7f3e9f83…`), so HTML
+needs its snapshot HTML under the expected name first:
+`artifacts/state-snapshots/html-2026-09-26.html` hashes to `7f3e9f83…` and is copied to
+`html/HTML/7f3e9f83d4cdf89c797bbc9e00f3c4e684abd36612518681d64cf462df4d1687.html`, then
+`reparse -s HTML` takes `real 10.7s user 10.4s sys 1.7s`.
 
-**Reparse time:** `real 17.2s user 30.5s sys 3.7s` (549 specs; HTML excluded due to cache mismatch).
+### Step 3 — query benchmark medians (`--only query --skip-indexing`, 20 runs, 3 warmup)
 
-### Step 3 — query benchmark medians (`--only query`, 10 runs, 2 warmup)
-
-Bench DB: 550 snapshots, index 0.13.2. HTML#navigate queries succeed (sections preserved from
-base); HTML view workloads exit with `slice_unavailable` because HTML was not reparsed.
-DOM#concept-node-insert view workloads succeed.
+All workloads exit 0.
 
 | workload | median | p95 | rss |
 |---|---:|---:|---:|
-| `query HTML#navigate` | 34.4 ms | 47.2 ms | 26 MB |
-| `query HTML#navigate --format markdown` | 36.5 ms | 42.4 ms | 26 MB |
-| `query HTML#navigate --effects cached` | 33.7 ms | 37.6 ms | 26 MB |
-| `query HTML#navigate --effects off` | 31.0 ms | 32.4 ms | 26 MB |
-| `query HTML#navigate --involving historyHandling` | 30.0 ms | 34.2 ms | 25 MB | EXIT 1 (slice_unavailable — HTML not reparsed) |
-| `query HTML#navigate --feeding 24.9.1` | 29.9 ms | 32.5 ms | 26 MB | EXIT 1 (slice_unavailable) |
-| `query HTML#navigate --depth 1` | 31.2 ms | 33.4 ms | 26 MB | EXIT 1 (slice_unavailable) |
-| `query DOM#concept-node-insert --involving parent` | 31.5 ms | 33.0 ms | 25 MB |
-| `query DOM#concept-node-insert --effects off` | 29.5 ms | 32.6 ms | 26 MB |
+| `query HTML#navigate` | 19.6 ms | 20.5 ms | 24 MB |
+| `query HTML#navigate --format markdown` | 22.0 ms | 22.4 ms | 24 MB |
+| `query HTML#navigate --effects cached` | 19.4 ms | 20.0 ms | 24 MB |
+| `query HTML#navigate --effects off` | 17.4 ms | 18.3 ms | 23 MB |
+| `query HTML#navigate --involving historyHandling` | 17.9 ms | 19.9 ms | 24 MB |
+| `query HTML#navigate --feeding 24.9.1` | 18.2 ms | 18.8 ms | 24 MB |
+| `query HTML#navigate --depth 1` | 18.3 ms | 18.9 ms | 24 MB |
+| `query DOM#concept-node-insert --involving parent` | 18.4 ms | 19.0 ms | 23 MB |
+| `query DOM#concept-node-insert --effects off` | 17.2 ms | 17.8 ms | 23 MB |
+| `query DOM#concept-tree-root` | 19.3 ms | 20.6 ms | 24 MB |
+| `query DOM#concept-tree-root --effects off` | 16.6 ms | 18.2 ms | 23 MB |
 
-**Performance gate (adaptation 17):** each view workload's median must be within 1 ms of its
-`--effects off` counterpart. The only measurable pair is
-`query-dom-insert-involving` (31.5 ms) vs `query-dom-insert-effects-off` (29.5 ms) = 2.0 ms
-difference. This exceeds the 1 ms gate at 10-run precision; at 20-run precision the difference
-would be smaller. The view overhead is dominated by process startup (~20 ms floor) and DB open,
-not by `apply_view` itself (one `state_slices` read: SELECT payload WHERE snapshot_id=? AND anchor=?).
-HTML view workloads could not be measured because HTML has no state_slices in this copy.
+**Performance gate (adaptation 17):** each view median within 1 ms of its `--effects off`
+counterpart.
 
-Plain `query HTML#navigate` unchanged vs the post-incremental baseline within noise (34.4 ms vs 23.7 ms
-at 2 vs 550 indexed specs — the 10 ms delta is accounted for by corpus size and DB growth).
+| view | vs `--effects off` |
+|---|---:|
+| `HTML#navigate --involving historyHandling` | +0.5 ms |
+| `HTML#navigate --feeding 24.9.1` | +0.8 ms |
+| `HTML#navigate --depth 1` | +0.9 ms |
+| `DOM#concept-node-insert --involving parent` | +1.2 ms |
+
+Three repeat runs of the involving pairs at 50 runs / 5 warmup:
+
+| run | navigate involving − off | insert involving − off |
+|---|---:|---:|
+| 1 | +0.6 ms | +0.3 ms |
+| 2 | +0.6 ms | +0.6 ms |
+| 3 | −0.4 ms | +1.4 ms |
+
+The view overhead sits at 0.3–1.4 ms, the same size as the run-to-run drift of a single
+workload (`--effects off` on insert: 17.2, 15.5, 15.7, 14.7 ms across the four runs). The gate
+holds for the HTML views; the DOM pair straddles it. The view path adds a second
+`Connection::open` (`src/main.rs`), the snapshot/sha lookups and one `state_slices` read in
+`apply_view`; none of it is measurable apart from process-level noise at this resolution.
 
 ### Step 4 — storage
 
-**Corpus-wide state_slices (549 specs, HTML excluded):**
+**Corpus-wide state_slices (550 specs):**
 
 | metric | value |
 |---|---|
-| rows | 4,818 |
-| payload bytes | 2,949,873 (~2.88 MB) |
+| rows | 5,781 |
+| payload bytes | 3,528,733 (~3.4 MB) |
 
-**HTML + DOM (HTML has 0 rows due to cache mismatch; DOM only):**
+**HTML + DOM:**
 
 | spec | rows | payload bytes |
 |---|---:|---:|
+| HTML | 963 | 578,860 |
 | DOM | 183 | 100,739 |
-| HTML | 0 | 0 (not reparsed) |
+| **total** | **1,146** | **679,599** |
 
-The spec §12 expectation of "HTML+DOM ≈ 6,000 rows ≈ 2.8 MB" could not be verified for HTML;
-DOM's 183 rows / 100 KB is lower than predicted (the algorithm count for DOM is smaller than
-for HTML). Full corpus with HTML would require either a live re-fetch or correcting the cache
-file mismatch (copy `artifacts/state-snapshots/html-2026-09-26.html` to
-`html/HTML/<hash>.html`).
+The spec §12 estimate of "HTML+DOM ≈ 6,000 rows ≈ 2.8 MB" was high by about 5× in rows and
+4× in bytes.
 
 **Local growth (dbstat `state_slices`):**
 
 | object | size |
 |---|---:|
-| `state_slices` | 3,678,208 bytes (~3.6 MB) |
-| `sqlite_autoindex_state_slices_1` | 233,472 bytes |
-| **total** | **3,911,680 bytes (~3.8 MB)** |
+| `state_slices` | 4,395,008 bytes (~4.2 MB) |
+| `sqlite_autoindex_state_slices_1` | 274,432 bytes |
+| **total** | **4,669,440 bytes (~4.5 MB)** |
 
 **Export:**
 

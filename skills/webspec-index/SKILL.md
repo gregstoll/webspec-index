@@ -217,7 +217,7 @@ Selector forms:
 
 ### Views of long algorithms
 
-`query` on a long algorithm (HTML#navigate has over 180 steps) returns thousands of words. View flags
+`query` on a long algorithm (HTML#navigate has 67 steps) returns thousands of words. View flags
 trim it to what you need:
 
 ```bash
@@ -233,12 +233,14 @@ webspec-index query 'HTML#navigate' --feeding 24.9.1:historyEntry --format markd
   influenced by `name`, including the steps that carry it forward.
 - `--feeding <STEP>:<VAR>`: backward slice answering "where does `historyEntry` in step 24.9.1 come
   from". `<VAR>` is optional; without it, every variable that feeds the step is traced.
-- Combine flags: `--involving url --depth 2` limits the forward slice to two levels of sub-steps.
+- Combine flags: `--involving url --depth 2` limits the forward slice to top-level steps plus one
+  level of sub-steps (paths with at most 2 components).
 
 **Markers signal omissions, not algorithm boundaries.** A line like
-`- [steps 3–7 omitted: no use of url]` means those steps exist and were cut for relevance. The
-algorithm continues past a marker; it does not end there. The summary block at the end of the
-output lists every variable or step path that existed in the algorithm but was not followed into.
+`- [steps 3–7 omitted: no use of *url*]` means those steps exist and were cut for relevance. The
+algorithm continues past a marker; it does not end there. The summary block appears right after the
+`## Content — …` heading (before the steps) and lists slice variables, stores, unfollowed statements,
+loop bindings, rebound names, and (for backward slices) inputs and later definitions.
 
 ## Usage patterns for Gecko development
 
