@@ -324,7 +324,7 @@ impl SiteClass {
     }
 }
 
-/// One `state_sites` row (spec §9.2).
+/// One `state_sites` row (spec §9.2, §16.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Site {
     pub site_id: String,
@@ -342,6 +342,18 @@ pub struct Site {
     pub value_text: Option<String>,
     pub text: String,
     pub basis: String,
+    /// Structural segment id (§16.1); NULL for prose and declared sites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
+    /// Algorithm body id (§16.1); NULL for prose and declared sites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_id: Option<String>,
+    /// UTF-8 byte start of the statement in the segment text (§16.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_start: Option<u32>,
+    /// UTF-8 byte end of the statement in the segment text (§16.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_end: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

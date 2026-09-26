@@ -190,11 +190,7 @@ fn sync_from_html(
         if !force
             && content_unchanged
             && index_is_current(state)
-            && crate::db::effects::has_structure(
-                conn,
-                snapshot_id,
-                parse::steps::STRUCTURE_VERSION,
-            )?
+            && snapshot_is_reusable(conn, snapshot_id)?
         {
             store_update_check(
                 conn,
@@ -223,6 +219,7 @@ struct ParsedHtml {
     content_hash: String,
     parsed: crate::model::ParsedSpec,
     structure_json: String,
+    state: crate::state::StateSpec,
 }
 
 fn parse_html(
@@ -231,15 +228,65 @@ fn parse_html(
     base_url: &str,
     content_hash: String,
 ) -> Result<ParsedHtml> {
-    let parsed = parse::parse_spec(&html, spec_name, base_url)?;
     let synthetic_sha = format!("hash:{content_hash}");
-    let structure =
-        parse::steps::extract_step_structure(&html, spec_name, base_url, &synthetic_sha);
+    let document = scraper::Html::parse_document(&html);
+    let parsed = parse::parse_spec_document(&document, spec_name, base_url)?;
+    let structure = parse::steps::extract_step_structure_from_document(
+        &document,
+        spec_name,
+        base_url,
+        &synthetic_sha,
+    );
+    let catalog = crate::state::extract::bundled_catalog();
+    let state = crate::state::extract_state(&crate::state::StateInputs {
+        document: &document,
+        spec: spec_name,
+        base_url,
+        snapshot_sha: &synthetic_sha,
+        structure: &structure,
+        sections: &parsed.sections,
+        idl_definitions: &parsed.idl_definitions,
+        catalog,
+    });
     Ok(ParsedHtml {
         content_hash,
         parsed,
         structure_json: serde_json::to_string(&structure)?,
+        state,
     })
+}
+
+/// Whether `snapshot_id` can be served without re-parsing: it must have both a
+/// current structure (step IR) and a current state model (correct
+/// `STATE_VERSION` and bundled catalog digest).
+fn snapshot_is_reusable(conn: &Connection, snapshot_id: i64) -> Result<bool> {
+    Ok(
+        crate::db::effects::has_structure(conn, snapshot_id, parse::steps::STRUCTURE_VERSION)?
+            && crate::db::state::has_state_model(
+                conn,
+                snapshot_id,
+                &crate::state::extract::bundled_representation_version(),
+            )?,
+    )
+}
+
+/// Parse, index and store one HTML document into `conn`, returning the snapshot
+/// id. Used by tests and examples that already hold the HTML string.
+#[cfg(feature = "native")]
+pub fn index_html(
+    conn: &Connection,
+    spec_name: &str,
+    base_url: &str,
+    provider: &str,
+    html: String,
+) -> anyhow::Result<i64> {
+    let content_hash = hash_html(&html);
+    let prepared = parse_html(html, spec_name, base_url, content_hash)?;
+    let spec_id = write::insert_or_get_spec(conn, spec_name, base_url, provider)?;
+    let now = Utc::now();
+    let (snapshot_id, _) =
+        write_parsed_html(conn, spec_id, spec_name, base_url, provider, prepared, &now)?;
+    Ok(snapshot_id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -256,6 +303,7 @@ fn write_parsed_html(
         content_hash,
         parsed,
         structure_json,
+        state,
     } = prepared;
     let synthetic_sha = format!("hash:{content_hash}");
     write::atomic_write(conn, |conn| {
@@ -274,6 +322,7 @@ fn write_parsed_html(
             parse::steps::STRUCTURE_VERSION,
             &structure_json,
         )?;
+        crate::db::state::store_state(conn, snapshot_id, &state)?;
 
         store_update_check(conn, spec_id_reloaded, now, Some(now), Some(&content_hash))?;
         Ok((snapshot_id, true))
@@ -395,13 +444,7 @@ async fn sync_known_spec(
 
     if !force {
         if let (Some(snapshot_id), Some(sync_state)) = (previous_snapshot_id, state.as_ref()) {
-            if cache_is_current(sync_state, &now)
-                && crate::db::effects::has_structure(
-                    conn,
-                    snapshot_id,
-                    parse::steps::STRUCTURE_VERSION,
-                )?
-            {
+            if cache_is_current(sync_state, &now) && snapshot_is_reusable(conn, snapshot_id)? {
                 return Ok((snapshot_id, false));
             }
         }
@@ -663,7 +706,7 @@ enum HtmlUpdatePlan {
 
 enum PreparedHtmlUpdate {
     Unchanged(String),
-    Parsed(ParsedHtml),
+    Parsed(Box<ParsedHtml>),
 }
 
 fn plan_html_update(
@@ -678,14 +721,12 @@ fn plan_html_update(
     let previous_snapshot_id = queries::get_snapshot(conn, spec_name)?;
     let state = queries::get_update_check(conn, spec_id)?;
     let now = Utc::now();
-    let has_structure = match previous_snapshot_id {
-        Some(snapshot_id) => {
-            crate::db::effects::has_structure(conn, snapshot_id, parse::steps::STRUCTURE_VERSION)?
-        }
+    let is_reusable = match previous_snapshot_id {
+        Some(snapshot_id) => snapshot_is_reusable(conn, snapshot_id)?,
         None => false,
     };
     if !force
-        && has_structure
+        && is_reusable
         && state
             .as_ref()
             .is_some_and(|state| cache_is_current(state, &now))
@@ -722,7 +763,7 @@ fn plan_html_update(
         now,
         force,
         cached_html,
-        can_reuse_unchanged: has_structure,
+        can_reuse_unchanged: is_reusable,
     })))
 }
 
@@ -752,10 +793,10 @@ async fn prepare_html_update(plan: &HtmlUpdateWork) -> Result<PreparedHtmlUpdate
     }
     let spec_name = plan.spec_name.clone();
     let base_url = plan.base_url.clone();
-    Ok(PreparedHtmlUpdate::Parsed(
+    Ok(PreparedHtmlUpdate::Parsed(Box::new(
         tokio::task::spawn_blocking(move || parse_html(html, &spec_name, &base_url, content_hash))
             .await??,
-    ))
+    )))
 }
 
 fn commit_html_update(
@@ -783,7 +824,7 @@ fn commit_html_update(
                 &plan.spec_name,
                 &plan.base_url,
                 &plan.provider_name,
-                parsed,
+                *parsed,
                 &plan.now,
             )?;
             Ok(Some(snapshot_id))
@@ -959,6 +1000,26 @@ mod tests {
             parse::steps::STRUCTURE_VERSION,
         )
         .unwrap());
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn index_html_stores_state_and_missing_state_model_forces_reparse() {
+        let conn = crate::db::open_test_db().unwrap();
+        let html = crate::state::testing::MINI.to_string();
+        let snapshot = index_html(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+            html,
+        )
+        .unwrap();
+        let version = crate::state::extract::bundled_representation_version();
+        assert!(crate::db::state::has_state_model(&conn, snapshot, &version).unwrap());
+        conn.execute("DELETE FROM state_models", []).unwrap();
+        assert!(!crate::db::state::has_state_model(&conn, snapshot, &version).unwrap());
+        assert!(!snapshot_is_reusable(&conn, snapshot).unwrap());
     }
 
     // ── cache decision ────────────────────────────────────────────────────────

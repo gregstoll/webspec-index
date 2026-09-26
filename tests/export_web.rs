@@ -3,7 +3,7 @@ use std::path::Path;
 use webspec_index::db;
 use webspec_index::export::{export_web, ExportOptions};
 
-fn seeded_db(path: &Path) -> rusqlite::Connection {
+fn seeded_db(path: &Path) -> (rusqlite::Connection, i64) {
     let conn = rusqlite::Connection::open(path).unwrap();
     db::schema::initialize_schema(&conn).unwrap();
     db::schema::run_migrations(&conn).unwrap();
@@ -48,7 +48,7 @@ fn seeded_db(path: &Path) -> rusqlite::Connection {
                   ('__effect_summary_complete__', '', 's', '{}', X'00');",
     )
     .unwrap();
-    conn
+    (conn, html_snap)
 }
 
 fn options() -> ExportOptions {
@@ -65,7 +65,18 @@ fn options() -> ExportOptions {
 fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
-    drop(seeded_db(&src));
+    {
+        let (conn, html_snap) = seeded_db(&src);
+        db::state::store_state(
+            &conn,
+            html_snap,
+            &webspec_index::state::testing::extract_html(
+                webspec_index::state::testing::MINI,
+                "HTML",
+            ),
+        )
+        .unwrap();
+    }
     let out = dir.path().join("web");
     let manifest = export_web(&src, &out, &options()).unwrap();
 
@@ -108,11 +119,28 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    for gone in ["effect_structures", "effect_local_matches", "update_checks"] {
+    for gone in [
+        "effect_structures",
+        "effect_local_matches",
+        "update_checks",
+        "state_models",
+    ] {
         assert!(
             !tables.iter().any(|t| t == gone),
             "{gone} should be dropped: {tables:?}"
         );
+    }
+    // State data (except state_models) must survive the export.
+    for kept in [
+        "state_fields",
+        "state_sites",
+        "state_occurrence_counts",
+        "state_coverage",
+    ] {
+        let rows: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {kept}"), [], |r| r.get(0))
+            .unwrap();
+        assert!(rows >= 0, "{kept} should exist in export");
     }
     let snapshots: i64 = conn
         .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
@@ -165,7 +193,7 @@ fn export_strips_pr_snapshots_excluded_providers_and_heavy_tables() {
 fn export_refuses_without_prepared_effects() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
-    let conn = seeded_db(&src);
+    let (conn, _) = seeded_db(&src);
     conn.execute_batch("DELETE FROM effect_graph;").unwrap();
     drop(conn);
     let err = export_web(&src, &dir.path().join("web"), &options()).unwrap_err();
@@ -187,7 +215,7 @@ fn export_fails_the_size_gate() {
 fn export_specs_filter_keeps_only_listed_specs() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("index.db");
-    let conn = seeded_db(&src);
+    let (conn, _) = seeded_db(&src);
     // Seed a second spec (DOM, provider=whatwg). Inserting into specs/snapshots
     // bumps the effects_generation trigger, so update the effect_run to match.
     let dom = db::write::insert_or_get_spec(&conn, "DOM", "https://dom.spec.whatwg.org/", "whatwg")

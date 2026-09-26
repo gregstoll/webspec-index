@@ -183,6 +183,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "refs", "kind", "TEXT")?;
     ensure_column(conn, "sections", "number", "TEXT")?;
     super::effects::initialize(conn)?;
+    super::state::initialize(conn)?;
     Ok(())
 }
 
@@ -203,6 +204,15 @@ pub fn purge_if_version_changed(conn: &Connection, current: &str) -> Result<bool
     let tx = conn.unchecked_transaction()?;
     // Order matters: children before the snapshots they reference.
     for table in [
+        "state_coverage",
+        "state_occurrence_counts",
+        "state_sites",
+        "state_members",
+        "state_field_owners",
+        "state_fields",
+        "state_type_edges",
+        "state_types",
+        "state_models",
         "effect_sites",
         "effect_graph",
         "effect_local_matches",

@@ -147,7 +147,7 @@ pub fn store_local_matches(conn: &Connection, key: &str, payload: &str) -> Resul
     Ok(())
 }
 
-fn encode_payload(text: &str) -> Vec<u8> {
+pub(crate) fn encode_payload(text: &str) -> Vec<u8> {
     let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
     encoder
         .write_all(text.as_bytes())
@@ -155,7 +155,7 @@ fn encode_payload(text: &str) -> Vec<u8> {
         .expect("writing to an in-memory buffer cannot fail")
 }
 
-fn decode_payload(value: ValueRef<'_>) -> Result<String> {
+pub(crate) fn decode_payload(value: ValueRef<'_>) -> Result<String> {
     match value {
         ValueRef::Text(bytes) => Ok(String::from_utf8(bytes.to_vec())?),
         ValueRef::Blob(bytes) => {

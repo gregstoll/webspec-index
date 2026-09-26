@@ -1,11 +1,10 @@
 pub mod effects;
 pub mod queries;
 pub mod schema;
+pub mod state;
 pub mod write;
 
-#[cfg(any(feature = "native", test))]
 use anyhow::Result;
-#[cfg(any(feature = "native", test))]
 use rusqlite::Connection;
 #[cfg(feature = "native")]
 use std::path::PathBuf;
@@ -75,18 +74,24 @@ pub fn open_or_create_db() -> Result<Connection> {
 /// Without `sqlite_stat1` SQLite picks per-snapshot index scans for joins
 /// like the outgoing-calls lookup of `flow`, which are orders of magnitude
 /// slower than the plans it chooses with statistics.
-#[cfg(any(feature = "native", test))]
 pub fn refresh_planner_stats(conn: &Connection) -> Result<()> {
     conn.execute_batch("PRAGMA optimize=0x10002;")?;
     Ok(())
 }
 
-#[cfg(test)]
-pub fn open_test_db() -> Result<Connection> {
+/// Open an in-memory database with full schema + migrations applied.
+/// Used by integration tests and examples that need a ready-to-use connection
+/// without a native feature or filesystem path.
+pub fn open_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     schema::initialize_schema(&conn)?;
     schema::run_migrations(&conn)?;
     Ok(conn)
+}
+
+#[cfg(test)]
+pub fn open_test_db() -> Result<Connection> {
+    open_in_memory()
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::model::{ParsedIdlDefinition, ParsedSection};
-use crate::parse::steps::{AnchorTarget, InlineTokenKind, LinkSpan, StructuralSpec};
+use crate::parse::steps::{AnchorTarget, InlineTokenKind, LinkSpan, StructuralSpec, TextSpan};
 use crate::state::declare::{self, NameBindings};
 use crate::state::ir::{
     self, Expr, Hop, MutationOp, Path, Root, SetForm, SourceContext, Statement, StatementKind,
@@ -375,6 +375,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
             Some(target.clone()),
             parts,
             &occurrence.basis,
+            statement.as_ref().map(|s| s.span),
         ));
     }
 
@@ -405,6 +406,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
             None,
             parts,
             "ir",
+            Some(statement.span),
         ));
     }
     sites
@@ -417,11 +419,28 @@ fn site(
     target: Option<AnchorTarget>,
     parts: SiteParts,
     basis: &str,
+    statement_span: Option<TextSpan>,
 ) -> Site {
     let (context, role) = match &source.context {
         SourceContext::Algorithm { .. } => ("algorithm", None),
         SourceContext::BranchLabel { .. } => ("branch_label", None),
         SourceContext::Prose { role, .. } => ("prose", Some(tag(role))),
+    };
+    let (segment_id, body_id) = match &source.context {
+        SourceContext::Algorithm {
+            segment_id,
+            body_id,
+            ..
+        } => (Some(segment_id.clone()), Some(body_id.clone())),
+        SourceContext::BranchLabel { segment_id, .. } => (Some(segment_id.clone()), None),
+        SourceContext::Prose { .. } => (None, None),
+    };
+    let (span_start, span_end) = match statement_span {
+        Some(span) => (
+            Some(span.start.min(u32::MAX as usize) as u32),
+            Some(span.end.min(u32::MAX as usize) as u32),
+        ),
+        None => (None, None),
     };
     Site {
         site_id,
@@ -439,6 +458,10 @@ fn site(
         value_text: parts.value_text,
         text: source.text.clone(),
         basis: basis.to_string(),
+        segment_id,
+        body_id,
+        span_start,
+        span_end,
     }
 }
 

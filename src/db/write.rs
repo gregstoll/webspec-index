@@ -232,6 +232,15 @@ fn delete_snapshot_children(
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<()> {
     for table in [
+        "state_coverage",
+        "state_occurrence_counts",
+        "state_sites",
+        "state_members",
+        "state_field_owners",
+        "state_fields",
+        "state_type_edges",
+        "state_types",
+        "state_models",
         "effect_anchors",
         "effect_structures",
         "refs",
@@ -894,5 +903,31 @@ mod tests {
         assert_eq!(indexed, None);
         assert_eq!(hash.as_deref(), Some("beadfeed"));
         assert_eq!(index_version.as_deref(), Some("0.2.0"));
+    }
+
+    #[test]
+    fn delete_spec_data_removes_state_rows() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let snapshot = crate::state::testing::index_offline(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            crate::state::testing::MINI,
+        )
+        .unwrap();
+        let spec_id: i64 = conn
+            .query_row(
+                "SELECT spec_id FROM snapshots WHERE id=?1",
+                [snapshot],
+                |r| r.get(0),
+            )
+            .unwrap();
+        delete_spec_data(&conn, spec_id).unwrap();
+        for table in crate::db::state::STATE_TABLES {
+            let rows: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
     }
 }
