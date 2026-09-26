@@ -1028,6 +1028,7 @@ impl<'a> Scope<'a> {
                     continue;
                 };
                 sites.sort_by(|a, b| a.site_id.cmp(&b.site_id));
+                sites.dedup_by(|a, b| a.site_id == b.site_id);
                 site_ids.retain(|&id| id != snapshot.id);
                 rule_sites.extend(
                     sites
@@ -2321,5 +2322,41 @@ mod tests {
             .unwrap_err()
             .message
             .contains("only rules"));
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn query_time_rule_reproducing_a_stored_declared_site_lists_it_once() {
+        use crate::state::testing::{base_url, index_offline_with, QUERY_HTML};
+        let yaml = "schema: 1\npackage: p\nrules:\n  - id: unset\n    match: {text: 'Unset '}\n    emit: {kind: state.write, params: {field: 'HTML#is-initial-about:blank', op: clear}}\n";
+        let catalog = crate::state::catalog::load_state_files(&[("state/r.yaml", yaml)]).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        index_offline_with(&conn, "HTML", base_url("HTML"), QUERY_HTML, &catalog).unwrap();
+        let options = StateQueryOptions::default();
+        let selector = "HTML#is-initial-about:blank";
+        let StateResponse::Field(stored) = query(&conn, selector, &options).unwrap() else {
+            panic!()
+        };
+        assert_eq!(stored.declared.len(), 1);
+        let StateResponse::Field(ruled) =
+            query_with_rules(&conn, selector, &options, &catalog).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(ruled.declared.len(), 1);
+        assert_eq!(ruled.declared[0].basis, stored.declared[0].basis);
+        let rows = |response: StateResponse| {
+            let StateResponse::Fields(list) = response else {
+                panic!()
+            };
+            list.fields
+                .into_iter()
+                .map(|entry| (entry.row.anchor, entry.row.writes, entry.row.inits))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows(query_with_rules(&conn, "Document.*", &options, &catalog).unwrap()),
+            rows(query(&conn, "Document.*", &options).unwrap())
+        );
     }
 }
