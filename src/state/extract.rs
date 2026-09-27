@@ -11,14 +11,19 @@ use crate::parse::steps::{
 };
 use crate::state::catalog::load_state_files;
 use crate::state::declare;
+use crate::state::idl_sig::IdlMembers;
+use crate::state::intro::{algorithm_intros, IdIndex};
 use crate::state::ir::{
     self, Expr, Hop, InitForm, MutationOp, OpBasis, OpaqueReason, Path, ProseRole, Root, SetForm,
     SourceContext, Statement, StatementKind, StatementSource,
 };
 use crate::state::model::{
     CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
-    Reflection, ReviewItem, Site, SiteClass, StateCatalog, StateSpec, TypeKey, TypeRef,
+    Reflection, ReviewItem, Signature, SignatureForm, SignatureIssue, Site, SiteClass,
+    StateCatalog, StateSpec, TypeBasis, TypeExpr, TypeKey, TypeRef,
 };
+use crate::state::names::NameResolver;
+use crate::state::signature::extract_signatures;
 use crate::state::{classify, prose, reflect, rules, types};
 
 /// Everything `extract_state` reads. The caller parses the document once and
@@ -90,7 +95,21 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         reflections,
     };
 
+    let names = NameResolver::new(spec, &model, &concepts);
+    let ids = IdIndex::new(document);
+    let intros = algorithm_intros(
+        document,
+        &ids,
+        spec,
+        base_url,
+        inputs.snapshot_sha,
+        structure,
+    );
+    let members = IdlMembers::new(inputs.idl_definitions, &model);
+    let signatures = extract_signatures(&intros, &names, &members);
+
     let (mut sources, mut branch_inits) = algorithm_sources(structure);
+    sources.extend(intros.into_iter().map(|intro| intro.source));
     let prose = prose::prose_sources(
         document,
         spec,
@@ -105,6 +124,9 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     let mut occurrences = Vec::new();
     let mut declared_sites = Vec::new();
     for (index, source) in sources.iter().enumerate() {
+        if matches!(source.context, SourceContext::Intro { .. }) {
+            continue;
+        }
         let mut parsed = match branch_inits.remove(&index) {
             Some((constructed, value)) => ir::parse_branch_label(source, constructed, value),
             None => ir::parse_source(source),
@@ -134,6 +156,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         ..CoverageCounters::default()
     };
     count_statements(&statements, &mut coverage);
+    count_signatures(structure, &signatures, &mut coverage);
     let concept_ids: HashSet<&str> = concepts.iter().map(|c| c.id.as_str()).collect();
     count_occurrences(
         spec,
@@ -156,7 +179,66 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         coverage,
         issues: declared.issues,
         declared_sites,
+        signatures,
         ..Default::default()
+    }
+}
+
+/// Signature coverage (§6.2): algorithms, forms, templates, `To`-like
+/// parameter type bases and IDL signatures found in the IDL.
+fn count_signatures(
+    structure: &StructuralSpec,
+    signatures: &[Signature],
+    coverage: &mut CoverageCounters,
+) {
+    let signed: HashSet<&str> = signatures
+        .iter()
+        .map(|signature| signature.algorithm.anchor.as_str())
+        .collect();
+    coverage.algorithms = structure.algorithms.len() as u32;
+    let unsigned = structure
+        .algorithms
+        .iter()
+        .filter(|algorithm| !signed.contains(algorithm.source.section_anchor.as_str()))
+        .count() as u32;
+    if unsigned > 0 {
+        coverage.intro_forms.insert("none".to_string(), unsigned);
+    }
+    for signature in signatures {
+        *coverage
+            .intro_forms
+            .entry(signature.form.as_str().to_string())
+            .or_default() += 1;
+        if signature.template.is_some() {
+            coverage.template_signatures += 1;
+        }
+        match &signature.form {
+            SignatureForm::To | SignatureForm::WhenStepsSay | SignatureForm::GivenList => {
+                for param in &signature.params {
+                    let basis = match (param.type_basis, &param.ty) {
+                        (TypeBasis::Explicit, TypeExpr::Opaque { .. }) => "opaque",
+                        (TypeBasis::Explicit, _) => "explicit",
+                        (TypeBasis::NameResolved, _) => "name_resolved",
+                        (TypeBasis::DfnFor, _) => "dfn_for",
+                        (TypeBasis::Unknown, _) => "unknown",
+                    };
+                    *coverage.to_params.entry(basis.to_string()).or_default() += 1;
+                }
+            }
+            SignatureForm::IdlMethod { .. }
+            | SignatureForm::IdlGetter { .. }
+            | SignatureForm::IdlSetter { .. }
+            | SignatureForm::IdlConstructor { .. } => {
+                coverage.idl_signatures += 1;
+                if !signature
+                    .issues
+                    .contains(&SignatureIssue::IdlMemberNotFound)
+                {
+                    coverage.idl_from_idl += 1;
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -362,6 +444,7 @@ fn count_occurrences(
         sources.iter().map(|s| (s.id.as_str(), s)).collect();
     coverage.unresolved_links = sources
         .iter()
+        .filter(|source| !matches!(source.context, SourceContext::Intro { .. }))
         .flat_map(|source| &source.links)
         .filter(|link| link.target.is_none())
         .count() as u32;
@@ -1410,6 +1493,54 @@ mod tests {
         assert_eq!(class_of("mode"), Some(OccurrenceClass::Init));
         assert_eq!(class_of("client"), Some(OccurrenceClass::Read));
         assert_eq!(class_of("origin"), Some(OccurrenceClass::Init));
+    }
+
+    #[test]
+    fn signatures_and_intro_sources_are_extracted_with_counters() {
+        use crate::state::model::{SignatureForm, SignatureIssue, TemplatePiece as P};
+        use crate::state::testing::{signature, NAV_HTML};
+        let state = extract(NAV_HTML, "HTML");
+        assert_eq!(signature(&state, "navigate").form, SignatureForm::To);
+        let lon = signature(&state, "location-object-navigate");
+        assert_eq!(
+            lon.template.as_ref().unwrap().pieces,
+            vec![
+                P::Callee,
+                P::Slot(0),
+                P::Literal("to".into()),
+                P::Slot(1),
+                P::Literal("given".into()),
+                P::Slot(2)
+            ]
+        );
+        assert!(lon.params[2].optional);
+        // `data-dfn-for="Location"` names the interface; NAV_HTML has no IDL block for it.
+        let assign = signature(&state, "dom-location-assign");
+        assert_eq!(
+            assign.form,
+            SignatureForm::IdlMethod {
+                interface: "Location".into(),
+                member: "assign".into()
+            }
+        );
+        assert_eq!(assign.issues, vec![SignatureIssue::IdlMemberNotFound]);
+        assert!(state
+            .sources
+            .iter()
+            .any(|s| matches!(s.context, crate::state::ir::SourceContext::Intro { .. })));
+        assert!(state
+            .statements
+            .iter()
+            .all(|st| !st.source_id.starts_with("intro-")));
+        let c = &state.coverage;
+        assert_eq!(c.algorithms, 4);
+        assert_eq!(
+            (c.intro_forms.get("to"), c.intro_forms.get("idl_method")),
+            (Some(&3), Some(&1))
+        );
+        assert_eq!(c.template_signatures, 3);
+        assert_eq!(c.to_params.values().sum::<u32>(), 6 + 3 + 2);
+        assert_eq!((c.idl_signatures, c.idl_from_idl), (1, 0));
     }
 
     #[test]

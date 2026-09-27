@@ -958,8 +958,10 @@ fn sites_with_rules(mut state: StateSpec, extra: &StateCatalog) -> Option<Vec<Si
     let mut touched = HashSet::new();
     let (mut statements, mut occurrences, mut declared) = (Vec::new(), Vec::new(), Vec::new());
     for source in &state.sources {
-        if matches!(source.context, ir::SourceContext::BranchLabel { .. })
-            || !extra.rules.iter().any(|rule| rule_may_match(rule, source))
+        if matches!(
+            source.context,
+            ir::SourceContext::BranchLabel { .. } | ir::SourceContext::Intro { .. }
+        ) || !extra.rules.iter().any(|rule| rule_may_match(rule, source))
         {
             continue;
         }

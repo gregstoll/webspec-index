@@ -52,7 +52,6 @@ fn regex(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
 }
 
 impl IdlMembers {
-    #[allow(dead_code)]
     pub(crate) fn new(defs: &[ParsedIdlDefinition], model: &ObjectModel) -> Self {
         static BLOCK: OnceLock<Regex> = OnceLock::new();
         static INCLUDES: OnceLock<Regex> = OnceLock::new();
@@ -372,7 +371,6 @@ fn default_expr(text: &str) -> Expr {
 
 /// The type an IDL type string denotes: declared IDL names are nominal, a
 /// trailing `?` adds `null`, everything else stays IDL text.
-#[allow(dead_code)]
 pub(crate) fn idl_type(text: &str, known: &BTreeSet<String>) -> TypeExpr {
     let text = collapse(text);
     if let Some(inner) = text.strip_suffix('?') {
@@ -407,13 +405,13 @@ fn intro_member(intro: &Intro) -> Option<IntroMember> {
     static INTRO: OnceLock<Regex> = OnceLock::new();
     let caps = regex(
         &INTRO,
-        r"^The (?:new )?(?P<member>.+?) (?P<role>method|getter|setter|constructor|attribute)(?: steps are|, when invoked, must| must return| steps must)",
+        r"^(?:The (?:new )?|\S+'s )(?P<member>.+?) (?P<role>method|getter|setter|constructor|attribute(?:'s [gs]etter)?)(?: (?:of|on) (?:the|an?) [^,]+?)?(?: steps are|, when invoked, must| must(?:, when invoked,)? (?:return|run|act|perform)| steps must)",
     )
     .captures(&intro.source.text)?;
     let role = match &caps["role"] {
         "method" => Role::Method,
-        "getter" | "attribute" => Role::Getter,
-        "setter" => Role::Setter,
+        "getter" | "attribute" | "attribute's getter" => Role::Getter,
+        "setter" | "attribute's setter" => Role::Setter,
         _ => Role::Constructor,
     };
     let raw = if intro.dfn_text.is_empty() {
@@ -436,7 +434,8 @@ fn intro_member(intro: &Intro) -> Option<IntroMember> {
         None => (text.to_string(), Vec::new()),
     };
     let interface = match (&intro.dfn_for, role) {
-        (Some(owner), _) => normalize_owner(owner),
+        // Steps shared by several interfaces take the first as `this`.
+        (Some(owner), _) => normalize_owner(owner.split(',').next().unwrap_or_default()),
         (None, Role::Constructor) => name.clone(),
         (None, _) => String::new(),
     };
@@ -464,7 +463,6 @@ fn pick_overload<'a, T>(
 
 /// The signature of an IDL method, getter, setter or constructor steps intro;
 /// `None` when the intro is no IDL steps intro or names no interface.
-#[allow(dead_code)]
 pub(crate) fn idl_signature(intro: &Intro, members: &IdlMembers) -> Option<Signature> {
     if intro.ecmarkup {
         return None;
@@ -671,6 +669,50 @@ AbortSignal includes ParentNode;</pre>
     }
     fn find<'a>(all: &'a [Signature], anchor: &str) -> &'a Signature {
         all.iter().find(|s| s.algorithm.anchor == anchor).unwrap()
+    }
+
+    #[test]
+    fn must_run_possessive_owner_and_attribute_getter_intros() {
+        let html = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="datatransferitemlist">DataTransferItemList</dfn> {
+  undefined remove(unsigned long index);
+  boolean checkValidity();
+  readonly attribute DOMString validationMessage;
+};</pre>
+<div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItemList" id="dom-remove" data-dfn-type="method"><code>remove(<var>index</var>)</code></dfn> method must run these steps:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItemList" id="dom-checkvalidity" data-dfn-type="method"><code>checkValidity()</code></dfn> method of the <code><a href="#datatransferitemlist">DataTransferItemList</a></code> interface must run these steps:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItemList,Other" id="dom-validationmessage" data-dfn-type="attribute"><code>validationMessage</code></dfn> attribute's getter must run these steps:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p><code><a href="#datatransferitemlist">DataTransferItemList</a></code>'s <dfn data-dfn-for="DataTransferItemList" id="dom-remove-2" data-dfn-type="method"><code>remove(<var>index</var>)</code></dfn> method steps are:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItemList" id="dom-remove-3" data-dfn-type="method"><code>remove(<var>index</var>)</code></dfn> method must, when invoked, act as follows:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItemList" id="dom-checkvalidity-2" data-dfn-type="method"><code>checkValidity()</code></dfn> method must run the following steps:</p><ol><li><p>Return.</p></li></ol></div>"##;
+        let all = idl_sigs(html);
+        let method = |member: &str| SignatureForm::IdlMethod {
+            interface: "DataTransferItemList".into(),
+            member: member.into(),
+        };
+        let remove = find(&all, "dom-remove");
+        assert_eq!(remove.form, method("remove"));
+        assert_eq!(ty(&remove.params[0].ty), "idl-type:unsigned long");
+        assert!(remove.issues.is_empty());
+        assert_eq!(
+            find(&all, "dom-checkvalidity").form,
+            method("checkValidity")
+        );
+        assert!(find(&all, "dom-checkvalidity").issues.is_empty());
+        let getter = find(&all, "dom-validationmessage");
+        assert_eq!(
+            getter.form,
+            SignatureForm::IdlGetter {
+                interface: "DataTransferItemList".into(),
+                member: "validationMessage".into()
+            }
+        );
+        assert!(getter.issues.is_empty());
+        assert_eq!(find(&all, "dom-remove-2").form, method("remove"));
+        assert_eq!(find(&all, "dom-remove-3").form, method("remove"));
+        assert_eq!(
+            find(&all, "dom-checkvalidity-2").form,
+            method("checkValidity")
+        );
     }
 
     #[test]

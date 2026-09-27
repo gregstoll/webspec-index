@@ -262,7 +262,6 @@ fn try_infra_link_phrase(bare: &str, links: &[(String, TypeRef)]) -> Option<Type
 /// ` or ` or `-or-`, each `null`, a primitive, an Infra type, a (counted) link, a quoted
 /// literal or, only when `article` (the caller stripped an article word), an unlinked name of
 /// one or two words. `None` when any alternative is none of these.
-#[allow(dead_code)]
 pub(crate) fn parse_intro_type(
     core: &str,
     links: &[(String, TypeRef)],

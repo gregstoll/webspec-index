@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::parse::idl_defs::normalize_owner;
+use crate::state::def_sig::{definitional_signature, ecmarkup_signature};
 use crate::state::grammar::{Encoded, Env, Parser};
+use crate::state::idl_sig::{idl_signature, IdlMembers};
 use crate::state::intro::Intro;
 use crate::state::ir::StatementSource;
 use crate::state::model::{
@@ -45,7 +47,6 @@ const TERMINATORS: [&str; 7] = [
 
 /// The signature an intro of form `To`, `WhenStepsSay` or `GivenList` states;
 /// `None` for any other intro.
-#[allow(dead_code)]
 pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signature> {
     static GIVEN_LIST: OnceLock<Regex> = OnceLock::new();
     let dfn = intro.dfn_span?;
@@ -90,6 +91,8 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
     let mut named_group = false;
     let mut sticky_optional = false;
     let mut tail_consumed = false;
+    // Parameters a COUNT type phrase still applies to, with that type.
+    let mut counted: Option<(usize, TypeExpr, TypeBasis, String)> = None;
     for var in &intro.vars {
         let var_start = enc.to_enc(var.span.start);
         let var_end = enc.to_enc(var.span.end);
@@ -106,7 +109,7 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
         let mut optional = sticky_optional || has("optional");
 
         let phrase = type_phrase(&enc.text, &words, &links, names);
-        let (ty, type_basis, type_text, literal_words) = match &phrase {
+        let (mut ty, mut type_basis, mut type_text, literal_words) = match &phrase {
             Some(found) => (
                 found.ty.clone(),
                 found.basis,
@@ -124,6 +127,22 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
             ),
         };
         let mut literal = normalize_literal(literal_words);
+        match &phrase {
+            Some(found) => {
+                counted = count(&enc.text[found.core_start..var_start])
+                    .map(|(n, _)| (n - 1, ty.clone(), type_basis, type_text.clone()));
+            }
+            None if literal.is_empty() => {
+                if let Some((left @ 1.., carried_ty, carried_basis, carried_text)) = &mut counted {
+                    *left -= 1;
+                    (ty, type_basis, type_text) =
+                        (carried_ty.clone(), *carried_basis, carried_text.clone());
+                } else {
+                    counted = None;
+                }
+            }
+            None => counted = None,
+        }
 
         let mut end = var_end;
         let mut default = None;
@@ -223,6 +242,31 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
     })
 }
 
+/// One signature per intro that states one, first match wins: IDL, `To`-like,
+/// ecmarkup (ecmarkup intros only), definitional. The first intro of an anchor
+/// wins.
+pub(crate) fn extract_signatures(
+    intros: &[Intro],
+    names: &NameResolver,
+    members: &IdlMembers,
+) -> Vec<Signature> {
+    let mut seen = HashSet::new();
+    intros
+        .iter()
+        .filter_map(|intro| {
+            if seen.contains(intro.anchor.as_str()) {
+                return None;
+            }
+            let signature = idl_signature(intro, members)
+                .or_else(|| to_signature(intro, names))
+                .or_else(|| intro.ecmarkup.then(|| ecmarkup_signature(intro)).flatten())
+                .or_else(|| definitional_signature(intro, names))?;
+            seen.insert(intro.anchor.as_str());
+            Some(signature)
+        })
+        .collect()
+}
+
 /// Each link's visible text and the type it denotes in a type position.
 pub(crate) fn type_links(source: &StatementSource, names: &NameResolver) -> Vec<(String, TypeRef)> {
     source
@@ -273,12 +317,23 @@ pub(crate) fn type_phrase(
 /// A core that names a type on its own: a link, a quote, `null`, a primitive
 /// or an Infra word.
 fn starts_typed(core: &str) -> bool {
+    if let Some(rest) = count(core).map(|(_, rest)| rest) {
+        return starts_typed(rest);
+    }
     core.starts_with("⟦L")
         || core.starts_with(['"', '\u{201C}'])
         || TYPE_WORDS.iter().any(|word| {
             core.strip_prefix(word)
                 .is_some_and(|rest| !rest.starts_with(|c: char| c.is_alphanumeric()))
         })
+}
+
+/// A leading COUNT word (§8.1.4): how many parameters the type applies to, and
+/// the rest of the core.
+fn count(core: &str) -> Option<(usize, &str)> {
+    [("two ", 2), ("three ", 3), ("four ", 4)]
+        .iter()
+        .find_map(|&(word, n)| core.strip_prefix(word).map(|rest| (n, rest)))
 }
 
 /// Encoded ranges of the words in `start..end`: whitespace-separated, with
@@ -652,6 +707,37 @@ mod tests {
         assert!(all
             .iter()
             .all(|s| s.algorithm.anchor != "rules-to-parse-a-date-string"));
+    }
+
+    #[test]
+    fn counted_type_applies_to_that_many_listed_parameters() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="check">check</dfn>, given two <a href="#concept-origin">origins</a> <var>a</var> and <var>b</var>, and <var>c</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="report">report</dfn> given three <a href="#concept-url">URLs</a> <var>x</var>, <var>y</var> and <var>z</var>:</p><ol><li><p>Return.</p></li></ol></div>"##;
+        let all = sigs(html, "HTML");
+        let s = find(&all, "check");
+        assert_eq!(
+            s.template.as_ref().unwrap().pieces,
+            vec![
+                P::Callee,
+                lit("given"),
+                P::Slot(0),
+                P::ListSep,
+                P::Slot(1),
+                P::ListSep,
+                P::Slot(2)
+            ]
+        );
+        assert_eq!(ty(&s.params[0].ty), "HTML#concept-origin");
+        assert_eq!(s.params[0].type_text, "two origins");
+        assert_eq!(
+            (&s.params[1].ty, s.params[1].type_basis),
+            (&s.params[0].ty, TypeBasis::Explicit)
+        );
+        assert_eq!(s.params[2].ty, TypeExpr::Unknown);
+        assert_eq!(s.issues, vec![SignatureIssue::UntypedParam("c".into())]);
+        let r = find(&all, "report");
+        assert!(r.params.iter().all(|p| ty(&p.ty) == "HTML#concept-url"));
+        assert!(r.issues.is_empty());
     }
 
     #[test]

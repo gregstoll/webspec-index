@@ -29,7 +29,6 @@ fn regex(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
 
 /// The accessor, predicate or declared signature of a non-ecmarkup intro
 /// with a dfn and at least one variable outside it.
-#[allow(dead_code)]
 pub(crate) fn definitional_signature(intro: &Intro, names: &NameResolver) -> Option<Signature> {
     if intro.ecmarkup {
         return None;
@@ -60,7 +59,6 @@ pub(crate) fn definitional_signature(intro: &Intro, names: &NameResolver) -> Opt
 }
 
 /// The signature an ecmarkup clause states in its `takes … and returns …` paragraph.
-#[allow(dead_code)]
 pub(crate) fn ecmarkup_signature(intro: &Intro) -> Option<Signature> {
     static TAKES: OnceLock<Regex> = OnceLock::new();
     static ITEM: OnceLock<Regex> = OnceLock::new();

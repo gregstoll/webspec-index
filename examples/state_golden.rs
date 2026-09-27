@@ -9,7 +9,7 @@
 mod golden;
 
 use webspec_index::state::catalog::StateCatalog;
-use webspec_index::state::model::CoverageCounters;
+use webspec_index::state::model::{SignatureForm, StateSpec, TypeBasis, TypeExpr};
 
 struct Floors {
     owner: f64,
@@ -74,15 +74,15 @@ fn index(html: &str, dom: &str, catalog: &StateCatalog) -> (rusqlite::Connection
     (conn, [h, d])
 }
 
-fn coverage(conn: &rusqlite::Connection, snapshot: i64) -> CoverageCounters {
+fn model(conn: &rusqlite::Connection, snapshot: i64) -> StateSpec {
     webspec_index::db::state::load_state_model(conn, snapshot)
         .unwrap()
         .unwrap()
-        .coverage
 }
 
 /// Prints the §12.4 numbers for one run; returns false when a floor is violated.
-fn report(run: &str, spec: &str, c: &CoverageCounters, floors: &Floors) -> bool {
+fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
+    let (c, signatures) = (&state.coverage, &state.signatures);
     let owned: u32 = c.written_fields_owned.values().sum();
     let owner_pct = 100.0 * owned as f64 / c.written_fields.max(1) as f64;
     let set_pct = 100.0 * c.set_structured as f64 / c.set_total.max(1) as f64;
@@ -103,6 +103,42 @@ fn report(run: &str, spec: &str, c: &CoverageCounters, floors: &Floors) -> bool 
     );
     println!("  statements {:?}", c.statements);
     println!("  occurrences {:?}", c.occurrences);
+    let pct = |part: u32, whole: u32| 100.0 * part as f64 / whole.max(1) as f64;
+    let params: u32 = c.to_params.values().sum();
+    let typed: u32 = ["explicit", "name_resolved", "dfn_for"]
+        .iter()
+        .filter_map(|basis| c.to_params.get(*basis))
+        .sum();
+    println!(
+        "  signatures: template {}/{} ({:.1}%), forms {:?}, To params typed {:.1}%, IDL from IDL {}/{}",
+        c.template_signatures,
+        c.algorithms,
+        pct(c.template_signatures, c.algorithms),
+        c.intro_forms,
+        pct(typed, params),
+        c.idl_from_idl,
+        c.idl_signatures
+    );
+    // §6.2 counts IDL signatures as "with template" and types `To` intros only.
+    let with_idl = c.template_signatures + c.idl_signatures;
+    let (to_typed, to_params) = signatures
+        .iter()
+        .filter(|s| s.form == SignatureForm::To)
+        .flat_map(|s| &s.params)
+        .fold((0, 0), |(typed, all), p| {
+            let is_typed = match p.type_basis {
+                TypeBasis::Explicit => !matches!(p.ty, TypeExpr::Opaque { .. }),
+                TypeBasis::NameResolved | TypeBasis::DfnFor => true,
+                TypeBasis::Unknown => false,
+            };
+            (typed + u32::from(is_typed), all + 1)
+        });
+    println!(
+        "  signatures (§6.2 terms): template or IDL {with_idl}/{} ({:.1}%), To-form params typed {to_typed}/{to_params} ({:.1}%)",
+        c.algorithms,
+        pct(with_idl, c.algorithms),
+        pct(to_typed, to_params)
+    );
     for unresolved in &c.written_fields_unresolved {
         println!("  unresolved owner: {spec}#{unresolved}");
     }
@@ -139,12 +175,12 @@ fn main() {
         exit = 1;
     }
     for (spec, snapshot) in ["HTML", "DOM"].into_iter().zip(snapshots) {
-        let c = coverage(&conn, snapshot);
-        if !report("bundled", spec, &c, &bundled_floors(spec)) {
+        let state = model(&conn, snapshot);
+        if !report("bundled", spec, &state, &bundled_floors(spec)) {
             exit = 1;
         }
         if review {
-            for item in &c.unclassified_review {
+            for item in &state.coverage.unclassified_review {
                 println!(
                     "  review: {spec}#{}{} [{}] {}",
                     item.subject,
@@ -164,7 +200,7 @@ fn main() {
         if !report(
             "grammar",
             spec,
-            &coverage(&conn, snapshot),
+            &model(&conn, snapshot),
             &grammar_floors(spec),
         ) {
             exit = 1;

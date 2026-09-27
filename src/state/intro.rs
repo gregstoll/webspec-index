@@ -18,7 +18,6 @@ pub(crate) struct IdIndex<'a> {
 }
 
 impl<'a> IdIndex<'a> {
-    #[allow(dead_code)]
     pub(crate) fn new(document: &'a Html) -> Self {
         let mut by_id = HashMap::new();
         for element in document.root_element().descendent_elements() {
@@ -34,7 +33,6 @@ impl<'a> IdIndex<'a> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Intro {
     pub source: StatementSource,
@@ -48,7 +46,6 @@ pub(crate) struct Intro {
     pub prose_role: Option<ProseRole>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IntroVar {
     pub span: TextSpan,
@@ -60,7 +57,6 @@ pub(crate) struct IntroVar {
 
 /// The intro of every structural algorithm whose anchored element and intro
 /// block are found.
-#[allow(dead_code)]
 pub(crate) fn algorithm_intros(
     document: &Html,
     index: &IdIndex,

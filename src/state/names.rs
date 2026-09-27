@@ -30,7 +30,6 @@ fn fold(name: &str) -> String {
 }
 
 impl NameResolver {
-    #[allow(dead_code)]
     pub(crate) fn new(spec: &str, model: &ObjectModel, concepts: &[ConceptDfn]) -> Self {
         let mut idl_names = HashSet::new();
         let mut idl_by_lowercase = HashMap::new();
@@ -93,7 +92,6 @@ impl NameResolver {
     }
 
     /// The type a link in a type position denotes.
-    #[allow(dead_code)]
     pub(crate) fn link_type(&self, link: &LinkSpan) -> TypeRef {
         static IDENT: OnceLock<Regex> = OnceLock::new();
         if let Some(target) = &link.target {

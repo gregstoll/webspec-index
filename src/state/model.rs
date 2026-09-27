@@ -546,7 +546,7 @@ pub struct CoverageCounters {
     pub prose_callouts_excluded: u32,
     pub prose_mentions: u32,
     pub unclassified_review: Vec<ReviewItem>,
-    /// Number of algorithms with any signature.
+    /// Number of structural algorithms.
     pub algorithms: u32,
     /// `SignatureForm::as_str` → count; `"none"` = algorithm without signature.
     pub intro_forms: BTreeMap<String, u32>,
