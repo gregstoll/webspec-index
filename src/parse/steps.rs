@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use super::algorithms::step_number;
 
 /// Version of the serialized structural parse format.
-pub const STRUCTURE_VERSION: &str = "9";
+pub const STRUCTURE_VERSION: &str = "10";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuralSpec {
@@ -3426,7 +3426,7 @@ mod tests {
       <dl class="props"><dt><a href="#is-initial-about:blank">is initial <code>about:blank</code></a></dt><dd>true</dd>
       <dt><a href="https://dom.spec.whatwg.org/#concept-document-type">type</a></dt><dd>"<code>html</code>"</dd></dl></li>"##,
         );
-        assert_eq!(s.version, "9");
+        assert_eq!(s.version, "10");
         let branch = &s.algorithms[0].branches[0];
         assert_eq!(branch.label, "is initial about:blank");
         assert_eq!(branch.label_text, "is initial `about:blank`");
