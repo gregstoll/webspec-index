@@ -17,16 +17,12 @@ use crate::state::model::{Literal, TypeKey, TypeRef};
 /// the SP1 behavior: nothing is callable, no mentions, no body arguments.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Env {
-    #[allow(dead_code)]
     pub spec: String,
     /// In-spec anchors that can be called, by anchor.
-    #[allow(dead_code)]
     pub callables: BTreeMap<String, Callable>,
     /// `(segment_id, link_id)` of structural operation sites with role `Mention`.
-    #[allow(dead_code)]
     pub mentions: BTreeSet<(String, String)>,
     /// `(segment_id, link_id)` → body ids passed to that operation.
-    #[allow(dead_code)]
     pub body_args: BTreeMap<(String, String), Vec<String>>,
 }
 
@@ -40,7 +36,6 @@ pub(crate) enum Callable {
     NoTemplate,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Callability {
     Known(Callable),
@@ -49,7 +44,6 @@ pub(crate) enum Callability {
 }
 
 impl Env {
-    #[allow(dead_code)]
     pub(crate) fn callability(&self, target: Option<&AnchorTarget>) -> Callability {
         match target {
             None => Callability::No,
@@ -364,7 +358,6 @@ pub(crate) struct Parser<'a> {
     pub(crate) enc: &'a Encoded,
     pub(crate) source: &'a StatementSource,
     pub(crate) out: ParsedSource,
-    #[allow(dead_code)]
     pub(crate) env: &'a Env,
     /// Clause starts that already produced an `Opaque` statement.
     pub(crate) opaque_clauses: Vec<usize>,

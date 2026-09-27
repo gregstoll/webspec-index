@@ -1,50 +1,113 @@
 //! `VALUE` grammar: expression atoms (§7.3), extended with calls and
 //! conditionals by later productions.
-use crate::state::grammar::{literal, Parser, Placeholder};
-use crate::state::ir::{Expr, LinkRole};
+use crate::state::call::segment_key;
+use crate::state::grammar::{literal, Callability, Callable, Parser, Placeholder};
+use crate::state::ir::{CallForm, Expr, LinkRole, Path, Root};
 use crate::state::model::Literal;
 
 const QUOTES: [(&str, &str); 2] = [("\"", "\""), ("\u{201C}", "\u{201D}")];
 
+/// A possessive call's receiver: its path without the accessor hop. A bare
+/// variable or `this` is that expression; a receiver-less path has none.
+fn path_receiver(path: Path) -> Option<Expr> {
+    if !path.hops.is_empty() || path.subscript.is_some() {
+        return Some(Expr::Path(path));
+    }
+    match path.root {
+        Root::Var(name) => Some(Expr::Var(name)),
+        Root::This => Some(Expr::This),
+        Root::Implicit => None,
+        Root::Opaque { text } => Some(Expr::Opaque { text }),
+        root @ Root::Link { .. } => Some(Expr::Path(Path {
+            root,
+            hops: Vec::new(),
+            subscript: None,
+        })),
+    }
+}
+
 impl Parser<'_> {
     /// `VALUE` → `Expr`. Every link inside a parsed (non-`Opaque`) atom gets
     /// the `Value` role.
+    /// Calls (§8.5) are tried after `NEW` and before `PATH`; their links get
+    /// roles from `call_at`, an algorithm value's link `AlgorithmValue`, and
+    /// the type link of `a new ⟦T⟧` `Type`.
     pub(crate) fn expr_at(&mut self, start: usize, end: usize) -> Expr {
+        let (start, end) = self.trimmed(start, end);
         let mut values = Vec::new();
-        let expr = self.value_expr(start, end, &mut values);
+        let expr = match self.head_atom(start, end, &mut values) {
+            Some(expr) => {
+                if matches!(expr, Expr::New { .. }) {
+                    if let Some(link) = self.new_type_link(start) {
+                        self.set_role(link, LinkRole::Type);
+                    }
+                }
+                self.parsed_values(expr, start, end, &mut values)
+            }
+            None => match self.call_expr(start, end) {
+                Some(expr) => expr,
+                None => {
+                    let expr = self.tail_atom(start, end);
+                    self.parsed_values(expr, start, end, &mut values)
+                }
+            },
+        };
         for link in values {
             self.set_role(link, LinkRole::Value);
         }
         expr
     }
 
-    /// `VALUE` → `Expr` without recording roles; the link indices of parsed
-    /// atoms go to `values`. `PATH` subscripts use it directly.
+    /// `VALUE` → `Expr` without calls and without recording roles; the link
+    /// indices of parsed atoms go to `values`. `PATH` subscripts use it
+    /// directly.
     pub(crate) fn value_expr(&self, start: usize, end: usize, values: &mut Vec<usize>) -> Expr {
+        let (start, end) = self.trimmed(start, end);
+        let expr = self
+            .head_atom(start, end, values)
+            .unwrap_or_else(|| self.tail_atom(start, end));
+        self.parsed_values(expr, start, end, values)
+    }
+
+    fn trimmed(&self, start: usize, end: usize) -> (usize, usize) {
         let text = &self.enc.text[start..end];
         let start = start + (text.len() - text.trim_start().len());
         let end = end - (text.len() - text.trim_end().len());
-        let start = start.min(end);
-        let expr = self.atom(start, end, values);
+        (start.min(end), end)
+    }
+
+    /// Adds the links of a parsed atom to `values`.
+    fn parsed_values(&self, expr: Expr, start: usize, end: usize, values: &mut Vec<usize>) -> Expr {
         if !matches!(expr, Expr::Opaque { .. } | Expr::List(_)) {
             values.extend(self.enc.links_in(start, end));
         }
         expr
     }
 
-    fn atom(&self, start: usize, end: usize, values: &mut Vec<usize>) -> Expr {
+    /// The type link of `a new ⟦T⟧` at `start`.
+    fn new_type_link(&self, start: usize) -> Option<usize> {
+        let after = self.keyword(start, &["a new ", "an new "])?;
+        match self.enc.placeholder(after)? {
+            (Placeholder::Link(link), _) => Some(link),
+            _ => None,
+        }
+    }
+
+    /// The atoms tried before calls: variables, `this`, enum values in
+    /// quotes, literals, lists and `NEW`.
+    fn head_atom(&self, start: usize, end: usize, values: &mut Vec<usize>) -> Option<Expr> {
         let text = &self.enc.text[start..end];
         match self.enc.placeholder(start) {
             Some((Placeholder::Var(var), after)) if after == end => {
-                return Expr::Var(self.enc.vars[var].clone());
+                return Some(Expr::Var(self.enc.vars[var].clone()));
             }
             Some((Placeholder::Link(link), after)) if after == end && self.is_this_link(link) => {
-                return Expr::This;
+                return Some(Expr::This);
             }
             _ => {}
         }
         if text == "this" {
-            return Expr::This;
+            return Some(Expr::This);
         }
         // A quoted code token is an enum value, not the string `literal`
         // reads it as.
@@ -53,26 +116,31 @@ impl Parser<'_> {
             .any(|(open, close)| text.starts_with(open) && text.ends_with(close))
         {
             if let Some(value) = self.enum_value(start, end) {
-                return value;
+                return Some(value);
             }
         }
         if let Some(lit) = self.literal_at(start, end) {
-            return Expr::Literal(lit);
+            return Some(Expr::Literal(lit));
         }
         if let Some(items) = self.list(start, end) {
-            return Expr::List(
+            return Some(Expr::List(
                 items
                     .into_iter()
                     .map(|(start, end)| self.value_expr(start, end, values))
                     .collect(),
-            );
+            ));
         }
         if let Some(after) = self.keyword(start, &["a new ", "an new "]) {
-            return Expr::New {
+            return Some(Expr::New {
                 ty: self.new_type(after),
                 init: self.inits.get(&start).cloned(),
-            };
+            });
         }
+        None
+    }
+
+    /// The atoms tried after calls: `PATH`, enum values, else `Opaque`.
+    fn tail_atom(&self, start: usize, end: usize) -> Expr {
         if let Some(path) = self.path(start, false).filter(|path| path.end == end) {
             return Expr::Path(path.path);
         }
@@ -81,6 +149,191 @@ impl Parser<'_> {
         }
         Expr::Opaque {
             text: self.src_text(start, end),
+        }
+    }
+
+    /// A call spanning `start..end` (§8.5 value forms), or an algorithm named
+    /// as a value.
+    fn call_expr(&mut self, start: usize, end: usize) -> Option<Expr> {
+        if start >= end {
+            return None;
+        }
+        // RESULTOF
+        if let Some((link, _)) = self
+            .result_of_link(start)
+            .filter(|&(_, after)| after <= end)
+        {
+            if self.link_callability(link) != Callability::No {
+                return self.call_expr_at(link, CallForm::ResultOf, None, end);
+            }
+        }
+        if let Some((link, close)) = self.ecmarkup_call(start, end) {
+            if self.link_callability(link) != Callability::No {
+                return self.call_expr_at(link, CallForm::Ecmarkup, None, close + 1);
+            }
+        }
+        if let Some(link) = self.gerund_link(start, end) {
+            if self.link_callability(link) != Callability::No {
+                return self.call_expr_at(link, CallForm::Gerund, None, end);
+            }
+        }
+        if let Some((Placeholder::Link(link), after)) = self.enc.placeholder(start) {
+            let callability = self.link_callability(link);
+            // CALLX
+            let callx = match callability {
+                Callability::Known(Callable::Body | Callable::Template | Callable::NoTemplate) => {
+                    true
+                }
+                Callability::CrossSpec => self.keyword(after, &[" given ", " with "]).is_some(),
+                _ => false,
+            };
+            if after < end && callx {
+                return self.call_expr_at(link, CallForm::ResultOf, None, end);
+            }
+            // ALGREF
+            if after == end && matches!(callability, Callability::Known(_)) {
+                self.set_role(link, LinkRole::AlgorithmValue);
+                let link = &self.source.links[link];
+                return Some(Expr::AlgorithmRef {
+                    link_id: link.id.clone(),
+                    target: link.target.clone(),
+                });
+            }
+        }
+        self.possessive_call(start, end)
+    }
+
+    /// `PATH` whose last hop is an accessor, or `the ⟦L⟧ of R` with an
+    /// accessor `⟦L⟧`: a `Possessive` call with the rest as its receiver.
+    fn possessive_call(&mut self, start: usize, end: usize) -> Option<Expr> {
+        let accessor = |p: &Self, link: usize| {
+            p.link_callability(link) == Callability::Known(Callable::Accessor)
+        };
+        if let Some(path) = self
+            .path(start, false)
+            .filter(|path| path.end == end && path.path.subscript.is_none())
+        {
+            if let Some(&Some(link)) = path.hop_links.last() {
+                if accessor(self, link) {
+                    let mut receiver = path.path;
+                    receiver.hops.pop();
+                    let link_start = self.enc.to_enc(self.source.links[link].span.start);
+                    let receiver_links: Vec<usize> = self.enc.links_in(start, link_start).collect();
+                    for receiver_link in receiver_links {
+                        self.set_role(receiver_link, LinkRole::Value);
+                    }
+                    return self.call_expr_at(
+                        link,
+                        CallForm::Possessive,
+                        path_receiver(receiver),
+                        end,
+                    );
+                }
+            }
+        }
+        let at = self.keyword(start, &["the "])?;
+        let (Placeholder::Link(link), after) = self.enc.placeholder(at)? else {
+            return None;
+        };
+        let receiver_start = self.keyword(after, &[" of "]).filter(|&r| r < end)?;
+        if !accessor(self, link) {
+            return None;
+        }
+        let receiver = self.expr_at(receiver_start, end);
+        self.call_expr_at(link, CallForm::Possessive, Some(receiver), end)
+    }
+
+    fn call_expr_at(
+        &mut self,
+        link: usize,
+        form: CallForm,
+        receiver: Option<Expr>,
+        region_end: usize,
+    ) -> Option<Expr> {
+        self.call_at(link, form, receiver, region_end)
+            .map(Expr::Call)
+    }
+
+    /// Callability of link `link` at this site: `No` for a mention.
+    pub(crate) fn link_callability(&self, link: usize) -> Callability {
+        let link = &self.source.links[link];
+        let key = (segment_key(self.source).to_string(), link.id.clone());
+        if self.env.mentions.contains(&key) {
+            return Callability::No;
+        }
+        self.env.callability(link.target.as_ref())
+    }
+
+    /// `the result of ` (`running `|`performing `|`invoking `|`calling `)?
+    /// (`the `)? `⟦L⟧` at `pos`: the link and the position after it.
+    pub(crate) fn result_of_link(&self, pos: usize) -> Option<(usize, usize)> {
+        let at = self.keyword(pos, &["the result of "])?;
+        let at = self
+            .keyword(at, &["running ", "performing ", "invoking ", "calling "])
+            .unwrap_or(at);
+        let at = self.keyword(at, &["the "]).unwrap_or(at);
+        match self.enc.placeholder(at)? {
+            (Placeholder::Link(link), after) => Some((link, after)),
+            _ => None,
+        }
+    }
+
+    /// `(? |! )?⟦L⟧(` … `)` spanning `start..end`: the link and the position
+    /// of the closing parenthesis.
+    fn ecmarkup_call(&self, start: usize, end: usize) -> Option<(usize, usize)> {
+        let at = self.keyword(start, &["? ", "! "]).unwrap_or(start);
+        let (Placeholder::Link(link), open) = self.enc.placeholder(at)? else {
+            return None;
+        };
+        if !self.lit(open, "(") {
+            return None;
+        }
+        let close = self.matching_paren(open, end)?;
+        (close + 1 == end).then_some((link, close))
+    }
+
+    /// The `)` matching the `(` at `open`, outside protected ranges.
+    fn matching_paren(&self, open: usize, end: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for (offset, ch) in self.enc.text[open..end].char_indices() {
+            let pos = open + offset;
+            if self.enc.is_protected(pos) {
+                continue;
+            }
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(pos);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// `GERUND`: a link at `start` whose text's first word ends in `ing`, or
+    /// a word ending in `ing` directly before a link.
+    fn gerund_link(&self, start: usize, end: usize) -> Option<usize> {
+        if let Some((Placeholder::Link(link), _)) = self.enc.placeholder(start) {
+            let text = &self.source.links[link].visible_text;
+            let first = text.split_whitespace().next().unwrap_or_default();
+            return first.ends_with("ing").then_some(link);
+        }
+        let word_len = self.enc.text[start..end]
+            .bytes()
+            .take_while(u8::is_ascii_alphabetic)
+            .count();
+        let word = &self.enc.text[start..start + word_len];
+        if word.len() <= "ing".len() || !word.ends_with("ing") {
+            return None;
+        }
+        let at = self.keyword(start + word_len, &[" "])?;
+        match self.enc.placeholder(at)? {
+            (Placeholder::Link(link), _) => Some(link),
+            _ => None,
         }
     }
 

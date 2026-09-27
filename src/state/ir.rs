@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::parse::steps::{AnchorTarget, InlineToken, LinkSpan, TextSpan};
-use crate::state::grammar::{Encoded, Env, InfraTarget, Parser, PathParse, Placeholder};
+use crate::state::grammar::{
+    Callability, Encoded, Env, InfraTarget, Parser, PathParse, Placeholder,
+};
 use crate::state::model::{Literal, OccurrenceClass, TypeRef};
 
 // ---------------------------------------------------------------------------
@@ -235,7 +237,7 @@ pub enum Expr {
     },
     /// A call result; value is the `Call.id`.
     Call(String),
-    /// A cross-spec algorithm reference in value position (not a call).
+    /// An algorithm named as a value (not a call).
     AlgorithmRef {
         link_id: String,
         target: Option<AnchorTarget>,
@@ -608,7 +610,7 @@ pub(crate) struct ParsedSource {
     /// link a statement positions.
     pub link_roles: BTreeMap<usize, (OccurrenceClass, String)>,
     pub clauses: Vec<Clause>,
-    /// Call objects attached to this source; empty until Task F13 fills them.
+    /// The calls of this source, with statements, parents and children.
     pub calls: Vec<Call>,
     /// link index → `LinkRole`; filled by grammar productions (Task F7+).
     pub roles: BTreeMap<usize, LinkRole>,
@@ -649,6 +651,7 @@ pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSo
                 .map(|(link, ..)| source.links[link].visible_text.to_lowercase())
         });
         let consumed = at < p.covered_until
+            || p.try_call_statement(at)
             || p.try_infra_mutation(at)
             || p.try_set(at)
             || p.try_unset(at)
@@ -664,6 +667,8 @@ pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSo
             p.push_opaque(at, OpaqueReason::UnsupportedForm, verb);
         }
     }
+    p.scan_result_of_calls();
+    p.finish_calls();
     p.out
 }
 
@@ -929,6 +934,9 @@ impl Parser<'_> {
         if let Some((mut targets, end)) = self.targets(after, true, |p, end| p.lit(end, " to ")) {
             let value_start = end + " to ".len();
             if self.is_invocation(value_start) {
+                if self.try_set_to_be(at, &targets, value_start) {
+                    return true;
+                }
                 let id = self.push_opaque(at, OpaqueReason::ValueIsInvocation, Some("set".into()));
                 for target in &targets {
                     for link in target
@@ -962,6 +970,177 @@ impl Parser<'_> {
         };
         self.push_opaque(at, reason, Some("set".into()));
         false
+    }
+
+    /// `Set PATH to be ⟦L⟧ …` with a callable `⟦L⟧`: a `SetToBe` call
+    /// statement whose receiver is the target, which it reads, not writes.
+    fn try_set_to_be(&mut self, at: usize, targets: &[PathParse], value_start: usize) -> bool {
+        let [target] = targets else {
+            return false;
+        };
+        let pos = self.keyword(value_start, &["be "]).unwrap_or(value_start);
+        let Some((Placeholder::Link(link), _)) = self.enc.placeholder(pos) else {
+            return false;
+        };
+        if self.link_callability(link) == Callability::No {
+            return false;
+        }
+        let end = self.value_end(value_start, None);
+        let receiver = Some(Expr::Path(target.path.clone()));
+        let Some(call) = self.call_at(link, CallForm::SetToBe, receiver, end) else {
+            return false;
+        };
+        let id = self.push_call_statement(at, end, call);
+        for link in target
+            .root_link
+            .iter()
+            .chain(target.hop_links.iter().flatten())
+        {
+            self.role(*link, OccurrenceClass::ReadPath, &id);
+        }
+        for &(start, end) in &target.read_ranges {
+            self.read_roles(start, end, &id);
+        }
+        self.covered_until = end;
+        true
+    }
+
+    /// A clause that is a call (§8.5 statement position): after an optional
+    /// `⌛ ` and `Optionally`, a callable link, or `Run`/`Perform`/`Invoke`/
+    /// `Call`/`Potentially` and an optional `the ` before it. Its region runs
+    /// to the clause end.
+    fn try_call_statement(&mut self, at: usize) -> bool {
+        const HEADS: [&str; 10] = [
+            "Run ",
+            "run ",
+            "Perform ",
+            "perform ",
+            "Invoke ",
+            "invoke ",
+            "Call ",
+            "call ",
+            "Potentially ",
+            "potentially ",
+        ];
+        let pos = self.keyword(at, &["\u{231B} "]).unwrap_or(at);
+        let mut pos = self
+            .keyword(pos, &["Optionally, ", "Optionally "])
+            .unwrap_or(pos);
+        if let Some(after) = self.keyword(pos, &HEADS) {
+            pos = self.keyword(after, &["the "]).unwrap_or(after);
+        }
+        let Some((Placeholder::Link(link), after)) = self.enc.placeholder(pos) else {
+            return false;
+        };
+        if self.infra_op(pos).is_some() || self.link_callability(link) == Callability::No {
+            return false;
+        }
+        let end = self.value_end(after, None);
+        let Some(call) = self.call_at(link, CallForm::Imperative, None, end) else {
+            return false;
+        };
+        self.push_call_statement(at, end, call);
+        self.covered_until = end;
+        true
+    }
+
+    /// A `Call` statement over `start..end` for call `call`, which it owns.
+    fn push_call_statement(&mut self, start: usize, end: usize, call: String) -> String {
+        let id = self.push(
+            start,
+            end,
+            "call",
+            StatementKind::Call { call: call.clone() },
+        );
+        if let Some(call) = self.out.calls.iter_mut().find(|c| c.id == call) {
+            call.statement_id = id.clone();
+        }
+        id
+    }
+
+    /// Every `the result of … ⟦L⟧` inside a statement whose callable link is
+    /// no callee yet becomes a `ResultOf` call running to the clause end.
+    fn scan_result_of_calls(&mut self) {
+        let bytes = self.enc.text.as_bytes();
+        let starts: Vec<usize> = self
+            .enc
+            .text
+            .match_indices("the result of ")
+            .map(|(at, _)| at)
+            .filter(|&at| {
+                (at == 0 || !bytes[at - 1].is_ascii_alphanumeric()) && !self.enc.is_protected(at)
+            })
+            .collect();
+        for start in starts {
+            let Some((link, after)) = self.result_of_link(start) else {
+                continue;
+            };
+            let callee = &self.source.links[link];
+            let id = call_id(&self.source.id, &callee.id);
+            let span = callee.span;
+            let in_statement = self
+                .out
+                .statements
+                .iter()
+                .any(|s| s.span.start <= span.start && span.end <= s.span.end);
+            if !in_statement
+                || self.out.calls.iter().any(|c| c.id == id)
+                || self.link_callability(link) == Callability::No
+            {
+                continue;
+            }
+            let end = self.value_end(after, None);
+            self.call_at(link, CallForm::ResultOf, None, end);
+        }
+    }
+
+    /// Gives each call without a statement the innermost statement containing
+    /// it, each call its parent (the call with the smallest region containing
+    /// it) and each parent its children in span order.
+    fn finish_calls(&mut self) {
+        let contains =
+            |outer: TextSpan, inner: TextSpan| outer.start <= inner.start && inner.end <= outer.end;
+        let statements = &self.out.statements;
+        let calls = &mut self.out.calls;
+        for call in calls.iter_mut().filter(|c| c.statement_id.is_empty()) {
+            if let Some(statement) = statements
+                .iter()
+                .filter(|s| contains(s.span, call.span))
+                .min_by_key(|s| s.span.end - s.span.start)
+            {
+                call.statement_id = statement.id.clone();
+            }
+        }
+        let parents: Vec<Option<String>> = calls
+            .iter()
+            .map(|call| {
+                calls
+                    .iter()
+                    .filter(|other| {
+                        other.id != call.id
+                            && other.region != call.span
+                            && contains(other.region, call.span)
+                    })
+                    .min_by_key(|other| other.region.end - other.region.start)
+                    .map(|parent| parent.id.clone())
+            })
+            .collect();
+        let mut children: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
+        for (call, parent) in calls.iter_mut().zip(parents) {
+            if let Some(parent) = &parent {
+                children
+                    .entry(parent.clone())
+                    .or_default()
+                    .push((call.span.start, call.id.clone()));
+            }
+            call.parent_call = parent;
+        }
+        for call in calls.iter_mut() {
+            if let Some(mut nested) = children.remove(&call.id) {
+                nested.sort();
+                call.nested = nested.into_iter().map(|(_, id)| id).collect();
+            }
+        }
     }
 
     /// `Set TARGETS to VALUE` from `start`, or `Mutate { MapSet }` for a
@@ -2235,5 +2414,252 @@ mod tests {
             r##"[(Set { targets: [Path { root: Var("d"), hops: [Field { link_id: "src-4c9d44d6f62ce27f89265357f0c781fb468c341c66d6dbf5973b154e97360921", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }], value: Opaque { text: "the result of running run given *x*" }, form: To }, TextSpan { start: 0, end: 50 })] | {0: (Write, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3"), 1: (Read, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3")}"##,
         ];
         assert_eq!(got, want);
+    }
+
+    mod calls {
+        use crate::state::grammar::{Callable, Env};
+        use crate::state::ir::tests_support::{sources, sources_in};
+        use crate::state::ir::*;
+        use crate::state::model::Literal;
+        use crate::state::testing::var;
+
+        fn env(spec: &str, callables: &[(&str, Callable)]) -> Env {
+            Env {
+                spec: spec.into(),
+                callables: callables.iter().map(|(a, c)| (a.to_string(), *c)).collect(),
+                ..Env::default()
+            }
+        }
+        fn parse(step: &str, env: &Env) -> (StatementSource, ParsedSource) {
+            let src = sources(&[step]).remove(0);
+            let parsed = parse_source_with(&src, env);
+            (src, parsed)
+        }
+
+        #[test]
+        fn imperative_and_run_heads() {
+            let e = env(
+                "HTML",
+                &[("navigate", Callable::Template), ("x", Callable::Template)],
+            );
+            let (_, p) = parse(
+                "<a href=\"#navigate\">Navigate</a> <var>n</var> to <var>u</var>.",
+                &e,
+            );
+            assert!(
+                matches!(&p.statements[0].kind, StatementKind::Call { call } if call == &p.calls[0].id)
+            );
+            assert_eq!(
+                (p.calls[0].form, p.calls[0].statement_id.clone()),
+                (CallForm::Imperative, p.statements[0].id.clone())
+            );
+            let (_, p) = parse("Run <a href=\"#x\">x</a> given <var>y</var>.", &e);
+            assert_eq!(p.calls[0].form, CallForm::Imperative);
+        }
+
+        #[test]
+        fn result_of_callx_gerund_and_algorithm_values() {
+            let e = env(
+                "HTML",
+                &[("x", Callable::Template), ("fire", Callable::Template)],
+            );
+            let (_, p) = parse(
+                "Let <var>r</var> be the result of running <a href=\"#x\">x</a> given <var>y</var>.",
+                &e,
+            );
+            assert!(
+                matches!(&p.statements[0].kind, StatementKind::Let { value: Expr::Call(id), .. } if id == &p.calls[0].id)
+            );
+            assert_eq!(p.calls[0].form, CallForm::ResultOf);
+            let (_, p) = parse("Let <var>d</var> be <a href=\"https://url.spec.whatwg.org/#concept-url-parser\">URL parser</a> given <var>s</var>.", &e);
+            assert_eq!(p.calls[0].form, CallForm::ResultOf);
+            let (_, p) = parse("Let <var>d</var> be <a href=\"https://dom.spec.whatwg.org/#concept-node-document\">node document</a> of <var>n</var>.", &e);
+            assert!(p.calls.is_empty());
+            let (_, p) = parse(
+                "Let <var>r</var> be <a href=\"#fire\">firing an event</a> named <code>x</code> at <var>t</var>.",
+                &e,
+            );
+            assert!(
+                matches!(&p.statements[0].kind, StatementKind::Let { value: Expr::Call(id), .. } if id == &p.calls[0].id)
+            );
+            assert_eq!(p.calls[0].form, CallForm::Gerund);
+            let (_, p) = parse(
+                "Set <var>request</var>'s <a href=\"#steps\">steps</a> to <a href=\"#x\">x</a>.",
+                &e,
+            );
+            assert!(
+                matches!(&p.statements[0].kind, StatementKind::Set { value: Expr::AlgorithmRef { target: Some(t), .. }, .. } if t.anchor == "x")
+            );
+            assert_eq!(p.roles[&1], LinkRole::AlgorithmValue);
+            assert!(p.calls.is_empty());
+        }
+
+        #[test]
+        fn set_to_be_possessive_and_ecmarkup() {
+            let e = env(
+                "HTML",
+                &[
+                    ("blocked", Callable::Predicate),
+                    ("fallback-base-url", Callable::Accessor),
+                ],
+            );
+            let (_, p) = parse("Set <var>subject</var>'s <a href=\"#nd\">node document</a> to be <a href=\"#blocked\">blocked by a modal dialog</a>.", &e);
+            assert!(matches!(&p.statements[0].kind, StatementKind::Call { .. }));
+            assert_eq!(p.calls[0].form, CallForm::SetToBe);
+            assert!(matches!(&p.calls[0].receiver, Some(Expr::Path(_))));
+            let (src, p) = parse(
+                "Let <var>u</var> be <var>doc</var>’s <a href=\"#fallback-base-url\">fallback base URL</a>.",
+                &e,
+            );
+            assert_eq!(
+                (p.calls[0].form, p.calls[0].receiver.clone()),
+                (CallForm::Possessive, Some(var("doc")))
+            );
+            assert_eq!(
+                &src.text[p.calls[0].span.start..p.calls[0].span.end],
+                "fallback base URL"
+            );
+            let html = crate::state::testing::ECMA_HTML;
+            let src = sources_in(html, "ECMA-262")
+                .into_iter()
+                .find(|s| s.text.contains("StringIndexOf("))
+                .unwrap();
+            let p = parse_source_with(
+                &src,
+                &env("ECMA-262", &[("sec-stringindexof", Callable::Template)]),
+            );
+            assert_eq!(p.calls[0].form, CallForm::Ecmarkup);
+            assert_eq!(
+                &src.text[p.calls[0].region.start..p.calls[0].region.end],
+                "(*s*, \"x\", 0)"
+            );
+        }
+
+        #[test]
+        fn nested_calls_share_the_statement_and_know_their_parent() {
+            let e = env(
+                "HTML",
+                &[("x", Callable::Template), ("y", Callable::Template)],
+            );
+            let (_, p) = parse("Let <var>a</var> be the result of <a href=\"#x\">x</a> given the result of <a href=\"#y\">y</a> given <var>b</var>.", &e);
+            assert_eq!(p.calls.len(), 2);
+            let outer = p
+                .calls
+                .iter()
+                .find(|c| c.callee.visible_text == "x")
+                .unwrap();
+            let inner = p
+                .calls
+                .iter()
+                .find(|c| c.callee.visible_text == "y")
+                .unwrap();
+            assert_eq!(inner.parent_call.as_deref(), Some(outer.id.as_str()));
+            assert_eq!(
+                (outer.nested.clone(), inner.nested.clone()),
+                (vec![inner.id.clone()], vec![])
+            );
+            assert_eq!(inner.statement_id, outer.statement_id);
+            assert_eq!(outer.statement_id, p.statements[0].id);
+        }
+
+        #[test]
+        fn set_to_be_reads_its_target_and_needs_a_callable_link() {
+            let e = env("HTML", &[("blocked", Callable::Predicate)]);
+            let step = "Set <var>subject</var>'s <a href=\"#nd\">node document</a> to be <a href=\"#blocked\">blocked by a modal dialog</a>.";
+            let (_, p) = parse(step, &e);
+            let StatementKind::Call { call } = &p.statements[0].kind else {
+                panic!("{:?}", p.statements)
+            };
+            assert_eq!(&p.calls[0].id, call);
+            assert_eq!(p.calls[0].statement_id, p.statements[0].id);
+            assert_eq!(p.link_roles[&0].0, OccurrenceClass::ReadPath);
+            let (_, p) = parse(step, &env("HTML", &[]));
+            assert!(p.calls.is_empty());
+            assert!(matches!(
+                &p.statements[0].kind,
+                StatementKind::Opaque {
+                    reason: OpaqueReason::ValueIsInvocation,
+                    ..
+                }
+            ));
+        }
+
+        #[test]
+        fn statement_heads_skip_markers_and_exclude_infra_and_mentions() {
+            let e = env("HTML", &[("x", Callable::Template), ("y", Callable::Body)]);
+            let (src, p) = parse(
+                "Optionally, <a href=\"#x\">x</a> <var>a</var>, then run the <a href=\"#y\">y</a> steps.",
+                &e,
+            );
+            assert_eq!(p.calls.len(), 2);
+            assert!(p.calls.iter().all(|c| c.form == CallForm::Imperative));
+            assert_eq!(p.statements.len(), 2);
+            assert!(p
+                .statements
+                .iter()
+                .all(|s| matches!(s.kind, StatementKind::Call { .. })));
+            let x = &p.calls[0];
+            assert_eq!(&src.text[x.region.start..x.region.end], " *a*");
+            let (_, p) = parse(
+                "<a href=\"https://infra.spec.whatwg.org/#list-append\">Append</a> <var>a</var> to <var>b</var>.",
+                &e,
+            );
+            assert!(p.calls.is_empty());
+            let src = sources(&["<a href=\"#x\">x</a> <var>a</var>."]).remove(0);
+            let SourceContext::Algorithm { segment_id, .. } = &src.context else {
+                panic!()
+            };
+            let mut e = e.clone();
+            e.mentions
+                .insert((segment_id.clone(), src.links[0].id.clone()));
+            let p = parse_source_with(&src, &e);
+            assert!(p.calls.is_empty() && p.statements.is_empty());
+        }
+
+        #[test]
+        fn of_accessor_new_type_and_fallback_scan() {
+            let e = env(
+                "HTML",
+                &[("url", Callable::Accessor), ("x", Callable::Template)],
+            );
+            let (_, p) = parse(
+                "Let <var>u</var> be the <a href=\"#url\">URL</a> of <var>doc</var>.",
+                &e,
+            );
+            assert_eq!(
+                (p.calls[0].form, p.calls[0].receiver.clone()),
+                (CallForm::Possessive, Some(var("doc")))
+            );
+            let (_, p) = parse(
+                "Let <var>e</var> be a new <a href=\"#event\">event</a>.",
+                &e,
+            );
+            assert_eq!(p.roles[&0], LinkRole::Type);
+            // Inside an opaque statement the scan finds the call.
+            let (_, p) = parse("Set <var>a</var>'s <a href=\"#f\">f</a> and <var>b</var>'s <a href=\"#g\">g</a> to the result of <a href=\"#x\">x</a> given <var>c</var>.", &e);
+            assert_eq!(p.calls.len(), 1);
+            assert_eq!(p.calls[0].form, CallForm::ResultOf);
+            assert_eq!(p.calls[0].statement_id, p.statements[0].id);
+            // Outside every statement it records nothing.
+            let (_, p) = parse("If the result of <a href=\"#x\">x</a> is true, return.", &e);
+            assert!(p.calls.is_empty());
+        }
+
+        #[test]
+        fn default_env_keeps_sp1_behavior() {
+            let (_, p) = parse(
+                "Let <var>r</var> be the result of running <a href=\"#x\">x</a> given <var>y</var>.",
+                &Env::default(),
+            );
+            assert!(p.calls.is_empty());
+            assert!(matches!(
+                &p.statements[0].kind,
+                StatementKind::Let {
+                    value: Expr::Opaque { .. },
+                    ..
+                }
+            ));
+            let _ = Literal::Null;
+        }
     }
 }

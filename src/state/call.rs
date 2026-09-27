@@ -14,7 +14,6 @@ const MAX_FLAG_WORDS: usize = 6;
 
 /// The key of `env.mentions` and `env.body_args`: the segment of an
 /// algorithm source, else the source itself.
-#[allow(dead_code)]
 pub(crate) fn segment_key(source: &StatementSource) -> &str {
     match &source.context {
         SourceContext::Algorithm { segment_id, .. } => segment_id,
@@ -36,7 +35,6 @@ impl Parser<'_> {
     /// The call whose callee is link `link`, its region running from the
     /// link's end to `region_end` (encoded positions). `None` when the link
     /// is a mention or its target is not callable.
-    #[allow(dead_code)]
     pub(crate) fn call_at(
         &mut self,
         link: usize,
