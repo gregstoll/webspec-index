@@ -331,11 +331,11 @@ pub(crate) fn call_view(
                 .span
                 .and_then(|span| stored.source.text.get(span.start..span.end))
                 .map_or_else(|| render::expr_text(expr), str::to_string),
-            // A body argument names the nested steps' source, not text.
+            // A body argument names a steps source, not text.
             ArgValue::Body(_) => arg
                 .span
                 .and_then(|span| stored.source.text.get(span.start..span.end))
-                .map_or_else(|| "(substeps)".to_string(), str::to_string),
+                .map_or_else(|| "(steps)".to_string(), str::to_string),
         };
         args.push(ArgView {
             param: param(arg.param).map_or_else(|| arg.param.to_string(), |p| p.name.clone()),
@@ -564,7 +564,7 @@ mod tests {
             [
                 ("source", "*source*"),
                 ("global", "*global*"),
-                ("steps", "(substeps)")
+                ("steps", "(steps)")
             ]
         );
         assert_eq!(
