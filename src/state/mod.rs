@@ -29,6 +29,7 @@ pub mod service;
 pub(crate) mod signature;
 pub mod slice;
 pub mod testing;
+pub(crate) mod tree;
 pub(crate) mod typeexpr;
 pub(crate) mod types;
 
