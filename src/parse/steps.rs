@@ -382,6 +382,25 @@ pub(crate) fn canonical_inline(
     element: &ElementRef<'_>,
     ctx: &InlineContext<'_>,
 ) -> (String, Vec<InlineToken>, Vec<LinkSpan>) {
+    let (text, tokens, links, _) = canonical_inline_marked(element, ctx, None);
+    (text, tokens, links)
+}
+
+/// Positions in a marked inline rendering.
+pub(crate) struct InlineMarks {
+    /// Span of the rendered text of the element `mark` (the defining dfn), if it was rendered.
+    pub mark: Option<TextSpan>,
+    /// One entry per `Variable` token, in token order: the `<var>` element's node id.
+    pub vars: Vec<(TextSpan, ego_tree::NodeId)>,
+}
+
+/// `canonical_inline`, also reporting where the element `mark` and every
+/// `<var>` landed in the text.
+pub(crate) fn canonical_inline_marked(
+    element: &ElementRef<'_>,
+    ctx: &InlineContext<'_>,
+    mark: Option<ego_tree::NodeId>,
+) -> (String, Vec<InlineToken>, Vec<LinkSpan>, InlineMarks) {
     let ctx = ExtractContext {
         spec: ctx.spec,
         base_url: ctx.base_url,
@@ -391,13 +410,20 @@ pub(crate) fn canonical_inline(
     };
     let mut builder = CanonicalBuilder::new(&ctx);
     builder.skip_nested_blocks = true;
+    builder.mark = mark;
     for child in element.children() {
         builder.walk(child);
     }
+    // The builder never emits leading whitespace, so trimming shifts no span.
+    debug_assert_eq!(builder.text.trim_start().len(), builder.text.len());
     (
         builder.text.trim().to_string(),
         builder.tokens,
         builder.links,
+        InlineMarks {
+            mark: builder.mark_span,
+            vars: builder.var_nodes,
+        },
     )
 }
 
@@ -1714,6 +1740,9 @@ struct CanonicalBuilder<'a, 'b> {
     pending_space: bool,
     link_ordinal: usize,
     skip_nested_blocks: bool,
+    mark: Option<ego_tree::NodeId>,
+    mark_span: Option<TextSpan>,
+    var_nodes: Vec<(TextSpan, ego_tree::NodeId)>,
 }
 
 impl<'a, 'b> CanonicalBuilder<'a, 'b> {
@@ -1726,10 +1755,29 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
             pending_space: false,
             link_ordinal: 0,
             skip_nested_blocks: false,
+            mark: None,
+            mark_span: None,
+            var_nodes: Vec::new(),
         }
     }
 
     fn walk(&mut self, node: ego_tree::NodeRef<'_, Node>) {
+        if self.mark == Some(node.id()) {
+            let start = self.text.len();
+            self.walk_node(node);
+            // Spaces flushed at the element's edges are not part of it.
+            let rendered = &self.text[start..];
+            let start = start + (rendered.len() - rendered.trim_start_matches(' ').len());
+            let end = start + self.text[start..].trim_end_matches(' ').len();
+            if start < end {
+                self.mark_span = Some(TextSpan { start, end });
+            }
+        } else {
+            self.walk_node(node);
+        }
+    }
+
+    fn walk_node(&mut self, node: ego_tree::NodeRef<'_, Node>) {
         match node.value() {
             Node::Text(text) => self.push_text(&text.text),
             Node::Element(element) => {
@@ -1737,7 +1785,11 @@ impl<'a, 'b> CanonicalBuilder<'a, 'b> {
                     return;
                 };
                 match element.name() {
-                    "var" => self.push_delimited(&element_ref, InlineTokenKind::Variable, '*'),
+                    "var" => {
+                        self.push_delimited(&element_ref, InlineTokenKind::Variable, '*');
+                        let span = self.tokens.last().expect("variable token").span;
+                        self.var_nodes.push((span, node.id()));
+                    }
                     "code" | "samp" => {
                         let plain = element_ref.text().collect::<String>();
                         let kind = if looks_literal(&plain) {
@@ -3205,6 +3257,44 @@ mod tests {
             .any(|t| t.kind == InlineTokenKind::Literal
                 && &text[t.span.start..t.span.end] == "`true`"));
         assert!(!text.contains("nested"));
+    }
+
+    #[test]
+    fn marked_rendering_reports_the_dfn_span_and_var_nodes_without_changing_text() {
+        let html = r##"<p>To <dfn id="insert">insert</dfn> a <var>node</var>, with <dfn data-dfn-for="insert" id="s"><var>suppress</var></dfn>:</p>"##;
+        let document = Html::parse_document(html);
+        let p = document
+            .select(&Selector::parse("p").unwrap())
+            .next()
+            .unwrap();
+        let dfn = document
+            .select(&Selector::parse("#insert").unwrap())
+            .next()
+            .unwrap();
+        let ctx = InlineContext {
+            spec: "DOM",
+            base_url: "https://dom.spec.whatwg.org/",
+            snapshot_sha: "hash:x",
+            anchor: "insert",
+        };
+        let (text, tokens, links, marks) = canonical_inline_marked(&p, &ctx, Some(dfn.id()));
+        assert_eq!(
+            (text.clone(), tokens.clone(), links.clone()),
+            canonical_inline(&p, &ctx)
+        );
+        let mark = marks.mark.unwrap();
+        assert_eq!(&text[mark.start..mark.end], "insert");
+        assert_eq!(marks.vars.len(), 2);
+        let second = ElementRef::wrap(document.tree.get(marks.vars[1].1).unwrap()).unwrap();
+        assert_eq!(
+            second
+                .parent()
+                .and_then(ElementRef::wrap)
+                .unwrap()
+                .value()
+                .attr("id"),
+            Some("s")
+        );
     }
 
     #[test]
