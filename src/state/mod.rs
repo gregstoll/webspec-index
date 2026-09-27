@@ -6,6 +6,7 @@ pub(crate) mod block;
 pub mod catalog;
 pub(crate) mod classify;
 pub(crate) mod declare;
+pub(crate) mod expr;
 pub mod extract;
 pub(crate) mod grammar;
 pub mod ir;

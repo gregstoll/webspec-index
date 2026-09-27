@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::parse::steps::{AnchorTarget, InlineTokenKind, TextSpan};
-use crate::state::ir::{Expr, Hop, LinkRole, ParsedSource, Path, Root, StatementSource};
+use crate::state::ir::{Hop, LinkRole, ParsedSource, Path, Root, StatementSource};
 use crate::state::model::{Literal, TypeKey, TypeRef};
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,6 @@ impl Env {
 }
 
 /// Role strength: a stronger role replaces a weaker one, never the reverse.
-#[allow(dead_code)]
 fn role_rank(role: &LinkRole) -> u8 {
     match role {
         LinkRole::Callee { .. } => 9,
@@ -388,7 +387,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_role(&mut self, link: usize, role: LinkRole) {
         let keep = self
             .out
@@ -608,7 +606,7 @@ impl Parser<'_> {
         let mut subscript = None;
         if self.lit(at, "[") {
             let close = self.matching_bracket(at)?;
-            subscript = Some(Box::new(self.expr(at + 1, close)));
+            subscript = Some(Box::new(self.value_expr(at + 1, close, &mut Vec::new())));
             read_ranges.push((at + 1, close));
             at = close + 1;
         }
@@ -930,48 +928,6 @@ impl Parser<'_> {
         }
         matches!(self.enc.placeholder(pos), Some((Placeholder::Link(link), _))
             if self.source.links[link].visible_text.starts_with("be "))
-    }
-
-    /// `VALUE` → `Expr`.
-    pub(crate) fn expr(&self, start: usize, end: usize) -> Expr {
-        let text = &self.enc.text[start..end];
-        let start = start + (text.len() - text.trim_start().len());
-        let end = end - (text.len() - text.trim_end().len());
-        let text = &self.enc.text[start.min(end)..end];
-        match self.enc.placeholder(start) {
-            Some((Placeholder::Var(var), after)) if after == end => {
-                return Expr::Var(self.enc.vars[var].clone());
-            }
-            Some((Placeholder::Link(link), after)) if after == end && self.is_this_link(link) => {
-                return Expr::This;
-            }
-            _ => {}
-        }
-        if text == "this" {
-            return Expr::This;
-        }
-        if let Some(lit) = literal(text) {
-            return Expr::Literal(lit);
-        }
-        if let Some((inner, after)) = self.code(start) {
-            if after == end {
-                if let Some(lit) = literal(&inner) {
-                    return Expr::Literal(lit);
-                }
-            }
-        }
-        if let Some(after) = self.keyword(start, &["a new ", "an new "]) {
-            return Expr::New {
-                ty: self.new_type(after),
-                init: self.inits.get(&start).cloned(),
-            };
-        }
-        if let Some(path) = self.path(start, false).filter(|path| path.end == end) {
-            return Expr::Path(path.path);
-        }
-        Expr::Opaque {
-            text: self.src_text(start, end),
-        }
     }
 
     /// `NEWTYPE`: a link, or a code token naming an IDL interface.

@@ -1391,7 +1391,10 @@ mod tests {
         assert_eq!(inits.len(), 2);
         assert_eq!(
             inits[0].0[0].value,
-            Expr::Literal(Literal::String("html".to_string()))
+            Expr::EnumValue {
+                text: "html".to_string(),
+                target: None
+            }
         );
         assert_eq!(inits[1].0[0].value, Expr::Var("o".to_string()));
         assert!(inits

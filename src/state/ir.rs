@@ -709,8 +709,9 @@ pub(crate) fn initializer_intro(source: &StatementSource) -> Option<Option<TypeR
 pub(crate) fn parse_value(source: &StatementSource) -> Expr {
     let enc = Encoded::new(source);
     let env = Env::default();
-    let p = Parser::new(&enc, source, &env);
-    p.expr(0, p.value_end(0, None))
+    let mut p = Parser::new(&enc, source, &env);
+    let end = p.value_end(0, None);
+    p.expr_at(0, end)
 }
 
 /// The links a parsed `PATH` positions, as indices into `source.links`.
@@ -755,7 +756,7 @@ pub(crate) fn parse_expr_span(source: &StatementSource, span: TextSpan) -> Expr 
     let env = Env::default();
     let start = enc.to_enc(span.start);
     let end = enc.to_enc(span.end);
-    Parser::new(&enc, source, &env).expr(start, end)
+    Parser::new(&enc, source, &env).expr_at(start, end)
 }
 
 /// A `<dl>` initializer entry (§7.3): the label's first link is the field,
@@ -833,7 +834,7 @@ impl Parser<'_> {
         let kind = StatementKind::Mutate {
             op,
             target: target.path.clone(),
-            operand: operand.map(|(start, end)| self.expr(start, end)),
+            operand: operand.map(|(start, end)| self.expr_at(start, end)),
             basis,
         };
         let id = self.push(at, end, "mutate", kind);
@@ -974,7 +975,7 @@ impl Parser<'_> {
         form: SetForm,
     ) -> usize {
         let value_end = self.value_end(value_start, targets.last());
-        let value = self.expr(value_start, value_end);
+        let value = self.expr_at(value_start, value_end);
         let id = if targets[0].path.subscript.is_some() {
             let kind = StatementKind::Mutate {
                 op: MutationOp::MapSet,
@@ -1052,7 +1053,7 @@ impl Parser<'_> {
         let kind = StatementKind::Mutate {
             op,
             target: target.path.clone(),
-            operand: operand.map(|(start, end)| self.expr(start, end)),
+            operand: operand.map(|(start, end)| self.expr_at(start, end)),
             basis: OpBasis::Verb,
         };
         let id = self.push(at, end, "mutate", kind);
@@ -1082,7 +1083,7 @@ impl Parser<'_> {
             return false;
         };
         let value_end = self.value_end(value_start, None);
-        let value = self.expr(value_start, value_end);
+        let value = self.expr_at(value_start, value_end);
         let mut first_id = None;
         for var in vars {
             let name = self.enc.vars[var].clone();
@@ -1111,7 +1112,7 @@ impl Parser<'_> {
         let value_end = self.value_end(value_start, None);
         let kind = StatementKind::Set {
             targets: vec![target.path.clone()],
-            value: self.expr(value_start, value_end),
+            value: self.expr_at(value_start, value_end),
             form: SetForm::Passive,
         };
         let id = self.push(at, value_end, "set", kind);
@@ -1195,7 +1196,7 @@ impl Parser<'_> {
                 .iter()
                 .map(|(hop, _, value_start, value_end)| InitEntry {
                     field: hop.clone(),
-                    value: self.expr(*value_start, *value_end),
+                    value: self.expr_at(*value_start, *value_end),
                 })
                 .collect(),
             form,
@@ -2226,7 +2227,7 @@ mod tests {
             r##"[(Set { targets: [Path { root: Var("d"), hops: [Field { link_id: "src-8479fb6fb8287e762d07630bb01259c7ae64f8e1d0df9363f59f5276dee0aea4", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }], value: Literal(Bool(true)), form: To }, TextSpan { start: 0, end: 19 })] | {0: (Write, "stmt-7aa9b61f42bc96f5868a16cdc18e52c63f9ac46bc19728fc8ab137387069e701")}"##,
             r##"[(Opaque { reason: UnparsedTarget, verb: Some("set"), target_text: Some("*a*'s _ and *b*'s _") }, TextSpan { start: 0, end: 31 })] | {}"##,
             r##"[(Mutate { op: Append, target: Path { root: Var("d"), hops: [Field { link_id: "src-f4e72ec47b9aa1ff3324e43f10524bc7e5be3d31cd04f38799e211692c2e3963", target: Some(AnchorTarget { spec: "HTML", anchor: "h" }), visible_text: "h" }], subscript: None }, operand: Some(Var("x")), basis: InfraLink(AnchorTarget { spec: "INFRA", anchor: "list-append" }) }, TextSpan { start: 0, end: 21 })] | {1: (Write, "stmt-a42f9d814b6054e1b18cc295eb44904d817f1f3af37a1bdc6e1a9acc44bbff3b")}"##,
-            r##"[(Init { constructed: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), entries: [InitEntry { field: Field { link_id: "src-e512ac427d9e15dc6b48b91bb630b159462b568ff1f259a6667e6c7c258ab347", target: Some(AnchorTarget { spec: "HTML", anchor: "type" }), visible_text: "type" }, value: Opaque { text: "`load`" } }], form: WhoseList }, TextSpan { start: 11, end: 43 }), (Let { var: "e", value: New { ty: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), init: Some("stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8") } }, TextSpan { start: 0, end: 43 })] | {0: (Read, "stmt-64b9ac000c9c7b93deb580c9682dbe3afbdf7589eeceb35dd873728b23e081de"), 1: (Init, "stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8")}"##,
+            r##"[(Init { constructed: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), entries: [InitEntry { field: Field { link_id: "src-e512ac427d9e15dc6b48b91bb630b159462b568ff1f259a6667e6c7c258ab347", target: Some(AnchorTarget { spec: "HTML", anchor: "type" }), visible_text: "type" }, value: EnumValue { text: "load", target: None } }], form: WhoseList }, TextSpan { start: 11, end: 43 }), (Let { var: "e", value: New { ty: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), init: Some("stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8") } }, TextSpan { start: 0, end: 43 })] | {0: (Read, "stmt-64b9ac000c9c7b93deb580c9682dbe3afbdf7589eeceb35dd873728b23e081de"), 1: (Init, "stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8")}"##,
             r##"[(Set { targets: [Path { root: Var("d"), hops: [Field { link_id: "src-4c9d44d6f62ce27f89265357f0c781fb468c341c66d6dbf5973b154e97360921", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }], value: Opaque { text: "the result of running run given *x*" }, form: To }, TextSpan { start: 0, end: 50 })] | {0: (Write, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3"), 1: (Read, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3")}"##,
         ];
         assert_eq!(got, want);
