@@ -1,30 +1,37 @@
 //! `extract_state` (§9.1): the object model, statement sources, statements and
 //! occurrences of one snapshot, and the rows derived from them (§9.2).
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use sha2::{Digest, Sha256};
 
 use crate::model::{ParsedIdlDefinition, ParsedSection};
 use crate::parse::steps::{
-    AnchorTarget, InlineTokenKind, LinkSpan, StepItem, StructuralBranch, StructuralSpec, TextSpan,
+    AnchorTarget, InlineTokenKind, LinkSpan, ReferenceRole, StepItem, StructuralBranch,
+    StructuralSpec, TextSpan,
 };
 use crate::state::catalog::load_state_files;
 use crate::state::declare;
+use crate::state::grammar::{Callable, Env};
 use crate::state::idl_sig::{idl_signature, IdlMembers};
 use crate::state::intro::{algorithm_intros, prose_intro, IdIndex};
 use crate::state::ir::{
-    self, Expr, Hop, InitForm, MutationOp, OpBasis, OpaqueReason, Path, ProseRole, Root, SetForm,
-    SourceContext, Statement, StatementKind, StatementSource,
+    self, Call, CallForm, Expr, Hop, InitForm, MutationOp, OpBasis, OpaqueReason, Origin,
+    ParsedSource, Path, Predicate, ProseRole, Root, SetForm, SourceContext, Statement,
+    StatementKind, StatementSource, VarOrigins,
 };
 use crate::state::model::{
-    CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence, OccurrenceClass, Owner,
-    Reflection, ReviewItem, Signature, SignatureForm, SignatureIssue, Site, SiteClass,
-    StateCatalog, StateSpec, TypeBasis, TypeExpr, TypeKey, TypeRef,
+    AlgorithmSummary, CoverageCounters, FieldDef, Literal, ObjectModel, Occurrence,
+    OccurrenceClass, Owner, Primitive, Reflection, ReturnBasis, ReturnType, ReviewItem, Signature,
+    SignatureForm, SignatureIssue, Site, SiteClass, StateCatalog, StateSpec, TypeBasis, TypeExpr,
+    TypeKey, TypeRef,
 };
 use crate::state::names::NameResolver;
 use crate::state::signature::extract_signatures;
-use crate::state::{classify, prose, reflect, rules, types};
+use crate::state::tree::link_tree;
+use crate::state::vars::{uses, var_origins, IrIndex};
+use crate::state::{classify, prose, reflect, roles, rules, types};
 
 /// Everything `extract_state` reads. The caller parses the document once and
 /// shares it with the section and structural extraction.
@@ -109,6 +116,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     let mut signatures = extract_signatures(&intros, &names, &members);
 
     let (mut sources, mut branch_inits) = algorithm_sources(structure);
+    let algorithm_ranges = algorithm_source_ranges(structure, &sources);
     sources.extend(intros.into_iter().map(|intro| intro.source));
     let prose = prose::prose_sources(
         document,
@@ -121,16 +129,26 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     add_prose_signatures(&prose.sources, &ids, &members, &mut signatures);
     let prose_sources = prose.sources.len() as u32;
     sources.extend(prose.sources);
-    let mut statements = Vec::new();
+
+    let env = call_env(spec, structure, &signatures);
+    let mut owner = vec![None; sources.len()];
+    for (algorithm, range) in algorithm_ranges.iter().enumerate() {
+        owner[range.clone()].fill(Some(algorithm));
+    }
+    let mut algorithm_statements: Vec<Vec<Statement>> = vec![Vec::new(); algorithm_ranges.len()];
+    let mut other_statements = Vec::new();
+    let mut calls = Vec::new();
+    let mut link_roles = Vec::with_capacity(sources.len());
     let mut occurrences = Vec::new();
     let mut declared_sites = Vec::new();
     for (index, source) in sources.iter().enumerate() {
         if matches!(source.context, SourceContext::Intro { .. }) {
+            link_roles.push(roles::link_roles(source, &ParsedSource::default(), &[]));
             continue;
         }
         let mut parsed = match branch_inits.remove(&index) {
             Some((constructed, value)) => ir::parse_branch_label(source, constructed, value),
-            None => ir::parse_source(source),
+            None => ir::parse_source_with(source, &env),
         };
         let mut source_occurrences = classify::classify(source, &parsed);
         rules::apply_rules(
@@ -140,9 +158,29 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
             &mut source_occurrences,
             &mut declared_sites,
         );
+        link_roles.push(roles::link_roles(source, &parsed, &source_occurrences));
         occurrences.extend(source_occurrences);
-        statements.extend(parsed.statements);
+        calls.extend(parsed.calls);
+        match owner[index] {
+            Some(algorithm) => algorithm_statements[algorithm].extend(parsed.statements),
+            None => other_statements.extend(parsed.statements),
+        }
     }
+
+    let mut issues = declared.issues;
+    for ((algorithm, range), statements) in structure
+        .algorithms
+        .iter()
+        .zip(&algorithm_ranges)
+        .zip(&mut algorithm_statements)
+    {
+        link_tree(algorithm, &sources[range.clone()], statements, &mut issues);
+    }
+    let statements: Vec<Statement> = algorithm_statements
+        .into_iter()
+        .flatten()
+        .chain(other_statements)
+        .collect();
 
     let counters = declared.counters;
     let mut coverage = CoverageCounters {
@@ -156,7 +194,6 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         prose_mentions: prose.mentions.values().sum(),
         ..CoverageCounters::default()
     };
-    count_statements(&statements, &mut coverage);
     count_signatures(structure, &signatures, &mut coverage);
     let concept_ids: HashSet<&str> = concepts.iter().map(|c| c.id.as_str()).collect();
     count_occurrences(
@@ -168,7 +205,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         &mut coverage,
     );
 
-    StateSpec {
+    let mut state = StateSpec {
         representation_version: inputs.catalog.representation_version(),
         spec: spec.to_string(),
         snapshot_sha: inputs.snapshot_sha.to_string(),
@@ -177,11 +214,412 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         statements,
         occurrences,
         prose_mentions: prose.mentions,
-        coverage,
-        issues: declared.issues,
+        coverage: CoverageCounters::default(),
+        issues,
         declared_sites,
         signatures,
+        calls,
+        link_roles,
         ..Default::default()
+    };
+
+    let index = IrIndex::new(&state);
+    let returns = return_types(&state.signatures, &index);
+    let var_origins = subject_var_origins(&state.signatures, &index);
+    let summaries = summaries(structure, &state.sources, &var_origins, &index);
+    count_statements(&state.statements, &index, &mut coverage);
+    count_ir(&state, structure, &var_origins, &index, &mut coverage);
+    drop(index);
+
+    for (at, returns) in returns {
+        state.signatures[at].returns = Some(returns);
+    }
+    state.var_origins = var_origins;
+    state.summaries = summaries;
+    state.coverage = coverage;
+    state
+}
+
+/// The statement grammar's view of this spec (§9.1): what each in-spec
+/// anchor is callable as, and the structural operation sites that mention an
+/// algorithm or pass it bodies.
+fn call_env(spec: &str, structure: &StructuralSpec, signatures: &[Signature]) -> Env {
+    let mut env = Env {
+        spec: spec.to_string(),
+        ..Env::default()
+    };
+    for signature in signatures {
+        let callable = match (&signature.form, &signature.template) {
+            (SignatureForm::Accessor, _) => Callable::Accessor,
+            (SignatureForm::Predicate, _) => Callable::Predicate,
+            (_, Some(_)) => Callable::Template,
+            (_, None) => Callable::NoTemplate,
+        };
+        env.callables
+            .entry(signature.algorithm.anchor.clone())
+            .or_insert(callable);
+    }
+    for algorithm in &structure.algorithms {
+        env.callables
+            .entry(algorithm.source.section_anchor.clone())
+            .or_insert(Callable::Body);
+        for site in &algorithm.operation_sites {
+            let key = (site.segment_id.clone(), site.link_id.clone());
+            if site.role == ReferenceRole::Mention {
+                env.mentions.insert(key.clone());
+            }
+            if !site.actual_body_ids.is_empty() {
+                env.body_args.insert(key, site.actual_body_ids.clone());
+            }
+        }
+    }
+    env
+}
+
+/// The range of `sources` (from [`algorithm_sources`]) each structural
+/// algorithm owns: its segments and its `<dl>` initializer entries.
+fn algorithm_source_ranges(
+    structure: &StructuralSpec,
+    sources: &[StatementSource],
+) -> Vec<Range<usize>> {
+    let mut at = 0;
+    structure
+        .algorithms
+        .iter()
+        .map(|algorithm| {
+            let segments = algorithm.segments.len();
+            let labels = sources[at + segments..]
+                .iter()
+                .take_while(|source| {
+                    matches!(&source.context, SourceContext::BranchLabel { .. })
+                        && source.subject.anchor == algorithm.source.section_anchor
+                })
+                .count();
+            let range = at..at + segments + labels;
+            at = range.end;
+            range
+        })
+        .collect()
+}
+
+/// Return types from `Return` statements (§8.1.1) for signatures without
+/// one: every value `Return` a literal of one primitive kind, possibly with
+/// `null`. Positions into `signatures`.
+fn return_types(signatures: &[Signature], index: &IrIndex) -> Vec<(usize, ReturnType)> {
+    signatures
+        .iter()
+        .enumerate()
+        .filter(|(_, signature)| signature.returns.is_none())
+        .filter_map(|(at, signature)| {
+            let statements = index.statements_by_subject.get(&signature.algorithm)?;
+            let ty = literal_return_type(statements)?;
+            Some((
+                at,
+                ReturnType {
+                    ty,
+                    basis: ReturnBasis::ReturnStatements,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn literal_return_type(statements: &[&Statement]) -> Option<TypeExpr> {
+    let mut primitive = None;
+    let mut null = false;
+    for statement in statements {
+        let StatementKind::Return { value: Some(value) } = &statement.kind else {
+            continue;
+        };
+        let kind = match value {
+            Expr::Literal(Literal::Null) => {
+                null = true;
+                continue;
+            }
+            Expr::Literal(Literal::Bool(_)) => Primitive::Boolean,
+            Expr::Literal(Literal::String(_)) => Primitive::String,
+            Expr::Literal(Literal::Number(_)) => Primitive::Number,
+            _ => return None,
+        };
+        if primitive.is_some_and(|seen| seen != kind) {
+            return None;
+        }
+        primitive = Some(kind);
+    }
+    let primitive = TypeExpr::Primitive(primitive?);
+    Some(if null {
+        TypeExpr::Union(vec![primitive, TypeExpr::Null])
+    } else {
+        primitive
+    })
+}
+
+/// Variable origins of every subject with statements, in subject order.
+fn subject_var_origins(signatures: &[Signature], index: &IrIndex) -> Vec<VarOrigins> {
+    let mut by_subject: HashMap<&AnchorTarget, &Signature> = HashMap::new();
+    for signature in signatures {
+        by_subject.entry(&signature.algorithm).or_insert(signature);
+    }
+    index
+        .statements_by_subject
+        .keys()
+        .map(|subject| var_origins(subject, by_subject.get(subject).copied(), index))
+        .collect()
+}
+
+/// One summary per structural algorithm and per IDL-role prose subject.
+fn summaries(
+    structure: &StructuralSpec,
+    sources: &[StatementSource],
+    var_origins: &[VarOrigins],
+    index: &IrIndex,
+) -> Vec<AlgorithmSummary> {
+    let origins: HashMap<&AnchorTarget, &VarOrigins> =
+        var_origins.iter().map(|o| (&o.subject, o)).collect();
+    let algorithms = structure.algorithms.iter().map(|algorithm| AnchorTarget {
+        spec: structure.spec.clone(),
+        anchor: algorithm.source.section_anchor.clone(),
+    });
+    let idl_steps = sources
+        .iter()
+        .filter(|source| {
+            matches!(
+                source.context,
+                SourceContext::Prose {
+                    role: ProseRole::Getter
+                        | ProseRole::Setter
+                        | ProseRole::Method
+                        | ProseRole::Constructor,
+                    ..
+                }
+            )
+        })
+        .map(|source| source.subject.clone());
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for subject in algorithms.chain(idl_steps) {
+        if !seen.insert(subject.clone()) {
+            continue;
+        }
+        let statements = index
+            .statements_by_subject
+            .get(&subject)
+            .map_or(&[][..], Vec::as_slice);
+        let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+        let mut opaque = Vec::new();
+        for statement in statements {
+            *counts
+                .entry(kind_tag(&statement.kind).to_string())
+                .or_default() += 1;
+            if matches!(statement.kind, StatementKind::Opaque { .. }) {
+                opaque.push(review_item(index, statement, String::new()));
+            }
+        }
+        let calls = index
+            .sources_by_subject
+            .get(&subject)
+            .into_iter()
+            .flatten()
+            .filter_map(|source| index.calls_by_source.get(source.id.as_str()))
+            .map(Vec::len)
+            .sum::<usize>() as u32;
+        out.push(AlgorithmSummary {
+            anchor: subject.anchor.clone(),
+            statements: counts,
+            opaque,
+            var_origins: origins
+                .get(&subject)
+                .map(|o| o.vars.clone())
+                .unwrap_or_default(),
+            calls,
+        });
+    }
+    out
+}
+
+/// A review item for `statement`: its subject, step and span text.
+fn review_item(index: &IrIndex, statement: &Statement, target: String) -> ReviewItem {
+    let source = index.sources.get(statement.source_id.as_str()).copied();
+    ReviewItem {
+        subject: source.map_or_else(String::new, |s| anchor_key(&s.subject)),
+        step_path: source
+            .and_then(|s| step_path(&s.context))
+            .map(str::to_string),
+        target,
+        text: source
+            .and_then(|s| s.text.get(statement.span.start..statement.span.end))
+            .unwrap_or_default()
+            .to_string(),
+    }
+}
+
+/// Length of the step prefix (`⌛ `, `Optionally, `) a step head may follow;
+/// the head rule of the statement tree (§8.2).
+fn head_prefix_len(text: &str) -> usize {
+    let rest = text.strip_prefix("\u{231B} ").unwrap_or(text);
+    let rest = rest
+        .strip_prefix("Optionally, ")
+        .or_else(|| rest.strip_prefix("Optionally "))
+        .unwrap_or(rest);
+    text.len() - rest.len()
+}
+
+/// Statement-level coverage (§14.5): step heads, conditions, assertions,
+/// loop variables, `Let`/`Return` value forms, call forms and undeclared
+/// variables.
+fn count_ir(
+    state: &StateSpec,
+    structure: &StructuralSpec,
+    var_origins: &[VarOrigins],
+    index: &IrIndex,
+    coverage: &mut CoverageCounters,
+) {
+    let mut first_statement: HashMap<&str, &Statement> = HashMap::new();
+    for statements in index.statements_by_subject.values() {
+        for &statement in statements {
+            first_statement
+                .entry(statement.source_id.as_str())
+                .or_insert(statement);
+        }
+    }
+    for step in structure.algorithms.iter().flat_map(|a| &a.steps) {
+        coverage.steps += 1;
+        let head = step
+            .items
+            .iter()
+            .find_map(|item| match item {
+                StepItem::Segment(id) => Some(id.as_str()),
+                _ => None,
+            })
+            .and_then(|id| Some((index.sources.get(id)?, first_statement.get(id)?)))
+            .filter(|(source, head)| head.span.start <= head_prefix_len(&source.text))
+            .map(|(_, head)| head);
+        let tag = match head {
+            Some(head) => {
+                if !matches!(head.kind, StatementKind::Opaque { .. }) {
+                    coverage.steps_recognized += 1;
+                }
+                kind_tag(&head.kind)
+            }
+            None => "unrecognized",
+        };
+        *coverage.step_heads.entry(tag.to_string()).or_default() += 1;
+    }
+
+    let mut expr_form = |slot: &str, form: &str| {
+        *coverage
+            .expr_forms
+            .entry(format!("{slot}:{form}"))
+            .or_default() += 1;
+    };
+    for statement in &state.statements {
+        match &statement.kind {
+            StatementKind::Let { value, .. } => expr_form("let", expr_form_name(value)),
+            StatementKind::Return { value } => {
+                expr_form("return", value.as_ref().map_or("none", expr_form_name))
+            }
+            _ => {}
+        }
+    }
+    for statement in &state.statements {
+        match &statement.kind {
+            StatementKind::If { condition, .. }
+            | StatementKind::Otherwise {
+                condition: Some(condition),
+                ..
+            } => {
+                coverage.if_total += 1;
+                if !matches!(condition, Predicate::Opaque { .. }) {
+                    coverage.if_parsed += 1;
+                }
+            }
+            StatementKind::Assert { predicate } => {
+                coverage.assert_total += 1;
+                if matches!(predicate, Predicate::Opaque { .. }) {
+                    coverage
+                        .assert_review
+                        .push(review_item(index, statement, String::new()));
+                } else {
+                    coverage.assert_parsed += 1;
+                }
+            }
+            StatementKind::ForEach { vars, .. } => {
+                coverage.foreach_total += 1;
+                if !vars.is_empty() {
+                    coverage.foreach_bound += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    for call in &state.calls {
+        *coverage
+            .calls_by_form
+            .entry(call_form_name(call.form).to_string())
+            .or_default() += 1;
+    }
+
+    for origins in var_origins {
+        let undeclared: Vec<&str> = origins
+            .vars
+            .iter()
+            .filter(|v| v.origin == Origin::Undeclared)
+            .map(|v| v.name.as_str())
+            .collect();
+        if undeclared.is_empty() {
+            continue;
+        }
+        coverage.undeclared_vars += undeclared.len() as u32;
+        let mut first_use: HashMap<&str, &Statement> = HashMap::new();
+        for &statement in index
+            .statements_by_subject
+            .get(&origins.subject)
+            .into_iter()
+            .flatten()
+        {
+            for name in uses(statement, index) {
+                first_use.entry(name).or_insert(statement);
+            }
+        }
+        for name in undeclared {
+            coverage.undeclared_review.push(match first_use.get(name) {
+                Some(statement) => review_item(index, statement, name.to_string()),
+                None => ReviewItem {
+                    subject: anchor_key(&origins.subject),
+                    step_path: None,
+                    target: name.to_string(),
+                    text: String::new(),
+                },
+            });
+        }
+    }
+}
+
+fn expr_form_name(expr: &Expr) -> &'static str {
+    match expr {
+        Expr::Var(_) => "var",
+        Expr::This => "this",
+        Expr::Literal(_) => "literal",
+        Expr::Path(_) => "path",
+        Expr::New { .. } => "new",
+        Expr::Call(_) => "call",
+        Expr::AlgorithmRef { .. } => "algorithm_ref",
+        Expr::List(_) => "list",
+        Expr::EnumValue { .. } => "enum",
+        Expr::Conditional { .. } => "conditional",
+        Expr::Opaque { .. } => "opaque",
+    }
+}
+
+fn call_form_name(form: CallForm) -> &'static str {
+    match form {
+        CallForm::Imperative => "imperative",
+        CallForm::ResultOf => "result_of",
+        CallForm::Gerund => "gerund",
+        CallForm::Possessive => "possessive",
+        CallForm::Predicate => "predicate",
+        CallForm::SetToBe => "set_to_be",
+        CallForm::Ecmarkup => "ecmarkup",
     }
 }
 
@@ -388,12 +826,36 @@ fn path_shape(path: &Path) -> String {
     }
 }
 
-/// Statement-form key: `let`, `set:<form>:<shape>`, `mutate:<op>:<shape>`,
-/// `init:<form>`, `opaque:<reason>:<verb or none>`.
-/// New control-flow kinds return their serde tag.
+/// The serde tag of a statement kind.
+fn kind_tag(kind: &StatementKind) -> &'static str {
+    match kind {
+        StatementKind::Let { .. } => "let",
+        StatementKind::Set { .. } => "set",
+        StatementKind::Mutate { .. } => "mutate",
+        StatementKind::Init { .. } => "init",
+        StatementKind::Opaque { .. } => "opaque",
+        StatementKind::Call { .. } => "call",
+        StatementKind::If { .. } => "if",
+        StatementKind::Otherwise { .. } => "otherwise",
+        StatementKind::ForEach { .. } => "for_each",
+        StatementKind::While { .. } => "while",
+        StatementKind::Return { .. } => "return",
+        StatementKind::Throw { .. } => "throw",
+        StatementKind::Abort { .. } => "abort",
+        StatementKind::Continue => "continue",
+        StatementKind::Break => "break",
+        StatementKind::ContinueRemaining { .. } => "continue_remaining",
+        StatementKind::Wait { .. } => "wait",
+        StatementKind::InParallel { .. } => "in_parallel",
+        StatementKind::RunSteps { .. } => "run_steps",
+        StatementKind::Assert { .. } => "assert",
+    }
+}
+
+/// Statement-form key: `set:<form>:<shape>`, `mutate:<op>:<shape>`,
+/// `init:<form>`, `opaque:<reason>:<verb or none>`; the kind tag otherwise.
 fn statement_key(kind: &StatementKind) -> String {
     match kind {
-        StatementKind::Let { .. } => "let".to_string(),
         StatementKind::Set { targets, form, .. } => {
             let shape = targets.first().map_or("other".to_string(), path_shape);
             format!("set:{}:{shape}", set_form_name(*form))
@@ -409,25 +871,13 @@ fn statement_key(kind: &StatementKind) -> String {
                 verb.as_deref().unwrap_or("none")
             )
         }
-        StatementKind::Call { .. } => "call".to_string(),
-        StatementKind::If { .. } => "if".to_string(),
-        StatementKind::Otherwise { .. } => "otherwise".to_string(),
-        StatementKind::ForEach { .. } => "for_each".to_string(),
-        StatementKind::While { .. } => "while".to_string(),
-        StatementKind::Return { .. } => "return".to_string(),
-        StatementKind::Throw { .. } => "throw".to_string(),
-        StatementKind::Abort { .. } => "abort".to_string(),
-        StatementKind::Continue => "continue".to_string(),
-        StatementKind::Break => "break".to_string(),
-        StatementKind::ContinueRemaining { .. } => "continue_remaining".to_string(),
-        StatementKind::Wait { .. } => "wait".to_string(),
-        StatementKind::InParallel { .. } => "in_parallel".to_string(),
-        StatementKind::RunSteps { .. } => "run_steps".to_string(),
-        StatementKind::Assert { .. } => "assert".to_string(),
+        other => kind_tag(other).to_string(),
     }
 }
 
-fn count_statements(statements: &[Statement], coverage: &mut CoverageCounters) {
+/// Statement forms, and structured and unstructured `Set`s: a `Set … to be
+/// ⟦L⟧` call counts as an unstructured set, as the opaque `set` it replaced.
+fn count_statements(statements: &[Statement], index: &IrIndex, coverage: &mut CoverageCounters) {
     for statement in statements {
         *coverage
             .statements
@@ -445,6 +895,14 @@ fn count_statements(statements: &[Statement], coverage: &mut CoverageCounters) {
             StatementKind::Opaque {
                 verb: Some(verb), ..
             } if verb == "set" || verb == "unset" => coverage.set_total += 1,
+            StatementKind::Call { call }
+                if index
+                    .calls
+                    .get(call.as_str())
+                    .is_some_and(|call| call.form == CallForm::SetToBe) =>
+            {
+                coverage.set_total += 1
+            }
             _ => {}
         }
     }
@@ -575,6 +1033,7 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
         .iter()
         .map(|s| (s.id.as_str(), s))
         .collect();
+    let calls: HashMap<&str, &Call> = state.calls.iter().map(|c| (c.id.as_str(), c)).collect();
     let mut first_clause: HashMap<&str, usize> = HashMap::new();
     let mut opaque_by_source: HashMap<&str, Vec<&Statement>> = HashMap::new();
     let mut rule_clauses: HashSet<(&str, usize)> = HashSet::new();
@@ -670,26 +1129,34 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
     }
 
     for statement in &state.statements {
-        let StatementKind::Opaque {
-            verb: Some(verb),
-            target_text,
-            ..
-        } = &statement.kind
-        else {
-            continue;
-        };
         if rule_clauses.contains(&(statement.source_id.as_str(), statement.span.start)) {
             continue;
         }
         let Some(source) = sources.get(statement.source_id.as_str()) else {
             continue;
         };
+        let (op, target_text) = match &statement.kind {
+            StatementKind::Opaque {
+                verb: Some(verb),
+                target_text,
+                ..
+            } => (verb.clone(), target_text.clone().unwrap_or_default()),
+            // SP4 replaces these with the callee's propagated writes.
+            StatementKind::Call { call }
+                if calls
+                    .get(call.as_str())
+                    .is_some_and(|call| call.form == CallForm::SetToBe) =>
+            {
+                ("set".to_string(), set_to_be_target(source, statement.span))
+            }
+            _ => continue,
+        };
         let class = SiteClass::OpaqueWrite;
         let parts = SiteParts {
-            op: verb.clone(),
+            op,
             receiver: "opaque",
             constructed: None,
-            target_text: target_text.clone().unwrap_or_default(),
+            target_text,
             value_text: None,
         };
         sites.push(site(
@@ -706,6 +1173,24 @@ pub fn derive_sites(state: &StateSpec) -> Vec<Site> {
     sites.extend(state.declared_sites.iter().cloned());
     sites.extend(state.model.reflections.iter().filter_map(reflection_site));
     sites
+}
+
+/// The text of a `Set … to be ⟦L⟧` statement between the `Set` keyword and
+/// the first ` to ` after it.
+fn set_to_be_target(source: &StatementSource, span: TextSpan) -> String {
+    let Some(clause) = source.text.get(span.start..span.end) else {
+        return String::new();
+    };
+    let target = ["Set ", "set "]
+        .iter()
+        .filter_map(|keyword| clause.find(keyword).map(|at| at + keyword.len()))
+        .min()
+        .map_or(clause, |after| &clause[after..]);
+    target
+        .find(" to ")
+        .map_or(target, |to| &target[..to])
+        .trim()
+        .to_string()
 }
 
 /// The `Declared` reflect site of a reflection whose content attribute is known.
@@ -1608,6 +2093,114 @@ mod tests {
         );
         // Coverage counts algorithm signatures only: `initEvent`, not the getter.
         assert_eq!(state.coverage.idl_signatures, 1);
+    }
+
+    #[test]
+    fn full_ir_is_extracted_for_the_event_fixture() {
+        use crate::state::ir::{BlockRole, CallForm, Origin, StatementKind};
+        use crate::state::testing::{calls_at, signature, statements_at, ty, EVENT_DOM};
+        let state = extract(EVENT_DOM, "DOM");
+        let step1 = statements_at(&state, "dom-event-initevent", "1");
+        assert!(matches!(step1[0].kind, StatementKind::If { .. }));
+        assert_eq!(step1[1].parent.as_ref().unwrap().role, BlockRole::Then);
+        let call = calls_at(&state, "dom-event-initevent", "2")[0];
+        assert_eq!(
+            (
+                call.form,
+                call.callee.target.as_ref().unwrap().anchor.as_str()
+            ),
+            (CallForm::Imperative, "concept-event-initialize")
+        );
+        let init = signature(&state, "dom-event-initevent");
+        assert_eq!(ty(init.this.as_ref().unwrap()), "idl:Event");
+        let origins = state
+            .var_origins
+            .iter()
+            .find(|v| v.subject.anchor == "dom-event-initevent")
+            .unwrap();
+        assert!(origins
+            .vars
+            .iter()
+            .all(|v| matches!(v.origin, Origin::Param { .. })));
+        let roles = state
+            .link_roles
+            .iter()
+            .find(|r| r.source_id == call.source_id)
+            .unwrap();
+        assert_eq!(
+            roles.roles.len(),
+            crate::state::testing::source_at(&state, "dom-event-initevent", "2")
+                .links
+                .len()
+        );
+        let c = &state.coverage;
+        assert_eq!((c.steps, c.steps_recognized), (3, 3));
+        assert_eq!(c.step_heads.get("if"), Some(&1));
+        assert_eq!(c.step_heads.get("call"), Some(&1));
+        assert_eq!((c.if_total, c.if_parsed), (1, 1));
+        assert_eq!(c.calls_by_form.get("imperative"), Some(&1));
+        assert_eq!(c.expr_forms.get("return:none"), Some(&1));
+        assert_eq!(c.expr_forms.get("return:path"), Some(&1));
+        let summary = state
+            .summaries
+            .iter()
+            .find(|s| s.anchor == "dom-event-initevent")
+            .unwrap();
+        assert_eq!((summary.statements.get("if"), summary.calls), (Some(&1), 1));
+    }
+
+    #[test]
+    fn predicate_signatures_get_boolean_from_return_statements() {
+        use crate::state::model::ReturnBasis;
+        use crate::state::testing::{signature, ty, FALLBACK_HTML};
+        let state = extract(FALLBACK_HTML, "HTML");
+        let r = signature(&state, "same-origin").returns.clone().unwrap();
+        assert_eq!(
+            (ty(&r.ty), r.basis),
+            ("boolean".to_string(), ReturnBasis::ReturnStatements)
+        );
+        assert_eq!(state.coverage.assert_total, 3);
+        assert_eq!(state.coverage.assert_parsed, 2);
+        assert_eq!(state.coverage.assert_review.len(), 1);
+    }
+
+    #[test]
+    fn set_to_be_calls_keep_their_opaque_write_site() {
+        use crate::state::ir::{CallForm, StatementKind};
+        use crate::state::model::SiteClass;
+        let html = r##"<div data-algorithm=""><p>To <dfn id="blocked">be blocked</dfn> given a <var>d</var>:</p><ol><li><p>Return true.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="mark">mark</dfn> given a <var>subject</var>:</p><ol><li><p>Set <var>subject</var>'s <a href="#nd">node document</a> to be <a href="#blocked">blocked</a>.</p></li></ol></div>"##;
+        let state = extract(html, "HTML");
+        let call = state
+            .calls
+            .iter()
+            .find(|c| c.form == CallForm::SetToBe)
+            .expect("the Set … to be clause is a SetToBe call");
+        assert!(state
+            .statements
+            .iter()
+            .any(|s| s.id == call.statement_id && matches!(s.kind, StatementKind::Call { .. })));
+        let source = state
+            .sources
+            .iter()
+            .find(|s| s.id == call.source_id)
+            .unwrap();
+        let after_set = source.text.find("Set ").unwrap() + "Set ".len();
+        let expected_target =
+            &source.text[after_set..after_set + source.text[after_set..].find(" to ").unwrap()];
+        let opaque: Vec<_> = crate::state::derive_sites(&state)
+            .into_iter()
+            .filter(|s| s.class == SiteClass::OpaqueWrite)
+            .collect();
+        assert_eq!(
+            opaque.len(),
+            1,
+            "exactly the site SP1 emitted for the opaque set"
+        );
+        assert_eq!(
+            (opaque[0].op.as_str(), opaque[0].target_text.as_str()),
+            ("set", expected_target)
+        );
     }
 
     #[test]
