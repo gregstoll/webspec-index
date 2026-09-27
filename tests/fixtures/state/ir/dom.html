@@ -1,0 +1,699 @@
+<!doctype html><html><body>
+<h3 class="heading settled" data-level="2.2" id="interface-event"><span class="secno">2.2. </span><span class="content">Interface <code class="idl"><a data-link-type="idl" href="#event" id="ref-for-event①">Event</a></code></span><a class="self-link" href="#interface-event"></a></h3>
+<p>Each <a data-link-type="dfn" href="#concept-event" id="ref-for-concept-event②⑧">event</a> has the following associated flags that are all initially unset:
+
+</p>
+<ul>
+    <li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="stop-propagation-flag">stop propagation flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="stop-immediate-propagation-flag">stop immediate propagation flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="canceled-flag">canceled flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="in-passive-listener-flag">in passive listener flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="composed-flag">composed flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="initialized-flag">initialized flag</dfn>
+ 
+    </li><li><dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="dispatch-flag">dispatch flag</dfn>
+
+   </li></ul>
+<div class="algorithm" data-algorithm="initialize" data-algorithm-for="Event">
+    <p>To <dfn class="dfn-paneled" data-dfn-for="Event" data-dfn-type="dfn" data-export id="concept-event-initialize">initialize</dfn> an <var>event</var>, with
+<var>type</var>, <var>bubbles</var>, and <var>cancelable</var>, run these steps:
+
+</p>
+    <ol>
+     <li>
+      <p>Set <var>event</var>’s <a data-link-type="dfn" href="#initialized-flag" id="ref-for-initialized-flag">initialized flag</a>.
+
+ </p>
+     </li><li>
+      <p>Unset <var>event</var>’s <a data-link-type="dfn" href="#stop-propagation-flag" id="ref-for-stop-propagation-flag④">stop propagation flag</a>,
+ <a data-link-type="dfn" href="#stop-immediate-propagation-flag" id="ref-for-stop-immediate-propagation-flag①">stop immediate propagation flag</a>, and <a data-link-type="dfn" href="#canceled-flag" id="ref-for-canceled-flag③">canceled flag</a>.
+
+ </p>
+     </li><li>
+      <p>Set <var>event</var>’s <code class="idl"><a data-link-type="idl" href="#dom-event-istrusted" id="ref-for-dom-event-istrusted④">isTrusted</a></code> attribute to false.
+
+ </p>
+     </li><li>
+      <p>Set <var>event</var>’s <a data-link-type="dfn" href="#event-target" id="ref-for-event-target⑧">target</a> to null.
+
+ </p>
+     </li><li>
+      <p>Set <var>event</var>’s <code class="idl"><a data-link-type="idl" href="#dom-event-type" id="ref-for-dom-event-type⑤">type</a></code> attribute to <var>type</var>.
+
+ </p>
+     </li><li>
+      <p>Set <var>event</var>’s <code class="idl"><a data-link-type="idl" href="#dom-event-bubbles" id="ref-for-dom-event-bubbles④">bubbles</a></code> attribute to <var>bubbles</var>.
+
+ </p>
+     </li><li>
+      <p>Set <var>event</var>’s <code class="idl"><a data-link-type="idl" href="#dom-event-cancelable" id="ref-for-dom-event-cancelable⑤">cancelable</a></code> attribute to <var>cancelable</var>.
+</p>
+    </li></ol>
+   </div>
+<div class="algorithm" data-algorithm="initEvent(type, bubbles, cancelable)" data-algorithm-for="Event">
+    <p>The
+<dfn class="dfn-paneled idl-code" data-dfn-for="Event" data-dfn-type="method" data-export data-lt="initEvent(type, bubbles, cancelable)|initEvent(type, bubbles)|initEvent(type)" id="dom-event-initevent"><code>initEvent(<var>type</var>, <var>bubbles</var>, <var>cancelable</var>)</code></dfn>
+method steps are:
+
+</p>
+    <ol>
+     <li>
+      <p>If <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#this" id="ref-for-this①④">this</a>’s <a data-link-type="dfn" href="#dispatch-flag" id="ref-for-dispatch-flag">dispatch flag</a> is set, then return.
+
+ </p>
+     </li><li>
+      <p><a data-link-type="dfn" href="#concept-event-initialize" id="ref-for-concept-event-initialize">Initialize</a> <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#this" id="ref-for-this①⑤">this</a> with <var>type</var>, <var>bubbles</var>, and
+ <var>cancelable</var>.
+</p>
+    </li></ol>
+   </div>
+<p><dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node">Nodes</dfn> are objects that <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#implements" id="ref-for-implements">implement</a> <code class="idl"><a data-link-type="idl" href="#node" id="ref-for-node">Node</a></code>.
+<a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node①④">Nodes</a> <a data-link-type="dfn" href="#concept-tree-participate" id="ref-for-concept-tree-participate④">participate</a> in a <a data-link-type="dfn" href="#concept-tree" id="ref-for-concept-tree①④">tree</a>, which is known as the
+<dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node-tree">node tree</dfn>.
+
+</p>
+<div class="algorithm" data-algorithm="insert">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node-insert">insert</dfn> a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤③">node</a> <var>node</var> into a
+<a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤④">node</a> <var>parent</var> before null or a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑤">node</a> <var>child</var>, with an
+optional boolean <dfn class="dfn-paneled" data-dfn-for="insert" data-dfn-type="dfn" data-noexport id="insert-suppressobservers"><var>suppressObservers</var></dfn> (default false):
+
+</p>
+    <ol>
+     <li>
+      <p>Let <var>nodes</var> be <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②⓪">children</a>, if <var>node</var> is a
+ <code class="idl"><a data-link-type="idl" href="#documentfragment" id="ref-for-documentfragment⑧">DocumentFragment</a></code> <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑥">node</a>; otherwise « <var>node</var> ».
+
+ </p>
+     </li><li>
+      <p>Let <var>count</var> be <var>nodes</var>’s <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-size" id="ref-for-list-size②">size</a>.
+
+ </p>
+     </li><li>
+      <p>If <var>count</var> is 0, then return.
+
+ </p>
+     </li><li>
+      <p>If <var>node</var> is a <code class="idl"><a data-link-type="idl" href="#documentfragment" id="ref-for-documentfragment⑨">DocumentFragment</a></code> <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑦">node</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p><a data-link-type="dfn" href="#concept-node-remove" id="ref-for-concept-node-remove①">Remove</a> its <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②①">children</a> with
+   <a data-link-type="dfn" href="#remove-suppressobservers" id="ref-for-remove-suppressobservers"><i>suppressObservers</i></a> set to true.
+
+   </p>
+       </li><li>
+        <p><a data-link-type="dfn" href="#queue-a-tree-mutation-record" id="ref-for-queue-a-tree-mutation-record">Queue a tree mutation record</a> for <var>node</var> with « », <var>nodes</var>, null, and
+    null.
+
+    </p>
+        <p class="note" role="note">This step intentionally does not pay attention to <var>suppressObservers</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>If <var>child</var> is non-null:
+
+  </p>
+      <ol>
+       <li>
+        <p>For each <a data-link-type="dfn" href="#concept-live-range" id="ref-for-concept-live-range">live range</a> whose <a data-link-type="dfn" href="#concept-range-start-node" id="ref-for-concept-range-start-node">start node</a> is <var>parent</var> and
+   <a data-link-type="dfn" href="#concept-range-start-offset" id="ref-for-concept-range-start-offset">start offset</a> is greater than <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index">index</a>: increase
+   its <a data-link-type="dfn" href="#concept-range-start-offset" id="ref-for-concept-range-start-offset①">start offset</a> by <var>count</var>.
+
+   </p>
+       </li><li>
+        <p>For each <a data-link-type="dfn" href="#concept-live-range" id="ref-for-concept-live-range①">live range</a> whose <a data-link-type="dfn" href="#concept-range-end-node" id="ref-for-concept-range-end-node">end node</a> is <var>parent</var> and
+   <a data-link-type="dfn" href="#concept-range-end-offset" id="ref-for-concept-range-end-offset">end offset</a> is greater than <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index①">index</a>: increase
+   its <a data-link-type="dfn" href="#concept-range-end-offset" id="ref-for-concept-range-end-offset①">end offset</a> by <var>count</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>Let <var>previousSibling</var> be <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-previous-sibling" id="ref-for-concept-tree-previous-sibling">previous sibling</a> or
+ <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-last-child" id="ref-for-concept-tree-last-child">last child</a> if <var>child</var> is null.
+
+ </p>
+     </li><li>
+      <p>For each <var>node</var> in <var>nodes</var>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order①①">tree order</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p><a data-link-type="dfn" href="#concept-node-adopt" id="ref-for-concept-node-adopt">Adopt</a> <var>node</var> into <var>parent</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document④">node document</a>.
+
+   </p>
+       </li><li>
+        <p>If <var>child</var> is null, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑦">append</a> <var>node</var> to
+   <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②②">children</a>.
+
+   </p>
+       </li><li>
+        <p>Otherwise, <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-insert" id="ref-for-list-insert">insert</a> <var>node</var> into <var>parent</var>’s
+   <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②③">children</a> before <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-index" id="ref-for-concept-tree-index②">index</a>.
+
+   </p>
+       </li><li>
+        <p>If <var>parent</var> is a <a data-link-type="dfn" href="#element-shadow-host" id="ref-for-element-shadow-host">shadow host</a> whose <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①②">shadow root</a>’s
+   <a data-link-type="dfn" href="#shadowroot-slot-assignment" id="ref-for-shadowroot-slot-assignment②">slot assignment</a> is "<code>named</code>" and <var>node</var> is a
+   <a data-link-type="dfn" href="#concept-slotable" id="ref-for-concept-slotable①⑥">slottable</a>, then <a data-link-type="dfn" href="#assign-a-slot" id="ref-for-assign-a-slot①">assign a slot</a> for <var>node</var>.
+
+   </p>
+       </li><li>
+        <p>If <var>parent</var>’s <a data-link-type="dfn" href="#concept-tree-root" id="ref-for-concept-tree-root①⑤">root</a> is a <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①③">shadow root</a>, and
+   <var>parent</var> is a <a data-link-type="dfn" href="#concept-slot" id="ref-for-concept-slot②⓪">slot</a> whose <a data-link-type="dfn" href="#slot-assigned-nodes" id="ref-for-slot-assigned-nodes②">assigned nodes</a> is the empty list,
+   then run <a data-link-type="dfn" href="#signal-a-slot-change" id="ref-for-signal-a-slot-change①">signal a slot change</a> for <var>parent</var>.
+
+   </p>
+       </li><li>
+        <p>Run <a data-link-type="dfn" href="#assign-slotables-for-a-tree" id="ref-for-assign-slotables-for-a-tree①">assign slottables for a tree</a> with <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-root" id="ref-for-concept-tree-root①⑥">root</a>.
+
+   </p>
+       </li><li>
+        <p>For each <a data-link-type="dfn" href="#concept-shadow-including-inclusive-descendant" id="ref-for-concept-shadow-including-inclusive-descendant">shadow-including inclusive descendant</a> <var>inclusiveDescendant</var> of
+    <var>node</var>, in <a data-link-type="dfn" href="#concept-shadow-including-tree-order" id="ref-for-concept-shadow-including-tree-order">shadow-including tree order</a>:
+
+    </p>
+        <ol>
+         <li>
+          <p>Run the <a data-link-type="dfn" href="#concept-node-insert-ext" id="ref-for-concept-node-insert-ext③">insertion steps</a> with <var>inclusiveDescendant</var>.
+
+     </p>
+         </li><li>
+          <p>If <var>inclusiveDescendant</var> is not <a data-link-type="dfn" href="#connected" id="ref-for-connected">connected</a>, then
+     <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#iteration-continue" id="ref-for-iteration-continue⑤">continue</a>.
+
+     </p>
+         </li><li>
+          <p>If <var>inclusiveDescendant</var> is an <a data-link-type="dfn" href="#concept-element" id="ref-for-concept-element①③">element</a> and
+      <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry">custom element registry</a> is non-null:
+
+      </p>
+          <ol>
+           <li>
+            <p>If <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry①">custom element registry</a>’s
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#is-scoped" id="ref-for-is-scoped">is scoped</a> is true, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑧">append</a>
+       <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document⑤">node document</a> to
+       <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry②">custom element registry</a>’s
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#scoped-document-set" id="ref-for-scoped-document-set">scoped document set</a>.
+
+       </p>
+           </li><li>
+            <p>If <var>inclusiveDescendant</var> is <a data-link-type="dfn" href="#concept-element-custom" id="ref-for-concept-element-custom">custom</a>, then
+       <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-callback-reaction" id="ref-for-enqueue-a-custom-element-callback-reaction">enqueue a custom element callback reaction</a> with <var>inclusiveDescendant</var>,
+       callback name "<code>connectedCallback</code>", and « ».
+
+       </p>
+           </li><li>
+            <p>Otherwise, <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-try-upgrade" id="ref-for-concept-try-upgrade">try to upgrade</a>
+        <var>inclusiveDescendant</var>.
+
+        </p>
+            <p class="note" role="note">If this successfully upgrades <var>inclusiveDescendant</var>, its
+        <code>connectedCallback</code> will be enqueued automatically during the
+        <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-upgrade-an-element" id="ref-for-concept-upgrade-an-element">upgrade an element</a> algorithm.
+      </p>
+          </li></ol>
+         </li><li>
+          <p>Otherwise, if <var>inclusiveDescendant</var> is a <a data-link-type="dfn" href="#concept-shadow-root" id="ref-for-concept-shadow-root①④">shadow root</a>,
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry">custom element registry</a> is non-null, and
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry①">custom element registry</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#is-scoped" id="ref-for-is-scoped①">is scoped</a> is true, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#set-append" id="ref-for-set-append⑨">append</a>
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document⑥">node document</a> to
+     <var>inclusiveDescendant</var>’s <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry②">custom element registry</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#scoped-document-set" id="ref-for-scoped-document-set①">scoped document set</a>.
+    </p>
+        </li></ol>
+      </li></ol>
+     </li><li>
+      <p>If <var>suppressObservers</var> is false, then <a data-link-type="dfn" href="#queue-a-tree-mutation-record" id="ref-for-queue-a-tree-mutation-record①">queue a tree mutation record</a> for
+ <var>parent</var> with <var>nodes</var>, « », <var>previousSibling</var>, and <var>child</var>.
+
+ </p>
+     </li><li>
+      <p>Run the <a data-link-type="dfn" href="#concept-node-children-changed-ext" id="ref-for-concept-node-children-changed-ext">children changed steps</a> for <var>parent</var>.
+
+ </p>
+     </li><li>
+      <p>Let <var>staticNodeList</var> be a <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list" id="ref-for-list①②">list</a> of <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑧">nodes</a>, initially « ».
+
+  </p>
+      <p class="note" role="note">We collect all <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑤⑨">nodes</a> <em>before</em> calling the
+  <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext②">post-connection steps</a> on any one of them, instead of calling the
+  <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext③">post-connection steps</a> <em>while</em> we’re traversing the <a data-link-type="dfn" href="#concept-node-tree" id="ref-for-concept-node-tree①①">node tree</a>. This is because
+  the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext④">post-connection steps</a> can modify the tree’s structure, making live traversal unsafe,
+  possibly leading to the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext⑤">post-connection steps</a> being called multiple times on the same
+  <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑥⓪">node</a>.
+ </p>
+     </li><li>
+      <p>For each <var>node</var> of <var>nodes</var>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order①②">tree order</a>:
+
+  </p>
+      <ol>
+       <li>
+        <p>For each <a data-link-type="dfn" href="#concept-shadow-including-inclusive-descendant" id="ref-for-concept-shadow-including-inclusive-descendant①">shadow-including inclusive descendant</a> <var>inclusiveDescendant</var> of
+   <var>node</var>, in <a data-link-type="dfn" href="#concept-shadow-including-tree-order" id="ref-for-concept-shadow-including-tree-order①">shadow-including tree order</a>: <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-append" id="ref-for-list-append①⓪">append</a>
+   <var>inclusiveDescendant</var> to <var>staticNodeList</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-iterate" id="ref-for-list-iterate①⑤">For each</a> <var>node</var> of <var>staticNodeList</var>: if <var>node</var> is
+ <a data-link-type="dfn" href="#connected" id="ref-for-connected①">connected</a>, then run the <a data-link-type="dfn" href="#concept-node-post-connection-ext" id="ref-for-concept-node-post-connection-ext⑥">post-connection steps</a> with <var>node</var>.
+</p>
+    </li></ol>
+   </div>
+<div class="algorithm" data-algorithm="replace">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node-replace">replace</dfn> a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑦②">node</a> <var>child</var> with
+a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑦③">node</a> <var>node</var> within a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑦④">node</a> <var>parent</var>:
+
+</p>
+    <ol>
+     <li>
+      <p><a data-link-type="dfn" href="#concept-node-ensure-pre-insertion-validity" id="ref-for-concept-node-ensure-pre-insertion-validity①">Ensure pre-insert validity</a> given <var>node</var>, <var>parent</var>,
+ <var>child</var>, and « <var>child</var> ».
+
+ </p>
+     </li><li>
+      <p>Let <var>referenceChild</var> be <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-next-sibling" id="ref-for-concept-tree-next-sibling②">next sibling</a>.
+
+ </p>
+     </li><li>
+      <p>If <var>referenceChild</var> is <var>node</var>, then set <var>referenceChild</var> to
+ <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-next-sibling" id="ref-for-concept-tree-next-sibling③">next sibling</a>.
+
+ </p>
+     </li><li>
+      <p>Let <var>previousSibling</var> be <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-previous-sibling" id="ref-for-concept-tree-previous-sibling③">previous sibling</a>.
+
+ </p>
+     </li><li>
+      <p>Let <var>removedNodes</var> be the empty set.
+
+ </p>
+     </li><li>
+      <p><a data-link-type="dfn" href="#concept-node-adopt" id="ref-for-concept-node-adopt①">Adopt</a> <var>node</var> into <var>parent</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document⑨">node document</a>.
+
+ </p>
+     </li><li>
+      <p>If <var>child</var>’s <a data-link-type="dfn" href="#concept-tree-parent" id="ref-for-concept-tree-parent①③">parent</a> is non-null:
+
+  </p>
+      <ol>
+       <li>
+        <p>Set <var>removedNodes</var> to « <var>child</var> ».
+
+   </p>
+       </li><li>
+        <p><a data-link-type="dfn" href="#concept-node-remove" id="ref-for-concept-node-remove③">Remove</a> <var>child</var> with <a data-link-type="dfn" href="#remove-suppressobservers" id="ref-for-remove-suppressobservers①"><i>suppressObservers</i></a> set
+   to true.
+  </p>
+      </li></ol>
+      <p class="note" role="note">The above can only be false if <var>child</var> is <var>node</var>.
+
+ </p>
+     </li><li>
+      <p>Let <var>nodes</var> be <var>node</var>’s <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child②⑧">children</a> if <var>node</var> is a
+ <code class="idl"><a data-link-type="idl" href="#documentfragment" id="ref-for-documentfragment①⓪">DocumentFragment</a></code> <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node⑦⑤">node</a>; otherwise « <var>node</var> ».
+
+ </p>
+     </li><li>
+      <p><a data-link-type="dfn" href="#concept-node-insert" id="ref-for-concept-node-insert⑦">Insert</a> <var>node</var> into <var>parent</var> before <var>referenceChild</var>
+ with <a data-link-type="dfn" href="#insert-suppressobservers" id="ref-for-insert-suppressobservers"><i>suppressObservers</i></a> set to true.
+
+ </p>
+     </li><li>
+      <p><a data-link-type="dfn" href="#queue-a-tree-mutation-record" id="ref-for-queue-a-tree-mutation-record④">Queue a tree mutation record</a> for <var>parent</var> with <var>nodes</var>,
+ <var>removedNodes</var>, <var>previousSibling</var>, and <var>referenceChild</var>.
+
+ </p>
+     </li><li>
+      <p>Return <var>child</var>.
+</p>
+    </li></ol>
+   </div>
+<h3 class="heading settled" data-level="4.4" id="interface-node"><span class="secno">4.4. </span><span class="content">Interface <code class="idl"><a data-link-type="idl" href="#node" id="ref-for-node①⑦">Node</a></code></span><a class="self-link" href="#interface-node"></a></h3>
+<div class="algorithm" data-algorithm="clone a node">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-node-clone">clone a node</dfn> given a <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node①③②">node</a> <var>node</var>
+and an optional <a data-link-type="dfn" href="#concept-document" id="ref-for-concept-document②①">document</a> <dfn class="dfn-paneled" data-dfn-for="clone a node" data-dfn-type="dfn" data-export id="clone-a-node-document"><var>document</var></dfn>
+(default <var>node</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document②⑦">node document</a>), boolean
+<dfn class="dfn-paneled" data-dfn-for="clone a node" data-dfn-type="dfn" data-export id="clone-a-node-subtree"><var>subtree</var></dfn> (default false), <a data-link-type="dfn" href="#concept-node" id="ref-for-concept-node①③③">node</a>-or-null
+<dfn class="dfn-paneled" data-dfn-for="clone a node" data-dfn-type="dfn" data-export id="clone-a-node-parent"><var>parent</var></dfn> (default null), and null or a
+<code class="idl"><a data-link-type="idl" href="https://html.spec.whatwg.org/multipage/custom-elements.html#customelementregistry" id="ref-for-customelementregistry②">CustomElementRegistry</a></code> object <dfn class="dfn-paneled" data-dfn-for="clone a node" data-dfn-type="dfn" data-export id="clone-a-node-fallbackregistry"><var>fallbackRegistry</var></dfn>
+(default null):
+
+</p>
+    <ol>
+     <li>
+      <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#assert" id="ref-for-assert⑦">Assert</a>: <var>node</var> is not a <a data-link-type="dfn" href="#concept-document" id="ref-for-concept-document②②">document</a> or <var>node</var> is
+ <var>document</var>.
+
+ </p>
+     </li><li>
+      <p>Let <var>copy</var> be the result of <a data-link-type="dfn" href="#clone-a-single-node" id="ref-for-clone-a-single-node">cloning a single node</a> given <var>node</var>,
+ <var>document</var>, and <var>fallbackRegistry</var>.
+
+ </p>
+     </li><li>
+      <p>Run any <a data-link-type="dfn" href="#concept-node-clone-ext" id="ref-for-concept-node-clone-ext①">cloning steps</a> defined for <var>node</var> in
+ <a data-link-type="dfn" href="#other-applicable-specifications" id="ref-for-other-applicable-specifications⑦">other applicable specifications</a> and pass <var>node</var>, <var>copy</var>, and
+ <var>subtree</var> as parameters.
+
+ </p>
+     </li><li>
+      <p>If <var>parent</var> is non-null, then <a data-link-type="dfn" href="#concept-node-append" id="ref-for-concept-node-append②">append</a> <var>copy</var> to
+ <var>parent</var>.
+
+ </p>
+     </li><li>
+      <p>If <var>subtree</var> is true, then for each <var>child</var> of <var>node</var>’s
+ <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child④⑧">children</a>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order②①">tree order</a>: <a data-link-type="dfn" href="#concept-node-clone" id="ref-for-concept-node-clone①">clone a node</a> given <var>child</var> with
+ <a data-link-type="dfn" href="#clone-a-node-document" id="ref-for-clone-a-node-document"><i>document</i></a> set to <var>document</var>,
+ <a data-link-type="dfn" href="#clone-a-node-subtree" id="ref-for-clone-a-node-subtree"><i>subtree</i></a> set to <var>subtree</var>,
+ <a data-link-type="dfn" href="#clone-a-node-parent" id="ref-for-clone-a-node-parent"><i>parent</i></a> set to <var>copy</var>, and
+ <a data-link-type="dfn" href="#clone-a-node-fallbackregistry" id="ref-for-clone-a-node-fallbackregistry"><i>fallbackRegistry</i></a> set to <var>fallbackRegistry</var>.
+
+ </p>
+     </li><li>
+      <p>If <var>node</var> is an <a data-link-type="dfn" href="#concept-element" id="ref-for-concept-element④③">element</a>, <var>node</var> is a
+  <a data-link-type="dfn" href="#element-shadow-host" id="ref-for-element-shadow-host②">shadow host</a>, and <var>node</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root①">shadow root</a>’s
+  <a data-link-type="dfn" href="#shadowroot-clonable" id="ref-for-shadowroot-clonable">clonable</a> is true:
+
+  </p>
+      <ol>
+       <li>
+        <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#assert" id="ref-for-assert⑧">Assert</a>: <var>copy</var> is not a <a data-link-type="dfn" href="#element-shadow-host" id="ref-for-element-shadow-host③">shadow host</a>.
+
+   </p>
+       </li><li>
+        <p>Let <var>shadowRootRegistry</var> be <var>node</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root②">shadow root</a>’s
+   <a data-link-type="dfn" href="#shadowroot-custom-element-registry" id="ref-for-shadowroot-custom-element-registry④">custom element registry</a>.
+
+   </p>
+       </li><li>
+        <p>If <var>shadowRootRegistry</var> <a data-link-type="dfn" href="#is-a-global-custom-element-registry" id="ref-for-is-a-global-custom-element-registry">is a global custom element registry</a>, then set
+   <var>shadowRootRegistry</var> to <var>document</var>’s
+   <a data-link-type="dfn" href="#document-custom-element-registry" id="ref-for-document-custom-element-registry①">custom element registry</a>’s <a data-link-type="dfn" href="#effective-global-custom-element-registry" id="ref-for-effective-global-custom-element-registry">effective global custom element registry</a>.
+
+   </p>
+       </li><li>
+        <p><a data-link-type="dfn" href="#concept-attach-a-shadow-root" id="ref-for-concept-attach-a-shadow-root">Attach a shadow root</a> with <var>copy</var>, <var>node</var>’s
+   <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root③">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-mode" id="ref-for-shadowroot-mode④">mode</a>, <var>node</var>’s
+   <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root④">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-delegates-focus" id="ref-for-shadowroot-delegates-focus">delegates focus</a>, <var>node</var>’s
+   <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root⑤">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-serializable" id="ref-for-shadowroot-serializable">serializable</a>, <var>node</var>’s
+   <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root⑥">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-slot-assignment" id="ref-for-shadowroot-slot-assignment④">slot assignment</a>, true, and
+   <var>shadowRootRegistry</var>.
+
+   </p>
+       </li><li>
+        <p>Set <var>copy</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root⑦">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-declarative" id="ref-for-shadowroot-declarative">declarative</a>
+   to <var>node</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root⑧">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-declarative" id="ref-for-shadowroot-declarative①">declarative</a>.
+
+   </p>
+       </li><li>
+        <p>Set <var>copy</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root⑨">shadow root</a>’s
+   <a data-link-type="dfn" href="#shadowroot-keep-custom-element-registry-null" id="ref-for-shadowroot-keep-custom-element-registry-null">keep custom element registry null</a> to <var>node</var>’s
+   <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root①⓪">shadow root</a>’s <a data-link-type="dfn" href="#shadowroot-keep-custom-element-registry-null" id="ref-for-shadowroot-keep-custom-element-registry-null①">keep custom element registry null</a>.
+
+   </p>
+       </li><li>
+        <p>For each <var>child</var> of <var>node</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root①①">shadow root</a>’s
+    <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child④⑨">children</a>, in <a data-link-type="dfn" href="#concept-tree-order" id="ref-for-concept-tree-order②②">tree order</a>: <a data-link-type="dfn" href="#concept-node-clone" id="ref-for-concept-node-clone②">clone a node</a> given <var>child</var> with
+    <a data-link-type="dfn" href="#clone-a-node-document" id="ref-for-clone-a-node-document①"><i>document</i></a> set to <var>document</var>,
+    <a data-link-type="dfn" href="#clone-a-node-subtree" id="ref-for-clone-a-node-subtree①"><i>subtree</i></a> set to true, and
+    <a data-link-type="dfn" href="#clone-a-node-parent" id="ref-for-clone-a-node-parent①"><i>parent</i></a> set to <var>copy</var>’s <a data-link-type="dfn" href="#concept-element-shadow-root" id="ref-for-concept-element-shadow-root①②">shadow root</a>.
+
+    </p>
+        <p class="note" role="note">This intentionally does not pass the
+    <a data-link-type="dfn" href="#clone-a-node-fallbackregistry" id="ref-for-clone-a-node-fallbackregistry①"><i>fallbackRegistry</i></a> argument.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>Return <var>copy</var>.
+</p>
+    </li></ol>
+   </div>
+<div class="algorithm" data-algorithm="create an element">
+    <p>To <dfn class="dfn-paneled" data-dfn-type="dfn" data-export id="concept-create-element">create an element</dfn>, given a <a data-link-type="dfn" href="#concept-document" id="ref-for-concept-document⑤④">document</a>
+<var>document</var>, string <var>localName</var>, string-or-null <var>namespace</var>, and
+optionally a string-or-null <var>prefix</var> (default null), string-or-null <var>is</var> (default
+null), boolean <var>synchronousCustomElements</var> (default false), and "<code>default</code>",
+null, or a <code class="idl"><a data-link-type="idl" href="https://html.spec.whatwg.org/multipage/custom-elements.html#customelementregistry" id="ref-for-customelementregistry①⑥">CustomElementRegistry</a></code> object <var>registry</var> (default "<code>default</code>"):
+
+</p>
+    <ol>
+     <li>
+      <p>Let <var>result</var> be null.
+
+ </p>
+     </li><li>
+      <p>If <var>registry</var> is "<code>default</code>", then set <var>registry</var> to the result
+ of <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#look-up-a-custom-element-registry" id="ref-for-look-up-a-custom-element-registry③">looking up a custom element registry</a> given <var>document</var>.
+
+ </p>
+     </li><li>
+      <p>Let <var>definition</var> be the result of
+ <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#look-up-a-custom-element-definition" id="ref-for-look-up-a-custom-element-definition">looking up a custom element definition</a> given <var>registry</var>,
+ <var>namespace</var>, <var>localName</var>, and <var>is</var>.
+
+ </p>
+     </li><li>
+      <p>If <var>definition</var> is non-null, and <var>definition</var>’s
+  <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-name" id="ref-for-concept-custom-element-definition-name">name</a> is not equal to its
+  <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-local-name" id="ref-for-concept-custom-element-definition-local-name">local name</a> (i.e., <var>definition</var> represents a
+  <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#customized-built-in-element" id="ref-for-customized-built-in-element②">customized built-in element</a>):
+
+  </p>
+      <ol>
+       <li>
+        <p>Let <var>interface</var> be the <a data-link-type="dfn" href="#concept-element-interface" id="ref-for-concept-element-interface">element interface</a> for <var>localName</var> and the
+   <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace①⑦">HTML namespace</a>.
+
+   </p>
+       </li><li>
+        <p>Set <var>result</var> to the result of <a data-link-type="dfn" href="#create-an-element-internal" id="ref-for-create-an-element-internal">creating an element internal</a> given
+   <var>document</var>, <var>interface</var>, <var>localName</var>, the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace①⑧">HTML namespace</a>,
+   <var>prefix</var>, "<code>undefined</code>", <var>is</var>, and <var>registry</var>.
+
+   </p>
+       </li><li>
+        <p>If <var>synchronousCustomElements</var> is true, then run this step while catching any
+    exceptions:
+
+    </p>
+        <ol>
+         <li>
+          <p><a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-upgrade-an-element" id="ref-for-concept-upgrade-an-element②">Upgrade</a> <var>result</var> using <var>definition</var>.
+    </p>
+        </li></ol>
+        <p>If this step threw an exception <var>exception</var>:
+
+    </p>
+        <ol>
+         <li>
+          <p><a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception" id="ref-for-report-an-exception①">Report</a> <var>exception</var> for <var>definition</var>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-constructor" id="ref-for-concept-custom-element-definition-constructor">constructor</a>’s corresponding JavaScript object’s
+     <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-associated-realm" id="ref-for-dfn-associated-realm②">associated realm</a>’s <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/webappapis.html#concept-realm-global" id="ref-for-concept-realm-global②">global object</a>.
+
+     </p>
+         </li><li>
+          <p>Set <var>result</var>’s <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state②">custom element state</a> to
+     "<code>failed</code>".
+    </p>
+        </li></ol>
+       </li><li>
+        <p>Otherwise, <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-upgrade-reaction" id="ref-for-enqueue-a-custom-element-upgrade-reaction">enqueue a custom element upgrade reaction</a> given <var>result</var> and
+   <var>definition</var>.
+  </p>
+      </li></ol>
+     </li><li>
+      <p>Otherwise, if <var>definition</var> is non-null:
+
+  </p>
+      <ol>
+       <li>
+        <p>If <var>synchronousCustomElements</var> is true:
+
+    </p>
+        <ol>
+         <li>
+          <p>Let <var>C</var> be <var>definition</var>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-constructor" id="ref-for-concept-custom-element-definition-constructor①">constructor</a>.
+
+     </p>
+         </li><li>
+          <p>Let <var>previousRegistry</var> be the <a data-link-type="dfn" href="https://tc39.es/ecma262/#surrounding-agent" id="ref-for-surrounding-agent⑧">surrounding agent</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#active-custom-element-constructor-map" id="ref-for-active-custom-element-constructor-map">active custom element constructor map</a>[<var>C</var>]
+     <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#map-with-default" id="ref-for-map-with-default">with default</a> null.
+
+     </p>
+         </li><li>
+          <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#map-set" id="ref-for-map-set②">Set</a> the <a data-link-type="dfn" href="https://tc39.es/ecma262/#surrounding-agent" id="ref-for-surrounding-agent⑨">surrounding agent</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#active-custom-element-constructor-map" id="ref-for-active-custom-element-constructor-map①">active custom element constructor map</a>[<var>C</var>] to
+     <var>registry</var>.
+
+     </p>
+         </li><li>
+          <p>Run these steps while catching any exceptions:
+
+      </p>
+          <ol>
+           <li>
+            <p>Set <var>result</var> to the result of <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#construct-a-callback-function" id="ref-for-construct-a-callback-function">constructing</a> <var>C</var>, with no
+       arguments.
+
+       </p>
+           </li><li>
+            <p><a data-link-type="dfn" href="https://infra.spec.whatwg.org/#assert" id="ref-for-assert①①">Assert</a>: one of the following is true:
+
+        </p>
+            <ul class="brief">
+             <li><var>result</var>’s <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state③">custom element state</a> is "<code>custom</code>"
+         and its <a data-link-type="dfn" href="#concept-element-custom-element-definition" id="ref-for-concept-element-custom-element-definition">custom element definition</a> is non-null;
+         
+             </li><li><var>result</var>’s <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state④">custom element state</a> is
+         "<code>precustomized</code>"; or
+         
+             </li><li><var>result</var>’s <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state⑤">custom element state</a> is neither
+         "<code>custom</code>" nor "<code>precustomized</code>" and its
+         <a data-link-type="dfn" href="#concept-element-custom-element-definition" id="ref-for-concept-element-custom-element-definition①">custom element definition</a> is null.
+        
+            </li></ul>
+            <div class="example" id="example-return-override">
+             <a class="self-link" href="#example-return-override"></a>
+         
+<pre><code class="highlight lang-javascript">customElements<c- p>.</c->define<c- p>(</c-><c- u>"x-example"</c-><c- p>,</c-> <c- a>class</c-> <c- k>extends</c-> HTMLElement <c- p>{</c->
+  <c- kr>constructor</c-><c- p>()</c-> <c- p>{</c->
+    <c- c1>// Non-conformant: returns an existing element instead of calling super().</c->
+    <c- k>return</c-> document<c- p>.</c->createElement<c- p>(</c-><c- u>"p"</c-><c- p>);</c->
+  <c- p>}</c->
+<c- p>});</c->
+
+document<c- p>.</c->createElement<c- p>(</c-><c- u>"x-example"</c-><c- p>);</c->
+</code></pre>
+             <p>Here <var>result</var> is the <code>p</code> <a data-link-type="dfn" href="#concept-element" id="ref-for-concept-element⑦⑧">element</a>, whose
+         <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state⑥">custom element state</a> is "<code>uncustomized</code>" and whose
+         <a data-link-type="dfn" href="#concept-element-custom-element-definition" id="ref-for-concept-element-custom-element-definition②">custom element definition</a> is null.
+        </p>
+            </div>
+           </li><li>
+            <p>Assert: <var>result</var>’s <a data-link-type="dfn" href="#concept-element-namespace" id="ref-for-concept-element-namespace①④">namespace</a> is the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace①⑨">HTML namespace</a>.
+
+        </p>
+            <p class="note" role="note">IDL enforces that <var>result</var> is an <code class="idl"><a data-link-type="idl" href="https://html.spec.whatwg.org/multipage/dom.html#htmlelement" id="ref-for-htmlelement">HTMLElement</a></code> object, which all
+        use the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace②⓪">HTML namespace</a>.
+
+       </p>
+           </li><li>
+            <p>If <var>result</var>’s <a data-link-type="dfn" href="#concept-element-attribute" id="ref-for-concept-element-attribute⑥">attribute list</a> <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#list-is-empty" id="ref-for-list-is-empty⑥">is not empty</a>,
+       then <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-throw" id="ref-for-dfn-throw④⑨">throw</a> a "<code class="idl"><a class="idl-code" data-link-type="exception" href="https://webidl.spec.whatwg.org/#notsupportederror" id="ref-for-notsupportederror①③">NotSupportedError</a></code>" <code class="idl"><a data-link-type="idl" href="https://webidl.spec.whatwg.org/#idl-DOMException" id="ref-for-idl-DOMException⑥③">DOMException</a></code>.
+
+       </p>
+           </li><li>
+            <p>If <var>result</var> has <a data-link-type="dfn" href="#concept-tree-child" id="ref-for-concept-tree-child⑤⑤">children</a>, then <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-throw" id="ref-for-dfn-throw⑤⓪">throw</a> a
+       "<code class="idl"><a class="idl-code" data-link-type="exception" href="https://webidl.spec.whatwg.org/#notsupportederror" id="ref-for-notsupportederror①④">NotSupportedError</a></code>" <code class="idl"><a data-link-type="idl" href="https://webidl.spec.whatwg.org/#idl-DOMException" id="ref-for-idl-DOMException⑥④">DOMException</a></code>.
+
+       </p>
+           </li><li>
+            <p>If <var>result</var>’s <a data-link-type="dfn" href="#concept-tree-parent" id="ref-for-concept-tree-parent③①">parent</a> is non-null, then <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-throw" id="ref-for-dfn-throw⑤①">throw</a> a
+       "<code class="idl"><a class="idl-code" data-link-type="exception" href="https://webidl.spec.whatwg.org/#notsupportederror" id="ref-for-notsupportederror①⑤">NotSupportedError</a></code>" <code class="idl"><a data-link-type="idl" href="https://webidl.spec.whatwg.org/#idl-DOMException" id="ref-for-idl-DOMException⑥⑤">DOMException</a></code>.
+
+       </p>
+           </li><li>
+            <p>If <var>result</var>’s <a data-link-type="dfn" href="#concept-node-document" id="ref-for-concept-node-document③⑧">node document</a> is not <var>document</var>, then
+       <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-throw" id="ref-for-dfn-throw⑤②">throw</a> a "<code class="idl"><a class="idl-code" data-link-type="exception" href="https://webidl.spec.whatwg.org/#notsupportederror" id="ref-for-notsupportederror①⑥">NotSupportedError</a></code>" <code class="idl"><a data-link-type="idl" href="https://webidl.spec.whatwg.org/#idl-DOMException" id="ref-for-idl-DOMException⑥⑥">DOMException</a></code>.
+
+       </p>
+           </li><li>
+            <p>If <var>result</var>’s <a data-link-type="dfn" href="#concept-element-local-name" id="ref-for-concept-element-local-name①②">local name</a> is not equal to
+       <var>localName</var>, then <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-throw" id="ref-for-dfn-throw⑤③">throw</a> a "<code class="idl"><a class="idl-code" data-link-type="exception" href="https://webidl.spec.whatwg.org/#notsupportederror" id="ref-for-notsupportederror①⑦">NotSupportedError</a></code>" <code class="idl"><a data-link-type="idl" href="https://webidl.spec.whatwg.org/#idl-DOMException" id="ref-for-idl-DOMException⑥⑦">DOMException</a></code>.
+
+       </p>
+           </li><li>
+            <p>Set <var>result</var>’s <a data-link-type="dfn" href="#concept-element-namespace-prefix" id="ref-for-concept-element-namespace-prefix①②">namespace prefix</a> to <var>prefix</var>.
+
+       </p>
+           </li><li>
+            <p>Set <var>result</var>’s <a data-link-type="dfn" href="#concept-element-is-value" id="ref-for-concept-element-is-value①"><code>is</code> value</a> to null.
+
+       </p>
+           </li><li>
+            <p>Set <var>result</var>’s <a data-link-type="dfn" href="#element-custom-element-registry" id="ref-for-element-custom-element-registry⑧">custom element registry</a> to
+       <var>registry</var>.
+      </p>
+          </li></ol>
+          <p>If any of these steps threw an exception <var>exception</var>:
+
+      </p>
+          <ol>
+           <li>
+            <p><a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception" id="ref-for-report-an-exception②">Report</a> <var>exception</var> for
+       <var>definition</var>’s <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-constructor" id="ref-for-concept-custom-element-definition-constructor②">constructor</a>’s corresponding
+       JavaScript object’s <a data-link-type="dfn" href="https://webidl.spec.whatwg.org/#dfn-associated-realm" id="ref-for-dfn-associated-realm③">associated realm</a>’s <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/webappapis.html#concept-realm-global" id="ref-for-concept-realm-global③">global object</a>.
+
+       </p>
+           </li><li>
+            <p>Set <var>result</var> to the result of <a data-link-type="dfn" href="#create-an-element-internal" id="ref-for-create-an-element-internal①">creating an element internal</a> given
+       <var>document</var>, <code class="idl"><a data-link-type="idl" href="https://html.spec.whatwg.org/multipage/dom.html#htmlunknownelement" id="ref-for-htmlunknownelement">HTMLUnknownElement</a></code>, <var>localName</var>, the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace②①">HTML namespace</a>,
+       <var>prefix</var>, "<code>failed</code>", null, and <var>registry</var>.
+      </p>
+          </li></ol>
+         </li><li>
+          <p>If <var>previousRegistry</var> is null, then <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#map-remove" id="ref-for-map-remove">remove</a> the
+     <a data-link-type="dfn" href="https://tc39.es/ecma262/#surrounding-agent" id="ref-for-surrounding-agent①⓪">surrounding agent</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#active-custom-element-constructor-map" id="ref-for-active-custom-element-constructor-map②">active custom element constructor map</a>[<var>C</var>].
+
+     </p>
+         </li><li>
+          <p>Otherwise, <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#map-set" id="ref-for-map-set③">set</a> the <a data-link-type="dfn" href="https://tc39.es/ecma262/#surrounding-agent" id="ref-for-surrounding-agent①①">surrounding agent</a>’s
+     <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#active-custom-element-constructor-map" id="ref-for-active-custom-element-constructor-map③">active custom element constructor map</a>[<var>C</var>] to
+     <var>previousRegistry</var>.
+    </p>
+        </li></ol>
+       </li><li>
+        <p>Otherwise:
+
+    </p>
+        <ol>
+         <li>
+          <p>Set <var>result</var> to the result of <a data-link-type="dfn" href="#create-an-element-internal" id="ref-for-create-an-element-internal②">creating an element internal</a> given
+     <var>document</var>, <code class="idl"><a data-link-type="idl" href="https://html.spec.whatwg.org/multipage/dom.html#htmlelement" id="ref-for-htmlelement①">HTMLElement</a></code>, <var>localName</var>, the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace②②">HTML namespace</a>,
+     <var>prefix</var>, "<code>undefined</code>", null, and <var>registry</var>.
+
+     </p>
+         </li><li>
+          <p><a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-upgrade-reaction" id="ref-for-enqueue-a-custom-element-upgrade-reaction①">Enqueue a custom element upgrade reaction</a> given <var>result</var> and
+     <var>definition</var>.
+    </p>
+        </li></ol>
+      </li></ol>
+     </li><li>
+      <p>Otherwise:
+
+  </p>
+      <ol>
+       <li>
+        <p>Let <var>interface</var> be the <a data-link-type="dfn" href="#concept-element-interface" id="ref-for-concept-element-interface①">element interface</a> for <var>localName</var> and
+   <var>namespace</var>.
+
+   </p>
+       </li><li>
+        <p>Set <var>result</var> to the result of <a data-link-type="dfn" href="#create-an-element-internal" id="ref-for-create-an-element-internal③">creating an element internal</a> given
+   <var>document</var>, <var>interface</var>, <var>localName</var>, <var>namespace</var>,
+   <var>prefix</var>, "<code>uncustomized</code>", <var>is</var>, and <var>registry</var>.
+
+   </p>
+       </li><li>
+        <p>If <var>namespace</var> is the <a data-link-type="dfn" href="https://infra.spec.whatwg.org/#html-namespace" id="ref-for-html-namespace②③">HTML namespace</a>, and either <var>localName</var> is a
+   <a data-link-type="dfn" href="https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name" id="ref-for-valid-custom-element-name①">valid custom element name</a> or <var>is</var> is non-null, then set <var>result</var>’s
+   <a data-link-type="dfn" href="#concept-element-custom-element-state" id="ref-for-concept-element-custom-element-state⑦">custom element state</a> to "<code>undefined</code>".
+  </p>
+      </li></ol>
+     </li><li>
+      <p>Return <var>result</var>.
+</p>
+    </li></ol>
+   </div>
+</body></html>
