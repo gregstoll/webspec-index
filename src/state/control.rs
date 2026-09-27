@@ -30,6 +30,17 @@ const MAP_ITERATE: (&str, &str) = ("INFRA", "map-iterate");
 const ITERATION_CONTINUE: (&str, &str) = ("INFRA", "iteration-continue");
 const ITERATION_BREAK: (&str, &str) = ("INFRA", "iteration-break");
 const IN_PARALLEL: (&str, &str) = ("HTML", "in-parallel");
+const THROW: (&str, &str) = ("WEBIDL", "dfn-throw");
+/// Anchors whose links spell a control keyword, never a call.
+const CONTROL_KEYWORDS: [(&str, &str); 7] = [
+    THROW,
+    LIST_ITERATE,
+    MAP_ITERATE,
+    ITERATION_CONTINUE,
+    ITERATION_BREAK,
+    ASSERT,
+    IN_PARALLEL,
+];
 
 /// A parsed `For each` head.
 struct LoopHead {
@@ -99,6 +110,12 @@ impl Parser<'_> {
                 target.spec.eq_ignore_ascii_case(spec) && target.anchor == *anchor
             })
             .then_some((link, after))
+    }
+
+    /// A link at `pos` that spells a control keyword (`throw`, `For each`,
+    /// `continue`, `break`, `Assert`, `in parallel`).
+    pub(crate) fn is_control_keyword_link(&self, pos: usize) -> bool {
+        self.head_link(pos, &CONTROL_KEYWORDS).is_some()
     }
 
     /// A head spelled by one of `words` or by a link to one of `anchors`:
@@ -320,15 +337,21 @@ impl Parser<'_> {
     /// its type phrase. A loop without a collection must name a type; its
     /// collection is that type phrase, opaque.
     fn loop_head(&mut self, start: usize) -> Option<(Vec<usize>, LoopHead)> {
-        let (type_links, var_start, var, mut end) = self.loop_var(start)?;
-        let mut vars = vec![self.enc.vars[var].clone()];
-        if let Some((Placeholder::Var(second), after)) = self
-            .keyword(end, &[" \u{2192} "])
-            .and_then(|next| self.enc.placeholder(next))
-        {
-            vars.push(self.enc.vars[second].clone());
-            end = after;
-        }
+        let (type_links, var_start, vars, end) = match self.tuple_vars(start) {
+            Some((vars, end)) => (Vec::new(), start, vars, end),
+            None => {
+                let (type_links, var_start, var, mut end) = self.loop_var(start)?;
+                let mut vars = vec![self.enc.vars[var].clone()];
+                if let Some((Placeholder::Var(second), after)) = self
+                    .keyword(end, &[" \u{2192} "])
+                    .and_then(|next| self.enc.placeholder(next))
+                {
+                    vars.push(self.enc.vars[second].clone());
+                    end = after;
+                }
+                (type_links, var_start, vars, end)
+            }
+        };
         let collection_start = self.keyword(end, &[" of ", " in ", " from "]);
         if collection_start.is_none() && var_start == start {
             return None;
@@ -362,6 +385,23 @@ impl Parser<'_> {
             terminator,
         };
         Some((type_links, head))
+    }
+
+    /// `(⟦V⟧, ⟦V⟧…)` at `pos`: the variable names and the position after
+    /// `)`.
+    fn tuple_vars(&self, pos: usize) -> Option<(Vec<String>, usize)> {
+        let mut at = self.keyword(pos, &["("])?;
+        let mut vars = Vec::new();
+        loop {
+            let (Placeholder::Var(var), end) = self.enc.placeholder(at)? else {
+                return None;
+            };
+            vars.push(self.enc.vars[var].clone());
+            if let Some(close) = self.keyword(end, &[")"]) {
+                return (vars.len() > 1).then_some((vars, close));
+            }
+            at = self.keyword(end, &[", "])?;
+        }
     }
 
     /// Up to four words or a code/link type phrase, then `⟦V⟧`, at `pos`:
@@ -434,12 +474,14 @@ impl Parser<'_> {
         true
     }
 
-    /// `Throw ` (`a`|`an`)? (quoted code)? `⟦L⟧` END.
+    /// (`Throw`|`⟦WEBIDL#dfn-throw⟧`) ` ` (`a`|`an`)? (quoted code)? `⟦L⟧`
+    /// END.
     fn try_throw(&mut self, at: usize, pos: usize) -> bool {
-        let Some((exception, links, end)) = self.throw_head(pos) else {
+        let Some((head_link, exception, links, end)) = self.throw_head(pos) else {
             return false;
         };
         self.push(at, end, "throw", StatementKind::Throw { exception });
+        self.keyword_role(head_link);
         for link in links {
             self.set_role(link, LinkRole::Type);
         }
@@ -447,8 +489,10 @@ impl Parser<'_> {
         true
     }
 
-    fn throw_head(&self, pos: usize) -> Option<(ExceptionRef, Vec<usize>, usize)> {
-        let start = self.keyword(pos, &["Throw ", "throw "])?;
+    fn throw_head(&self, pos: usize) -> Option<(Option<usize>, ExceptionRef, Vec<usize>, usize)> {
+        let (head_link, start) = self
+            .head(pos, &["Throw", "throw"], &[THROW])
+            .and_then(|(link, after)| Some((link, self.keyword(after, &[" "])?)))?;
         let mut at = self.keyword(start, &["a ", "an "]).unwrap_or(start);
         let mut links = Vec::new();
         let mut name = None;
@@ -478,7 +522,7 @@ impl Parser<'_> {
             link: exception_link.target.clone(),
             text: self.src_text(start, end),
         };
-        Some((exception, links, end))
+        Some((head_link, exception, links, end))
     }
 
     /// (`Abort`|`Terminate`) ` ` text END.
@@ -499,9 +543,10 @@ impl Parser<'_> {
         true
     }
 
-    /// `Continue`/`Break`, as a word or an Infra link, then END.
+    /// `Continue`/`Break`, as a word or an Infra link, then (` to the next `
+    /// text)? END.
     fn try_continue_or_break(&mut self, at: usize, pos: usize) -> bool {
-        let (kind_name, kind, (link, end)) =
+        let (kind_name, kind, (link, mut end)) =
             if let Some(head) = self.head(pos, &["Continue", "continue"], &[ITERATION_CONTINUE]) {
                 ("continue", StatementKind::Continue, head)
             } else if let Some(head) = self.head(pos, &["Break", "break"], &[ITERATION_BREAK]) {
@@ -509,6 +554,9 @@ impl Parser<'_> {
             } else {
                 return false;
             };
+        if let Some(target) = self.keyword(end, &[" to the next "]) {
+            end = self.value_end(target, None);
+        }
         if !self.is_end(end) {
             return false;
         }
@@ -627,6 +675,14 @@ mod tests {
 
     fn parse(step: &str) -> ParsedSource {
         parse_source_with(&sources(&[step]).remove(0), &Env::default())
+    }
+    /// Parses in DOM, where links to other specs are callable.
+    fn parse_in_dom(step: &str) -> ParsedSource {
+        let env = Env {
+            spec: "DOM".into(),
+            ..Env::default()
+        };
+        parse_source_with(&sources(&[step]).remove(0), &env)
     }
     fn kinds(p: &ParsedSource) -> Vec<&StatementKind> {
         p.statements.iter().map(|s| &s.kind).collect()
@@ -914,6 +970,66 @@ mod tests {
             ),
             "{last:?}"
         );
+    }
+
+    #[test]
+    fn linked_control_keywords_are_control_not_calls() {
+        let p = parse_in_dom(
+            r##"If <var>selector</var> is failure, then <a href="https://webidl.spec.whatwg.org/#dfn-throw">throw</a> a "<code class="idl"><a href="https://webidl.spec.whatwg.org/#syntaxerror">SyntaxError</a></code>" <code class="idl"><a href="https://webidl.spec.whatwg.org/#idl-DOMException">DOMException</a></code>."##,
+        );
+        let [StatementKind::If { .. }, StatementKind::Throw { exception }] = kinds(&p)[..] else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert_eq!(
+            (
+                exception.name.as_deref(),
+                exception.link.as_ref().unwrap().anchor.as_str()
+            ),
+            (Some("SyntaxError"), "idl-DOMException")
+        );
+        assert_eq!(p.roles[&0], crate::state::ir::LinkRole::Keyword);
+        assert!(p.calls.is_empty(), "{:?}", p.calls);
+
+        let p = parse_in_dom(
+            r##"If <var>child</var> has a <code>type</code> attribute and its value is not a <a href="https://mimesniff.spec.whatwg.org/#mime-type">MIME type</a>, <a href="https://infra.spec.whatwg.org/#iteration-continue">continue</a> to the next child."##,
+        );
+        let [StatementKind::If { .. }, StatementKind::Continue] = kinds(&p)[..] else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert!(p.calls.is_empty(), "{:?}", p.calls);
+
+        for step in [
+            r##"<a href="https://webidl.spec.whatwg.org/#dfn-throw">Throw</a> an exception."##,
+            r##"<a href="https://infra.spec.whatwg.org/#list-iterate">For each</a> live range whose start node is <var>parent</var>, set its start to 0."##,
+            r##"<a href="https://infra.spec.whatwg.org/#assert">Assert</a> nothing."##,
+            r##"<a href="https://infra.spec.whatwg.org/#iteration-break">Break</a> out of the loop."##,
+            r##"<a href="https://html.spec.whatwg.org/multipage/infrastructure.html#in-parallel">In parallel</a> do it."##,
+        ] {
+            assert!(parse_in_dom(step).calls.is_empty(), "{step}");
+        }
+    }
+
+    #[test]
+    fn loops_over_a_tuple() {
+        let p = parse(
+            "For each (<var>ancestorToReveal</var>, <var>revealType</var>) of <var>ancestorsToReveal</var>:",
+        );
+        let [StatementKind::ForEach {
+            vars, collection, ..
+        }] = kinds(&p)[..]
+        else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert_eq!(vars, &["ancestorToReveal", "revealType"]);
+        assert_eq!(collection, &var("ancestorsToReveal"));
+        let p = parse_in_dom(
+            r##"<a href="https://infra.spec.whatwg.org/#list-iterate">For each</a> (<var>a</var>, <var>b</var>) of <var>l</var>:"##,
+        );
+        let [StatementKind::ForEach { vars, .. }] = kinds(&p)[..] else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert_eq!(vars, &["a", "b"]);
+        assert!(p.calls.is_empty(), "{:?}", p.calls);
     }
 
     #[test]

@@ -484,16 +484,28 @@ fn count_ir(
     }
     for step in structure.algorithms.iter().flat_map(|a| &a.steps) {
         coverage.steps += 1;
-        let head = step
+        let source = step
             .items
             .iter()
             .find_map(|item| match item {
                 StepItem::Segment(id) => Some(id.as_str()),
                 _ => None,
             })
-            .and_then(|id| Some((index.sources.get(id)?, first_statement.get(id)?)))
-            .filter(|(source, head)| head.span.start <= head_prefix_len(&source.text))
-            .map(|(_, head)| head);
+            .and_then(|id| index.sources.get(id));
+        let head = source.and_then(|source| {
+            first_statement
+                .get(source.id.as_str())
+                .filter(|head| head.span.start <= head_prefix_len(&source.text))
+        });
+        // A `For each` head (plain or a linked list-iterate, whose text is
+        // the same) the loop grammar cannot parse is an unbound loop.
+        let loop_head = source.is_some_and(|source| {
+            source.text[head_prefix_len(&source.text)..].starts_with("For each ")
+        });
+        if loop_head && !head.is_some_and(|head| matches!(head.kind, StatementKind::ForEach { .. }))
+        {
+            coverage.foreach_total += 1;
+        }
         let tag = match head {
             Some(head) => {
                 if !matches!(head.kind, StatementKind::Opaque { .. }) {
@@ -2162,6 +2174,16 @@ mod tests {
         assert_eq!(state.coverage.assert_total, 3);
         assert_eq!(state.coverage.assert_parsed, 2);
         assert_eq!(state.coverage.assert_review.len(), 1);
+    }
+
+    #[test]
+    fn a_for_each_head_without_a_loop_counts_as_unbound() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="shift">shift</dfn> given a <var>parent</var> and a <var>nodes</var>:</p><ol><li><p>For each <var>node</var> of <var>nodes</var>, set <var>node</var>'s <a href="#i">index</a> to 0.</p></li><li><p>For each live range whose start node is <var>parent</var>, set its start offset to 0.</p></li></ol></div>"##;
+        let state = extract(html, "HTML");
+        assert_eq!(
+            (state.coverage.foreach_bound, state.coverage.foreach_total),
+            (1, 2)
+        );
     }
 
     #[test]

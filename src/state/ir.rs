@@ -1043,7 +1043,10 @@ impl Parser<'_> {
         let Some((Placeholder::Link(link), after)) = self.enc.placeholder(pos) else {
             return false;
         };
-        if self.infra_op(pos).is_some() || self.link_callability(link) == Callability::No {
+        if self.infra_op(pos).is_some()
+            || self.is_control_keyword_link(pos)
+            || self.link_callability(link) == Callability::No
+        {
             return false;
         }
         let end = self.value_end(after, None);
