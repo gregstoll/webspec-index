@@ -157,7 +157,7 @@ impl Parser<'_> {
     }
 
     /// Positions in `start..end` outside parentheses, `« »`, links and code.
-    fn top_level(&self, start: usize, end: usize) -> Vec<usize> {
+    pub(crate) fn top_level(&self, start: usize, end: usize) -> Vec<usize> {
         let mut positions = Vec::new();
         let mut depth = 0usize;
         let mut pos = start;

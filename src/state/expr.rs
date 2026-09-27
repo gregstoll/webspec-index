@@ -29,11 +29,14 @@ fn path_receiver(path: Path) -> Option<Expr> {
 impl Parser<'_> {
     /// `VALUE` → `Expr`. Every link inside a parsed (non-`Opaque`) atom gets
     /// the `Value` role.
-    /// Calls (§8.5) are tried after `NEW` and before `PATH`; their links get
-    /// roles from `call_at`, an algorithm value's link `AlgorithmValue`, and
-    /// the type link of `a new ⟦T⟧` `Type`.
+    /// `COND` is tried first. Calls (§8.5) are tried after `NEW` and before
+    /// `PATH`; their links get roles from `call_at`, an algorithm value's link
+    /// `AlgorithmValue`, and the type link of `a new ⟦T⟧` `Type`.
     pub(crate) fn expr_at(&mut self, start: usize, end: usize) -> Expr {
         let (start, end) = self.trimmed(start, end);
+        if let Some(expr) = self.conditional(start, end) {
+            return expr;
+        }
         let mut values = Vec::new();
         let expr = match self.head_atom(start, end, &mut values) {
             Some(expr) => {
@@ -58,6 +61,36 @@ impl Parser<'_> {
         expr
     }
 
+    /// `COND`: `A(,)? if PRED; otherwise(,)? B` at top level.
+    fn conditional(&mut self, start: usize, end: usize) -> Option<Expr> {
+        let text = &self.enc.text[start..end];
+        if !text.contains(" if ") || !text.contains("; otherwise") {
+            return None;
+        }
+        let positions = self.top_level(start, end);
+        let if_at = *positions
+            .iter()
+            .find(|&&pos| pos > start && self.lit(pos, " if "))?;
+        let otherwise_at = *positions
+            .iter()
+            .find(|&&pos| pos > if_at && self.lit(pos, "; otherwise"))?;
+        let then_end = if self.enc.text[..if_at].ends_with(',') {
+            if_at - 1
+        } else {
+            if_at
+        };
+        let after = otherwise_at + "; otherwise".len();
+        let otherwise_start = self.keyword(after, &[","]).unwrap_or(after);
+        let condition = self.predicate_at(if_at + " if ".len(), otherwise_at);
+        let then = self.expr_at(start, then_end);
+        let otherwise = self.expr_at(otherwise_start, end);
+        Some(Expr::Conditional {
+            condition: Box::new(condition),
+            then: Box::new(then),
+            otherwise: Box::new(otherwise),
+        })
+    }
+
     /// `VALUE` → `Expr` without calls and without recording roles; the link
     /// indices of parsed atoms go to `values`. `PATH` subscripts use it
     /// directly.
@@ -69,7 +102,7 @@ impl Parser<'_> {
         self.parsed_values(expr, start, end, values)
     }
 
-    fn trimmed(&self, start: usize, end: usize) -> (usize, usize) {
+    pub(crate) fn trimmed(&self, start: usize, end: usize) -> (usize, usize) {
         let text = &self.enc.text[start..end];
         let start = start + (text.len() - text.trim_start().len());
         let end = end - (text.len() - text.trim_end().len());
@@ -339,7 +372,7 @@ impl Parser<'_> {
 
     /// `LIT`: `literal`, `failure`, `the empty string`, a number with a
     /// U+2212 minus, or a code token spelling a literal.
-    fn literal_at(&self, start: usize, end: usize) -> Option<Literal> {
+    pub(crate) fn literal_at(&self, start: usize, end: usize) -> Option<Literal> {
         let text = &self.enc.text[start..end];
         match text {
             "failure" => return Some(Literal::Failure),

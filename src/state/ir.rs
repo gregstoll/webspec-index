@@ -382,6 +382,7 @@ pub enum Predicate {
         link_id: String,
         target: Option<AnchorTarget>,
         call: Option<String>,
+        negated: bool,
     },
     RunningOn {
         context: RunContext,

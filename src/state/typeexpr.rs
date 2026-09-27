@@ -19,7 +19,7 @@ fn regex(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
 
 // ── Primitive and Infra kind tables ──────────────────────────────────────────
 
-fn primitive_phrase(s: &str) -> Option<Primitive> {
+pub(crate) fn primitive_phrase(s: &str) -> Option<Primitive> {
     match s {
         "boolean" => Some(Primitive::Boolean),
         "string" => Some(Primitive::String),
@@ -56,7 +56,7 @@ fn infra_link_kind(ty: &TypeRef) -> Option<InfraKind> {
     infra_anchor_kind(&target.anchor)
 }
 
-fn infra_word_kind(s: &str) -> Option<InfraKind> {
+pub(crate) fn infra_word_kind(s: &str) -> Option<InfraKind> {
     match s {
         "list" => Some(InfraKind::List),
         "ordered set" => Some(InfraKind::OrderedSet),
