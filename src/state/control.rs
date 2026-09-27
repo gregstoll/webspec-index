@@ -26,6 +26,7 @@ const VERBHEADS: [&str; 14] = [
 const QUOTES: [(&str, &str); 2] = [("\"", "\""), ("\u{201C}", "\u{201D}")];
 const ASSERT: (&str, &str) = ("INFRA", "assert");
 const LIST_ITERATE: (&str, &str) = ("INFRA", "list-iterate");
+const MAP_ITERATE: (&str, &str) = ("INFRA", "map-iterate");
 const ITERATION_CONTINUE: (&str, &str) = ("INFRA", "iteration-continue");
 const ITERATION_BREAK: (&str, &str) = ("INFRA", "iteration-break");
 const IN_PARALLEL: (&str, &str) = ("HTML", "in-parallel");
@@ -134,21 +135,24 @@ impl Parser<'_> {
         }
     }
 
-    /// The body of a head whose terminator is at `terminator` (a `,` or the
-    /// final `:`) and where the clauses after it start.
+    /// The body of a head whose terminator is at `terminator` (a `,`, a `: `
+    /// before an inline body, or the final `:`) and where the clauses after
+    /// it start.
     fn body_after(&self, terminator: usize) -> (BodyLoc, usize) {
         if self.is_final_colon(terminator) {
             return (self.child_body(), self.text_end());
         }
-        let rest = self.keyword(terminator, &[", ", ","]).unwrap_or(terminator);
+        let rest = self
+            .keyword(terminator, &[", ", ",", ": "])
+            .unwrap_or(terminator);
         (BodyLoc::InlineRest, rest)
     }
 
-    /// The first top-level `,` or final `:` in `start..`.
+    /// The first top-level `,`, `: ` or final `:` in `start..`.
     fn head_terminator(&self, start: usize) -> Option<usize> {
         self.top_level(start, self.text_end())
             .into_iter()
-            .find(|&pos| self.lit(pos, ",") || self.is_final_colon(pos))
+            .find(|&pos| self.lit(pos, ",") || self.lit(pos, ": ") || self.is_final_colon(pos))
     }
 
     /// Pushes a control statement; an inline `body` makes it the parent of
@@ -284,7 +288,7 @@ impl Parser<'_> {
         let (head_link, start) = match self.keyword(pos, &["For each "]) {
             Some(start) => (None, start),
             None => match self
-                .head_link(pos, &[LIST_ITERATE])
+                .head_link(pos, &[LIST_ITERATE, MAP_ITERATE])
                 .and_then(|(link, after)| Some((Some(link), self.keyword(after, &[" "])?)))
             {
                 Some(head) => head,
@@ -626,6 +630,51 @@ mod tests {
     }
     fn kinds(p: &ParsedSource) -> Vec<&StatementKind> {
         p.statements.iter().map(|s| &s.kind).collect()
+    }
+
+    #[test]
+    fn loops_with_an_inline_body_after_a_colon() {
+        let p = parse(
+            "For each <var>node</var> of <var>nodes</var>: set <var>x</var> to <var>node</var>.",
+        );
+        let [StatementKind::ForEach {
+            vars,
+            body: BodyLoc::InlineRest,
+            ..
+        }, StatementKind::Set { .. }] = kinds(&p)[..]
+        else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert_eq!(vars, &["node"]);
+        let parent = p.statements[1].parent.as_ref().unwrap();
+        assert_eq!(
+            (parent.statement_id.as_str(), parent.role),
+            (p.statements[0].id.as_str(), BlockRole::Body)
+        );
+        for anchor in ["list-iterate", "map-iterate"] {
+            let p = parse(&format!(
+                r##"<a href="https://infra.spec.whatwg.org/#{anchor}">For each</a> <var>k</var> → <var>v</var> of <var>m</var>: set <var>x</var> to <var>v</var>."##
+            ));
+            let [StatementKind::ForEach { vars, .. }, StatementKind::Set { .. }] = kinds(&p)[..]
+            else {
+                panic!("{anchor}: {:?}", kinds(&p))
+            };
+            assert_eq!(vars, &["k", "v"]);
+            assert_eq!(p.roles[&0], crate::state::ir::LinkRole::Keyword);
+        }
+        let p = parse("While <var>x</var> is non-null: set <var>x</var> to <var>y</var>.");
+        let [StatementKind::While {
+            condition: Some(_),
+            body: BodyLoc::InlineRest,
+            ..
+        }, StatementKind::Set { .. }] = kinds(&p)[..]
+        else {
+            panic!("{:?}", kinds(&p))
+        };
+        assert_eq!(
+            p.statements[1].parent.as_ref().unwrap().role,
+            BlockRole::Body
+        );
     }
 
     #[test]

@@ -1254,19 +1254,30 @@ impl Parser<'_> {
         true
     }
 
+    /// `Let` VARS ` be ` VALUE, VARS a variable, a list of them (`, `,
+    /// ` and `, `, and `) or a parenthesized tuple; one `Let` per variable.
     fn try_let(&mut self, at: usize) -> bool {
         let Some(after) = self.keyword(at, &["Let ", "let "]) else {
             return false;
         };
-        let Some((Placeholder::Var(first), mut pos)) = self.enc.placeholder(after) else {
+        let tuple = self.keyword(after, &["("]);
+        let Some((Placeholder::Var(first), mut pos)) = self.enc.placeholder(tuple.unwrap_or(after))
+        else {
             return false;
         };
         let mut vars = vec![first];
-        if let Some(next) = self.keyword(pos, &[" and "]) {
-            if let Some((Placeholder::Var(second), end)) = self.enc.placeholder(next) {
-                vars.push(second);
-                pos = end;
-            }
+        while let Some((Placeholder::Var(next), end)) = self
+            .keyword(pos, &[", and ", " and ", ", "])
+            .and_then(|next| self.enc.placeholder(next))
+        {
+            vars.push(next);
+            pos = end;
+        }
+        if tuple.is_some() {
+            let Some(close) = self.keyword(pos, &[")"]) else {
+                return false;
+            };
+            pos = close;
         }
         let Some(value_start) = self.keyword(pos, &[" be "]) else {
             return false;
@@ -2091,6 +2102,49 @@ mod tests {
         assert_ne!(p.statements[0].id, p.statements[1].id);
         assert_eq!(role_of(&s, &p, "origin"), Some(OccurrenceClass::Read));
         assert!(p.clauses[0].consumed);
+    }
+
+    #[test]
+    fn let_binds_a_variable_list_and_a_tuple() {
+        let names = |p: &ParsedSource| -> Vec<String> {
+            p.statements
+                .iter()
+                .filter_map(|s| match &s.kind {
+                    StatementKind::Let { var, .. } => Some(var.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (_, p) = one(
+            "Let <var>capture</var>, <var>passive</var>, <var>once</var>, and <var>signal</var> be <var>options</var>.",
+        );
+        assert_eq!(names(&p), ["capture", "passive", "once", "signal"]);
+        assert!(p.clauses[0].consumed);
+        let (_, p) = one(
+            "Let (<var>namespace</var>, <var>prefix</var>, <var>localName</var>) be <var>t</var>.",
+        );
+        assert_eq!(names(&p), ["namespace", "prefix", "localName"]);
+        let (_, p) = one("Let <var>a</var>, which is odd, be <var>t</var>.");
+        assert_eq!(names(&p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn hourglass_prefix_starts_a_clause() {
+        let (s, p) = one("⌛ Let <var>mode</var> be null.");
+        let [Statement {
+            kind: StatementKind::Let { var, .. },
+            span,
+            ..
+        }] = &p.statements[..]
+        else {
+            panic!("{:?}", p.statements)
+        };
+        assert_eq!(var, "mode");
+        assert_eq!(span.start, "⌛ ".len());
+        assert!(s.text.starts_with("⌛ Let"));
+        let (_, p) = one("⌛ If <var>x</var> is null, then return.");
+        assert_eq!(p.statements.len(), 2, "{:?}", p.statements);
+        assert!(matches!(p.statements[0].kind, StatementKind::If { .. }));
     }
 
     #[test]

@@ -252,12 +252,16 @@ impl Encoded {
             })
     }
 
-    /// Clause starts (§7.3 `CLAUSE`) with their lexicon verb. Prose (§7.5)
-    /// also starts a clause after its lead-ins, case-insensitively.
+    /// Clause starts (§7.3 `CLAUSE`) with their lexicon verb. A step also
+    /// starts one after a leading `⌛ `. Prose (§7.5) also starts a clause
+    /// after its lead-ins, case-insensitively.
     pub(crate) fn clause_starts(&self, prose: bool) -> Vec<(usize, Option<String>)> {
         const PROSE_LEAD_INS: [&str; 3] = ["steps are to ", "must ", "the user agent must "];
         let bytes = self.text.as_bytes();
         let mut starts = std::collections::BTreeSet::from([0]);
+        if self.text.starts_with("\u{231B} ") {
+            starts.insert("\u{231B} ".len());
+        }
         for (index, _) in self.text.char_indices() {
             for separator in [", ", "; ", ": "] {
                 if self.text[index..].starts_with(separator) {

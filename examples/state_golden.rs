@@ -1,15 +1,20 @@
-//! Whole-corpus golden check and coverage print (spec §12.3–§12.4).
+//! Whole-corpus golden check and coverage print (spec §12.3–§12.4, statement IR §6.4–§6.6).
 //!
 //! Usage: cargo run --release --example state_golden -- [--review] HTML.html DOM.html
 //! Indexes both snapshots twice: with the bundled catalog (golden set, bundled floors) and
 //! with an empty catalog (grammar-only floors). `--review` prints the unclassified review
-//! items of the bundled run. Exits 1 on any golden mismatch or coverage floor violation.
+//! items, unparsed assertions and undeclared variables of the bundled run. Exits 1 on any
+//! golden mismatch or coverage floor violation.
 #[path = "../tests/state_golden.rs"]
 #[allow(dead_code)]
 mod golden;
 
+use std::collections::{BTreeSet, HashSet};
 use webspec_index::state::catalog::StateCatalog;
-use webspec_index::state::model::{SignatureForm, StateSpec, TypeBasis, TypeExpr};
+use webspec_index::state::ir::{Expr, Origin, SourceContext, StatementKind};
+use webspec_index::state::model::{
+    AnchorTarget, ReviewItem, SignatureForm, StateSpec, TypeBasis, TypeExpr,
+};
 
 struct Floors {
     owner: f64,
@@ -80,6 +85,132 @@ fn model(conn: &rusqlite::Connection, snapshot: i64) -> StateSpec {
         .unwrap()
 }
 
+fn ratio(part: u32, whole: u32) -> String {
+    format!(
+        "{part}/{whole} ({:.1}%)",
+        100.0 * part as f64 / whole.max(1) as f64
+    )
+}
+
+/// The §6.4–§6.6 statement measurements. The `Let`/`Return` rates cover every
+/// source; the §6.5 probe read algorithm steps only, so the step-only rates
+/// follow. The §6.6 probe checked `To` algorithms only, so their count follows
+/// the all-subject one.
+fn print_statements(state: &StateSpec) {
+    let c = &state.coverage;
+    let mut heads: Vec<(&String, &u32)> = c.step_heads.iter().collect();
+    heads.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let top: Vec<String> = heads
+        .iter()
+        .take(10)
+        .map(|(tag, n)| format!("{tag} {n}"))
+        .collect();
+    println!(
+        "  step heads recognized {}; top: {}",
+        ratio(c.steps_recognized, c.steps),
+        top.join(", ")
+    );
+    println!(
+        "  If parsed {}, Assert parsed {}, For each bound {}",
+        ratio(c.if_parsed, c.if_total),
+        ratio(c.assert_parsed, c.assert_total),
+        ratio(c.foreach_bound, c.foreach_total)
+    );
+    let opaque = |slot: &str| {
+        let prefix = format!("{slot}:");
+        let total: u32 = c
+            .expr_forms
+            .iter()
+            .filter(|(form, _)| form.starts_with(&prefix))
+            .map(|(_, n)| n)
+            .sum();
+        let opaque = c
+            .expr_forms
+            .get(&format!("{slot}:opaque"))
+            .copied()
+            .unwrap_or(0);
+        ratio(opaque, total)
+    };
+    println!(
+        "  Let opaque {}, Return opaque {}; expr forms {:?}",
+        opaque("let"),
+        opaque("return"),
+        c.expr_forms
+    );
+    let step_sources: HashSet<&str> = state
+        .sources
+        .iter()
+        .filter(|s| matches!(s.context, SourceContext::Algorithm { .. }))
+        .map(|s| s.id.as_str())
+        .collect();
+    let (mut lets, mut returns) = ((0, 0), (0, 0));
+    for statement in &state.statements {
+        if !step_sources.contains(statement.source_id.as_str()) {
+            continue;
+        }
+        let (count, value) = match &statement.kind {
+            StatementKind::Let { value, .. } => (&mut lets, Some(value)),
+            StatementKind::Return { value } => (&mut returns, value.as_ref()),
+            _ => continue,
+        };
+        count.0 += u32::from(matches!(value, Some(Expr::Opaque { .. })));
+        count.1 += 1;
+    }
+    println!(
+        "  in algorithm steps: Let opaque {}, Return opaque {}",
+        ratio(lets.0, lets.1),
+        ratio(returns.0, returns.1)
+    );
+    let algorithms: BTreeSet<&str> = c
+        .undeclared_review
+        .iter()
+        .map(|item| item.subject.as_str())
+        .collect();
+    let to_algorithms: HashSet<&AnchorTarget> = state
+        .signatures
+        .iter()
+        .filter(|s| s.form == SignatureForm::To)
+        .map(|s| &s.algorithm)
+        .collect();
+    let (mut to_undeclared, mut to_with_any) = (0, 0);
+    for origins in state
+        .var_origins
+        .iter()
+        .filter(|o| to_algorithms.contains(&o.subject))
+    {
+        let n = origins
+            .vars
+            .iter()
+            .filter(|v| v.origin == Origin::Undeclared)
+            .count();
+        to_undeclared += n;
+        to_with_any += usize::from(n > 0);
+    }
+    println!(
+        "  undeclared vars {} in {} algorithms (To algorithms: {to_undeclared} in {to_with_any} of {}); calls by form {:?}",
+        c.undeclared_vars,
+        algorithms.len(),
+        to_algorithms.len(),
+        c.calls_by_form
+    );
+}
+
+/// Review items; their subject already carries the spec.
+fn print_review(label: &str, items: &[ReviewItem]) {
+    for item in items {
+        println!(
+            "  {label}: {}{} [{}] {}",
+            item.subject,
+            item.step_path
+                .as_deref()
+                .map(|p| format!(":{p}"))
+                .unwrap_or_default(),
+            item.target,
+            item.text
+        );
+    }
+}
+
 /// Prints the §12.4 numbers for one run; returns false when a floor is violated.
 fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
     let (c, signatures) = (&state.coverage, &state.signatures);
@@ -139,6 +270,7 @@ fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
         pct(with_idl, c.algorithms),
         pct(to_typed, to_params)
     );
+    print_statements(state);
     for unresolved in &c.written_fields_unresolved {
         println!("  unresolved owner: {spec}#{unresolved}");
     }
@@ -180,18 +312,10 @@ fn main() {
             exit = 1;
         }
         if review {
-            for item in &state.coverage.unclassified_review {
-                println!(
-                    "  review: {spec}#{}{} [{}] {}",
-                    item.subject,
-                    item.step_path
-                        .as_deref()
-                        .map(|p| format!(":{p}"))
-                        .unwrap_or_default(),
-                    item.target,
-                    item.text
-                );
-            }
+            let c = &state.coverage;
+            print_review("review", &c.unclassified_review);
+            print_review("assert", &c.assert_review);
+            print_review("undeclared", &c.undeclared_review);
         }
     }
 
