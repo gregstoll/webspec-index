@@ -819,7 +819,7 @@ pub(crate) fn is_inside_algorithm_content(element: &scraper::ElementRef) -> bool
 }
 
 /// Whether an element's content is a single `<var>` and nothing else but whitespace.
-fn is_var_only(element: &scraper::ElementRef) -> bool {
+pub(crate) fn is_var_only(element: &scraper::ElementRef) -> bool {
     let mut vars = 0;
     for child in element.children() {
         match child.value() {

@@ -1,6 +1,6 @@
 //! Field and owner inference (§6.3): R1 `data-dfn-for` and R2 declaration sentences.
 use crate::parse::idl_defs::normalize_owner;
-use crate::parse::sections::is_inside_algorithm_content;
+use crate::parse::sections::{is_inside_algorithm_content, is_var_only};
 use crate::parse::steps::StructuralSpec;
 use crate::state::block::{
     flatten, innermost_block, list_item, norm, pattern, plain_text, sentences, BlockToken,
@@ -227,10 +227,7 @@ fn is_concept_dfn(dfn: &ElementRef<'_>) -> bool {
     v.name() == "dfn"
         && v.attr("id").is_some()
         && matches!(v.attr("data-dfn-type"), None | Some("dfn"))
-        && !dfn
-            .children()
-            .filter_map(ElementRef::wrap)
-            .any(|c| c.value().name() == "var")
+        && !is_var_only(dfn)
         && !dfn
             .ancestors()
             .filter_map(ElementRef::wrap)
@@ -1679,6 +1676,16 @@ mod tests {
             "got {:?}",
             f.declared_type
         );
+    }
+
+    #[test]
+    fn only_var_only_dfns_are_parameters() {
+        let doc = Html::parse_document(
+            r#"<p>To <dfn id="alg">frob</dfn> <dfn id="param" data-dfn-for="frob"><var>thing</var></dfn>:</p>
+<p>Each thing has a <dfn id="mixed"><var>x</var>'s ancestor list</dfn>.</p>"#,
+        );
+        let ids: Vec<_> = concept_dfns(&doc).into_iter().map(|c| c.id).collect();
+        assert_eq!(ids, ["alg", "mixed"]);
     }
 
     #[test]

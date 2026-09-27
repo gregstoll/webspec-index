@@ -1,4 +1,5 @@
 //! Declaration blocks as token sequences, for the owner and type grammars.
+use crate::parse::sections::is_var_only;
 use crate::parse::steps::{resolve_href, AnchorTarget};
 use scraper::{ElementRef, Node};
 use std::ops::Range;
@@ -116,10 +117,7 @@ fn dfn_token(el: &ElementRef<'_>) -> BlockToken {
             .unwrap_or_default(),
         dfn_for: v.attr("data-dfn-for").map(str::to_string),
         dfn_type: v.attr("data-dfn-type").map(str::to_string),
-        var_param: el
-            .children()
-            .filter_map(ElementRef::wrap)
-            .any(|c| c.value().name() == "var"),
+        var_param: is_var_only(el),
     }
 }
 
@@ -260,6 +258,17 @@ mod tests {
             &t[0],
             BlockToken::Dfn {
                 var_param: true,
+                ..
+            }
+        ));
+        let t = block(
+            r#"<p><dfn id="c"><var>x</var>'s ancestor list</dfn></p>"#,
+            "p",
+        );
+        assert!(matches!(
+            &t[0],
+            BlockToken::Dfn {
+                var_param: false,
                 ..
             }
         ));
