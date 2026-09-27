@@ -346,7 +346,7 @@ fn intro_alt(
     }
     if let Some(caps) = regex(
         &NOMINAL,
-        r"^(?:(?:two|three|four) )?(⟦L\d+⟧)(?: (?:object|element|node|interface)s?)?$",
+        r"^(?:(?:two|three|four) )?(⟦L\d+⟧)(?: ⟦L\d+⟧)?(?: (?:object|element|node|interface)s?)?$",
     )
     .captures(bare)
     {
@@ -949,6 +949,30 @@ mod tests {
         assert_eq!(
             parse("string-or-null", &[], false),
             Some(("string | null".into(), TypeBasis::Explicit))
+        );
+    }
+
+    #[test]
+    fn nominal_of_two_links_takes_the_first() {
+        use crate::state::testing::{extract_html, ty, AUTODIR_HTML};
+        let document = scraper::Html::parse_document(AUTODIR_HTML);
+        let state = extract_html(AUTODIR_HTML, "HTML");
+        let names = crate::state::names::NameResolver::new(
+            "HTML",
+            &state.model,
+            &crate::state::declare::concept_dfns(&document),
+        );
+        let pi = (
+            "`ProcessingInstruction`".to_string(),
+            TypeRef::Known(TypeKey::Idl("ProcessingInstruction".into())),
+        );
+        let node = (
+            "node".to_string(),
+            TypeRef::Known(TypeKey::Idl("Node".into())),
+        );
+        assert_eq!(
+            parse_intro_type("⟦L0⟧ ⟦L1⟧", &[pi, node], &names, true).map(|(t, b)| (ty(&t), b)),
+            Some(("idl:ProcessingInstruction".into(), TypeBasis::Explicit))
         );
     }
 

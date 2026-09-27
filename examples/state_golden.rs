@@ -2,18 +2,22 @@
 //!
 //! Usage: cargo run --release --example state_golden -- [--review] HTML.html DOM.html
 //! Indexes both snapshots twice: with the bundled catalog (golden set, bundled floors) and
-//! with an empty catalog (grammar-only floors). `--review` prints the unclassified review
-//! items, unparsed assertions and undeclared variables of the bundled run. Exits 1 on any
-//! golden mismatch or coverage floor violation.
+//! with an empty catalog (grammar-only floors). The bundled run also binds every stored call
+//! (binding rates, §14.5 floor, §13 time budget). `--review` prints the unclassified review
+//! items, unparsed assertions, undeclared variables and non-exact HTML bindings of the
+//! bundled run. Exits 1 on any golden mismatch, coverage floor violation or blown budget.
 #[path = "../tests/state_golden.rs"]
 #[allow(dead_code)]
 mod golden;
 
 use std::collections::{BTreeSet, HashSet};
+use webspec_index::db::state::StoredCall;
+use webspec_index::state::bind::{bind, Binding, Confidence};
 use webspec_index::state::catalog::StateCatalog;
 use webspec_index::state::ir::{Expr, Origin, SourceContext, StatementKind};
 use webspec_index::state::model::{
-    AnchorTarget, ReviewItem, SignatureForm, StateSpec, TypeBasis, TypeExpr,
+    AnchorTarget, ReviewItem, Signature, SignatureForm, StateSpec, TemplatePiece, TypeBasis,
+    TypeExpr,
 };
 
 struct Floors {
@@ -283,6 +287,179 @@ fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
     ok
 }
 
+/// Exact / partial / unbound counts of one population of calls.
+#[derive(Default)]
+struct Rates {
+    exact: u32,
+    partial: u32,
+    unbound: u32,
+}
+
+impl Rates {
+    fn add(&mut self, confidence: Confidence) {
+        match confidence {
+            Confidence::Exact => self.exact += 1,
+            Confidence::Partial => self.partial += 1,
+            Confidence::Unbound => self.unbound += 1,
+        }
+    }
+
+    fn exact_pct(&self) -> f64 {
+        let n = self.exact + self.partial + self.unbound;
+        100.0 * self.exact as f64 / n.max(1) as f64
+    }
+
+    fn line(&self) -> String {
+        let n = self.exact + self.partial + self.unbound;
+        let pct = |part: u32| 100.0 * part as f64 / n.max(1) as f64;
+        format!(
+            "{n}, exact {:.1}%, partial {:.1}%, unbound {:.1}%",
+            pct(self.exact),
+            pct(self.partial),
+            pct(self.unbound)
+        )
+    }
+}
+
+/// §14.5 floor on exact bindings of calls to `To` targets with parameters.
+/// Stage 1 interim values (64% HTML / 78% DOM); the §14.5 targets (70% / 80%) require
+/// Stage 2 improvements to handle compound-noun task-source arguments and
+/// inline body descriptions that carry no nested body arg.
+fn binding_floor(spec: &str) -> f64 {
+    if spec == "HTML" {
+        64.0
+    } else {
+        78.0
+    }
+}
+
+/// §13 budget for binding every call of HTML.
+const HTML_BIND_BUDGET_MS: f64 = 20.0;
+
+/// §6.3 / §14.5 binding rates and the §13 binding time over the stored calls of both
+/// snapshots; returns false when a floor or the budget is violated. `To`-like means the
+/// forms whose intro is a call template (`To`, `when the steps say`, given-list), as in
+/// `bind`. Over all calls, a call without a target or signature counts as unbound.
+/// A signature whose intro is a call template and that takes parameters.
+fn is_to_like(signature: &Signature) -> bool {
+    matches!(
+        signature.form,
+        SignatureForm::To | SignatureForm::WhenStepsSay | SignatureForm::GivenList
+    ) && !signature.params.is_empty()
+}
+
+/// One non-exact binding for review: caller, callee, template, issues, argument region.
+fn print_binding(stored: &StoredCall, signature: &Signature, binding: &Binding) {
+    let region = &stored.call.region;
+    let text = stored
+        .source
+        .text
+        .get(region.start..region.end)
+        .unwrap_or_default();
+    let template: Vec<String> = signature
+        .template
+        .iter()
+        .flat_map(|t| &t.pieces)
+        .map(|piece| match piece {
+            TemplatePiece::Head(head) | TemplatePiece::Literal(head) => head.clone(),
+            TemplatePiece::Callee => "CALLEE".into(),
+            TemplatePiece::Slot(i) => format!("${i}"),
+            TemplatePiece::ListSep => ",".into(),
+            TemplatePiece::NamedGroup(group) => format!("[{group}]"),
+        })
+        .collect();
+    let issues: Vec<String> = binding
+        .issues
+        .iter()
+        .map(|issue| format!("{issue:?}"))
+        .collect();
+    println!(
+        "  binding {:?}: {}:{}{} -> {}#{} `{}` {} :: {text}",
+        binding.confidence,
+        stored.spec,
+        stored.subject,
+        stored
+            .step_path
+            .as_deref()
+            .map(|p| format!(":{p}"))
+            .unwrap_or_default(),
+        binding.callee.spec,
+        binding.callee.anchor,
+        template.join(" "),
+        issues.join(", ")
+    );
+}
+
+fn report_bindings(conn: &rusqlite::Connection, snapshots: [i64; 2], review: bool) -> bool {
+    let calls: Vec<Vec<StoredCall>> = snapshots
+        .iter()
+        .map(|&s| webspec_index::db::state::calls_of_snapshot(conn, s).unwrap())
+        .collect();
+    let targets: Vec<AnchorTarget> = calls
+        .iter()
+        .flatten()
+        .filter_map(|c| c.call.callee.target.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let signatures =
+        webspec_index::db::state::signatures_for_targets(conn, &snapshots, &targets).unwrap();
+    let mut ok = true;
+    for (spec, calls) in ["HTML", "DOM"].into_iter().zip(&calls) {
+        let with_signature: Vec<(&StoredCall, &Signature)> = calls
+            .iter()
+            .filter_map(|c| {
+                let target = c.call.callee.target.as_ref()?;
+                Some((c, signatures.get(target)?))
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        let bindings: Vec<Binding> = with_signature
+            .iter()
+            .map(|(stored, signature)| bind(&stored.call, &stored.source, signature))
+            .collect();
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        let (mut to_like, mut to, mut all) = (Rates::default(), Rates::default(), Rates::default());
+        for ((_, signature), binding) in with_signature.iter().zip(&bindings) {
+            all.add(binding.confidence);
+            if is_to_like(signature) {
+                to_like.add(binding.confidence);
+                if signature.form == SignatureForm::To {
+                    to.add(binding.confidence);
+                }
+            }
+        }
+        all.unbound += (calls.len() - with_signature.len()) as u32;
+        println!(
+            "{spec} bindings: calls to To-like targets with parameters: {}",
+            to_like.line()
+        );
+        println!("  of which `To` targets: {}", to.line());
+        println!(
+            "  all calls: {} ({} without a target signature)",
+            all.line(),
+            calls.len() - with_signature.len()
+        );
+        println!("  bound {} calls in {ms:.2} ms", bindings.len());
+        if to_like.exact_pct() < binding_floor(spec) {
+            println!("FLOOR {spec} exact bindings below §14.5");
+            ok = false;
+        }
+        if spec == "HTML" && ms >= HTML_BIND_BUDGET_MS {
+            println!("BUDGET {spec} binding took {ms:.2} ms, §13 allows {HTML_BIND_BUDGET_MS} ms");
+            ok = false;
+        }
+        if review {
+            for ((stored, signature), binding) in with_signature.iter().zip(&bindings) {
+                if binding.confidence != Confidence::Exact && is_to_like(signature) {
+                    print_binding(stored, signature, binding);
+                }
+            }
+        }
+    }
+    ok
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let review = args.iter().any(|a| a == "--review");
@@ -317,6 +494,9 @@ fn main() {
             print_review("assert", &c.assert_review);
             print_review("undeclared", &c.undeclared_review);
         }
+    }
+    if !report_bindings(&conn, snapshots, review) {
+        exit = 1;
     }
 
     let (conn, snapshots) = index(&html, &dom, &StateCatalog::default());

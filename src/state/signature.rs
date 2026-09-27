@@ -18,7 +18,7 @@ use crate::state::names::NameResolver;
 use crate::state::typeexpr::parse_intro_type;
 
 /// Words stripped before a type phrase's core.
-const ARTICLES: [&str; 5] = ["a", "an", "the", "optional", "optionally"];
+const ARTICLES: [&str; 6] = ["a", "an", "the", "optional", "optionally", "particular"];
 /// Words a type phrase without an article may start with.
 const TYPE_WORDS: [&str; 13] = [
     "null",
@@ -99,7 +99,16 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
         if var_start < cursor {
             continue;
         }
-        let words = words(&enc.text, cursor, var_start);
+        let mut words = words(&enc.text, cursor, var_start);
+        if enc.text[cursor..var_start]
+            .trim_start()
+            .starts_with("which ")
+        {
+            let comma = words.iter().position(|&(s, e)| &enc.text[s..e] == ",");
+            if let Some(comma) = comma {
+                words.drain(..=comma);
+            }
+        }
         let texts: Vec<String> = words
             .iter()
             .map(|&(start, end)| parser.src_text(start, end))
@@ -119,12 +128,27 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
                     .to_string(),
                 &texts[..found.k],
             ),
-            None => (
-                TypeExpr::Unknown,
-                TypeBasis::Unknown,
-                String::new(),
-                &texts[..],
-            ),
+            None => match described_type(&texts) {
+                Some((k, core)) => {
+                    let text = parser
+                        .src_text(words[core].0, var_start)
+                        .trim()
+                        .trim_end_matches(',')
+                        .to_string();
+                    (
+                        TypeExpr::Opaque { text: text.clone() },
+                        TypeBasis::Explicit,
+                        text,
+                        &texts[..k],
+                    )
+                }
+                None => (
+                    TypeExpr::Unknown,
+                    TypeBasis::Unknown,
+                    String::new(),
+                    &texts[..],
+                ),
+            },
         };
         let mut literal = normalize_literal(literal_words);
         match &phrase {
@@ -293,6 +317,9 @@ pub(crate) fn type_phrase(
     names: &NameResolver,
 ) -> Option<TypePhrase> {
     let end = words.last()?.1;
+    if matches!(&text[words.last()?.0..end], "a" | "an" | "the") {
+        return None;
+    }
     (0..words.len()).find_map(|k| {
         let mut j = k;
         while j < words.len() && ARTICLES.contains(&&text[words[j].0..words[j].1]) {
@@ -312,6 +339,29 @@ pub(crate) fn type_phrase(
             basis,
         })
     })
+}
+
+/// A glue with no type phrase whose words from an article or COUNT word on
+/// describe the type in prose ("and a series of steps", "given a struct
+/// consisting of a width and a height, or null,", "four policy
+/// container-or-nulls"): the index of that word, where the literal ends, and
+/// of the description's first word.
+fn described_type(texts: &[String]) -> Option<(usize, usize)> {
+    let k = texts.iter().position(|w| {
+        matches!(
+            w.to_lowercase().as_str(),
+            "a" | "an" | "the" | "two" | "three" | "four"
+        )
+    })?;
+    let core = if matches!(texts[k].to_lowercase().as_str(), "a" | "an" | "the") {
+        k + 1
+    } else {
+        k
+    };
+    texts[core..]
+        .iter()
+        .any(|w| w != "," && !ARTICLES.contains(&w.as_str()))
+        .then_some((k, core))
 }
 
 /// A core that names a type on its own: a link, a quote, `null`, a primitive
@@ -523,6 +573,72 @@ mod tests {
     }
     fn lit(s: &str) -> P {
         P::Literal(s.into())
+    }
+
+    #[test]
+    fn prose_type_descriptions_are_types_not_literals() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="q">queue a global task</dfn> on a <a href="#task-source">task source</a> <var>source</var>, with a <a href="#global-object">global object</a> <var>global</var> and a series of steps <var>steps</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="dims">determine dimensions</dfn> of <var>image</var> given a struct consisting of a width and a height, or null, <var>natural</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="fire">fire</dfn> named <var>e</var> at <var>target</var>, optionally using an <var>eventConstructor</var>, and a <var>legacy flag</var>:</p><ol><li><p>Return.</p></li></ol></div>"##;
+        let all = sigs(html, "HTML");
+        let q = find(&all, "q");
+        assert_eq!(
+            q.template.as_ref().unwrap().pieces,
+            vec![
+                P::Callee,
+                lit("on"),
+                P::Slot(0),
+                lit("with"),
+                P::Slot(1),
+                P::ListSep,
+                P::Slot(2)
+            ]
+        );
+        assert_eq!(q.params[2].type_text, "series of steps");
+        assert_eq!(
+            q.params[2].ty,
+            TypeExpr::Opaque {
+                text: "series of steps".into()
+            }
+        );
+        let dims = find(&all, "dims");
+        assert_eq!(
+            dims.template.as_ref().unwrap().pieces,
+            vec![P::Callee, lit("of"), P::Slot(0), lit("given"), P::Slot(1)]
+        );
+        assert_eq!(
+            dims.params[1].type_text,
+            "struct consisting of a width and a height, or null"
+        );
+        let fire = find(&all, "fire");
+        assert_eq!(
+            fire.template.as_ref().unwrap().pieces,
+            vec![
+                P::Callee,
+                lit("named"),
+                P::Slot(0),
+                lit("at"),
+                P::Slot(1),
+                lit("using"),
+                P::Slot(2),
+                P::ListSep,
+                P::Slot(3)
+            ]
+        );
+        assert_eq!(fire.params[2].ty, TypeExpr::Unknown);
+        assert!(fire.params[2].optional && fire.params[3].optional);
+    }
+
+    #[test]
+    fn which_clause_after_a_parameter_is_not_the_next_literal() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="report">report an exception</dfn> <var>exception</var> which is a JavaScript value, for a particular <a href="#global-object">global object</a> <var>global</var>:</p><ol><li><p>Return.</p></li></ol></div>"##;
+        let all = sigs(html, "HTML");
+        let s = find(&all, "report");
+        assert_eq!(
+            s.template.as_ref().unwrap().pieces,
+            vec![P::Callee, P::Slot(0), lit("for"), P::Slot(1)]
+        );
+        assert_eq!(s.params[1].type_text, "global object");
     }
 
     #[test]

@@ -1,5 +1,8 @@
 //! Argument binding (§9): aligns a call's argument region with its callee's
 //! signature. Derived at consumption time, never stored.
+use std::sync::OnceLock;
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
@@ -402,6 +405,15 @@ impl Binder<'_> {
                 end -= lead.len();
             }
         }
+        let body_bound = self
+            .args
+            .iter()
+            .any(|arg| matches!(arg.value, ArgValue::Body(_)));
+        if body_bound {
+            if let Some(intro) = body_intro().find(&self.masked[start..end]) {
+                end = start + intro.start();
+            }
+        }
         (start, end)
     }
 
@@ -464,7 +476,7 @@ impl Binder<'_> {
                 }
                 continue;
             }
-            match self.argument(arg_start, arg_end) {
+            match self.argument(param, arg_start, arg_end) {
                 Some((value, span)) => self.set(param, ArgValue::Expr(value), via, Some(span)),
                 None if !self.signature.params[param].optional => self.missing(param),
                 None => {}
@@ -549,7 +561,7 @@ impl Binder<'_> {
         positional.sort();
         let mut items = items.into_iter();
         for (_, param) in positional {
-            match items.next().and_then(|(s, e)| self.argument(s, e)) {
+            match items.next().and_then(|(s, e)| self.argument(param, s, e)) {
                 Some((value, span)) => self.set(
                     param,
                     ArgValue::Expr(value),
@@ -645,13 +657,30 @@ impl Binder<'_> {
 
     /// Rule 6: the argument in `start..end` as an expression, with its
     /// trimmed span; `None` when it is empty.
-    fn argument(&mut self, start: usize, end: usize) -> Option<(Expr, TextSpan)> {
-        let (start, end) = self.trim(start, end);
+    fn argument(&mut self, param: usize, start: usize, end: usize) -> Option<(Expr, TextSpan)> {
+        let (mut start, mut end) = self.trim(start, end);
+        // Strip " if given" suffix: "*x* if given" means forward *x* when present.
+        const IF_GIVEN: &str = " if given";
+        if self.source.text[start..end].ends_with(IF_GIVEN) {
+            end -= IF_GIVEN.len();
+            let (s, e) = self.trim(start, end);
+            start = s;
+            end = e;
+        }
+        let text = &self.source.text;
+        let type_text = &self.signature.params[param].type_text;
+        let lead = type_text.len() + 1;
+        if !type_text.is_empty()
+            && start + lead < end
+            && self.masked[start..].starts_with(type_text.as_str())
+            && self.masked[start + type_text.len()..].starts_with(' ')
+        {
+            start += lead;
+        }
         if start >= end {
             return None;
         }
         let span = TextSpan { start, end };
-        let text = &self.source.text;
         let mut at = start;
         for leads in CALL_LEADS {
             if let Some(lead) = leads.iter().find(|lead| text[at..end].starts_with(*lead)) {
@@ -732,6 +761,18 @@ impl Binder<'_> {
         }
         None
     }
+}
+
+/// The phrase ending an argument region that introduces the body passed as
+/// a body argument: "… to run the following steps:", "… and these steps:".
+fn body_intro() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i),? (?:to (?:run|perform|execute) |and )(?:the following|these|the) (?:sub)?steps?\s*[:.]?\s*$",
+        )
+        .unwrap()
+    })
 }
 
 /// A parameter type phrase naming steps or an algorithm.
@@ -858,6 +899,41 @@ mod tests {
         assert!(
             matches!(&b.args[2].value, ArgValue::Default(Expr::EnumValue { text, .. }) if text == "auto")
         );
+    }
+
+    #[test]
+    fn anonymous_body_intro_ends_the_argument_before_a_body_argument() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="q">queue a global task</dfn> on a <a href="#task-source">task source</a> <var>source</var>, with a <a href="#global-object">global object</a> <var>global</var> and a series of steps <var>steps</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a <a href="#global-object">global object</a> <var>global</var>:</p><ol>
+<li><p><a href="#q">Queue a global task</a> on <var>source</var> given <var>global</var> to run the following steps:</p><ol><li><p>Return.</p></li></ol></li>
+<li><p><a href="#q">Queue a global task</a> on <var>source</var> given <var>global</var> to resolve <var>p</var>.</p></li>
+</ol></div>"##;
+        let (b, _) = bound(html, "HTML", "c", "1").remove(0);
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(var("source")));
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("global")));
+        assert!(matches!(b.args[2].value, ArgValue::Body(_)));
+        let (b, _) = bound(html, "HTML", "c", "2").remove(0);
+        assert_eq!(b.confidence, Confidence::Partial);
+        assert_eq!(b.args[2].value, ArgValue::Unbound);
+    }
+
+    #[test]
+    fn argument_led_by_its_parameter_type_phrase_binds_the_value() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="enqueue">enqueue a reaction</dfn>, given a <a href="#custom-element">custom element</a> <var>element</var>, a callback name <var>callbackName</var>, and a <a href="https://infra.spec.whatwg.org/#list">list</a> <var>args</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a <a href="#custom-element">custom element</a> <var>element</var>:</p><ol>
+<li><p><a href="#enqueue">Enqueue a reaction</a> with <var>element</var>, callback name "<code>connectedCallback</code>", and « ».</p></li>
+<li><p><a href="#enqueue">Enqueue a reaction</a> with <var>element</var>, callback "<code>connectedCallback</code>", and « ».</p></li>
+</ol></div>"##;
+        let (b, _) = bound(html, "HTML", "c", "1").remove(0);
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert!(
+            matches!(&b.args[1].value, ArgValue::Expr(Expr::EnumValue { text, .. }) if text == "connectedCallback"),
+            "{:?}",
+            b.args[1]
+        );
+        let (b, _) = bound(html, "HTML", "c", "2").remove(0);
+        assert_eq!(b.confidence, Confidence::Partial);
     }
 
     #[test]
