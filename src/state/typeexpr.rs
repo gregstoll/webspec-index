@@ -545,6 +545,17 @@ fn parse_value(v: &str) -> InitialValue {
             text,
         },
         "empty" | "« »" => InitialValue::Empty { text },
+        "the empty string" => InitialValue::Literal {
+            value: Literal::String(String::new()),
+            text,
+        },
+        _ if ["the empty ", "an empty "].iter().any(|head| {
+            v.strip_prefix(head)
+                .is_some_and(|collection| collection.split_whitespace().count() <= 2)
+        }) =>
+        {
+            InitialValue::Empty { text }
+        }
         "unset" => InitialValue::Unset { text },
         _ if v.starts_with("a new ") || v.starts_with("an new ") => {
             let rest = v
@@ -1066,6 +1077,28 @@ mod tests {
             | InitialValue::New { text, .. }
             | InitialValue::Opaque { text } => text,
         })
+    }
+
+    #[test]
+    fn empty_phrases_are_empty_values() {
+        use crate::state::model::Literal;
+        let value = |s: &str| initial_value(&format!("⟦D0⟧, initially {s}."), None, None);
+        assert!(matches!(
+            value("the empty string"),
+            Some(InitialValue::Literal { value: Literal::String(s), text }) if s.is_empty() && text == "the empty string"
+        ));
+        for phrase in [
+            "the empty list",
+            "the empty set",
+            "an empty list",
+            "an empty import map",
+        ] {
+            assert!(
+                matches!(value(phrase), Some(InitialValue::Empty { .. })),
+                "{phrase}: {:?}",
+                value(phrase)
+            );
+        }
     }
 
     #[test]
