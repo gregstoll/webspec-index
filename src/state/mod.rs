@@ -7,6 +7,7 @@ pub mod catalog;
 pub(crate) mod classify;
 pub(crate) mod declare;
 pub mod extract;
+pub(crate) mod grammar;
 pub mod ir;
 pub mod lookup;
 pub mod model;

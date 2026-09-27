@@ -7,8 +7,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::parse::steps::{AnchorTarget, InlineToken, InlineTokenKind, LinkSpan, TextSpan};
-use crate::state::model::{Literal, OccurrenceClass, TypeKey, TypeRef};
+use crate::parse::steps::{AnchorTarget, InlineToken, LinkSpan, TextSpan};
+use crate::state::grammar::{Encoded, Env, InfraTarget, Parser, PathParse, Placeholder};
+use crate::state::model::{Literal, OccurrenceClass, TypeRef};
 
 // ---------------------------------------------------------------------------
 // §7.1 Sources
@@ -608,6 +609,10 @@ pub(crate) struct ParsedSource {
     /// link a statement positions.
     pub link_roles: BTreeMap<usize, (OccurrenceClass, String)>,
     pub clauses: Vec<Clause>,
+    /// Call objects attached to this source; empty until Task F13 fills them.
+    pub calls: Vec<Call>,
+    /// link index → `LinkRole`; filled by grammar productions (Task F7+).
+    pub roles: BTreeMap<usize, LinkRole>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -631,243 +636,12 @@ pub(crate) fn statement_id(source_id: &str, kind: &str, span: TextSpan) -> Strin
     format!("stmt-{:x}", hasher.finalize())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Placeholder {
-    /// Index into `source.links`.
-    Link(usize),
-    /// Index into `Encoded::vars`.
-    Var(usize),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Piece {
-    enc: usize,
-    enc_end: usize,
-    src: TextSpan,
-    placeholder: Option<Placeholder>,
-}
-
-/// The source text with each link span replaced by `⟦L{i}⟧` and each
-/// variable outside a link by `⟦V{j}⟧`. The grammar runs on `text`; every
-/// span it emits maps back through `to_src`.
-struct Encoded {
-    text: String,
-    /// Contiguous cover of both `text` and the source text, in order.
-    pieces: Vec<Piece>,
-    /// Variable names (`InlineToken::source_text`).
-    vars: Vec<String>,
-    /// Encoded ranges of `Code` and `Literal` tokens.
-    protected: Vec<(usize, usize)>,
-    src_len: usize,
-}
-
-impl Encoded {
-    fn new(source: &StatementSource) -> Self {
-        let mut spans: Vec<(TextSpan, Placeholder)> = source
-            .links
-            .iter()
-            .enumerate()
-            .map(|(index, link)| (link.span, Placeholder::Link(index)))
-            .collect();
-        let mut vars = Vec::new();
-        for token in &source.tokens {
-            let inside_link = source
-                .links
-                .iter()
-                .any(|link| link.span.start <= token.span.start && token.span.end <= link.span.end);
-            if token.kind == InlineTokenKind::Variable && !inside_link {
-                spans.push((token.span, Placeholder::Var(vars.len())));
-                vars.push(token.source_text.clone());
-            }
-        }
-        spans.sort_by_key(|(span, _)| (span.start, std::cmp::Reverse(span.end)));
-
-        let mut encoded = Self {
-            text: String::with_capacity(source.text.len()),
-            pieces: Vec::new(),
-            vars,
-            protected: Vec::new(),
-            src_len: source.text.len(),
-        };
-        let mut cursor = 0;
-        for (span, placeholder) in spans {
-            if span.start < cursor || span.start >= span.end {
-                continue;
-            }
-            encoded.push_text(&source.text, cursor, span.start);
-            let enc = encoded.text.len();
-            match placeholder {
-                Placeholder::Link(index) => encoded.text.push_str(&format!("⟦L{index}⟧")),
-                Placeholder::Var(index) => encoded.text.push_str(&format!("⟦V{index}⟧")),
-            }
-            encoded.pieces.push(Piece {
-                enc,
-                enc_end: encoded.text.len(),
-                src: span,
-                placeholder: Some(placeholder),
-            });
-            cursor = span.end;
-        }
-        encoded.push_text(&source.text, cursor, source.text.len());
-
-        encoded.protected = source
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, InlineTokenKind::Code | InlineTokenKind::Literal))
-            .map(|token| {
-                (
-                    encoded.to_enc(token.span.start),
-                    encoded.to_enc(token.span.end),
-                )
-            })
-            .collect();
-        encoded
-    }
-
-    fn push_text(&mut self, src: &str, start: usize, end: usize) {
-        if start >= end {
-            return;
-        }
-        let enc = self.text.len();
-        self.text.push_str(&src[start..end]);
-        self.pieces.push(Piece {
-            enc,
-            enc_end: self.text.len(),
-            src: TextSpan { start, end },
-            placeholder: None,
-        });
-    }
-
-    fn piece_at(&self, enc: usize) -> Option<&Piece> {
-        let index = self.pieces.partition_point(|piece| piece.enc <= enc);
-        index
-            .checked_sub(1)
-            .map(|index| &self.pieces[index])
-            .filter(|piece| enc < piece.enc_end)
-    }
-
-    /// Source byte offset of an encoded position. A placeholder's start maps
-    /// to its span start, any later position inside it to its span end.
-    fn to_src(&self, enc: usize) -> usize {
-        match self.piece_at(enc) {
-            None => self.src_len,
-            Some(piece) if piece.placeholder.is_none() => piece.src.start + (enc - piece.enc),
-            Some(piece) if enc == piece.enc => piece.src.start,
-            Some(piece) => piece.src.end,
-        }
-    }
-
-    /// Encoded position of a source byte offset.
-    fn to_enc(&self, src: usize) -> usize {
-        let index = self.pieces.partition_point(|piece| piece.src.start <= src);
-        let Some(piece) = index.checked_sub(1).map(|index| &self.pieces[index]) else {
-            return 0;
-        };
-        match piece.placeholder {
-            _ if src >= piece.src.end => piece.enc_end,
-            None => piece.enc + (src - piece.src.start),
-            Some(_) if src == piece.src.start => piece.enc,
-            Some(_) => piece.enc_end,
-        }
-    }
-
-    fn span(&self, start: usize, end: usize) -> TextSpan {
-        TextSpan {
-            start: self.to_src(start),
-            end: self.to_src(end),
-        }
-    }
-
-    /// The placeholder starting exactly at `enc`, and the position after it.
-    fn placeholder(&self, enc: usize) -> Option<(Placeholder, usize)> {
-        let piece = self.piece_at(enc)?;
-        (piece.enc == enc)
-            .then_some(piece.placeholder)
-            .flatten()
-            .map(|placeholder| (placeholder, piece.enc_end))
-    }
-
-    fn is_protected(&self, enc: usize) -> bool {
-        self.protected
-            .iter()
-            .any(|&(start, end)| start < enc && enc < end)
-    }
-
-    /// Link indices of the placeholders inside `start..end`.
-    fn links_in(&self, start: usize, end: usize) -> impl Iterator<Item = usize> + '_ {
-        self.pieces
-            .iter()
-            .filter_map(move |piece| match piece.placeholder {
-                Some(Placeholder::Link(index)) if start <= piece.enc && piece.enc_end <= end => {
-                    Some(index)
-                }
-                _ => None,
-            })
-    }
-
-    /// Clause starts (§7.3 `CLAUSE`) with their lexicon verb. Prose (§7.5)
-    /// also starts a clause after its lead-ins, case-insensitively.
-    fn clause_starts(&self, prose: bool) -> Vec<(usize, Option<String>)> {
-        const PROSE_LEAD_INS: [&str; 3] = ["steps are to ", "must ", "the user agent must "];
-        let bytes = self.text.as_bytes();
-        let mut starts = std::collections::BTreeSet::from([0]);
-        for (index, _) in self.text.char_indices() {
-            for separator in [", ", "; ", ": "] {
-                if self.text[index..].starts_with(separator) {
-                    starts.insert(index + separator.len());
-                }
-            }
-            let at_word = index == 0 || !bytes[index - 1].is_ascii_alphanumeric();
-            if at_word {
-                for word in ["then ", "and ", "otherwise ", "otherwise, "] {
-                    if self.text[index..].starts_with(word) {
-                        starts.insert(index + word.len());
-                    }
-                }
-                if prose {
-                    for lead_in in PROSE_LEAD_INS {
-                        if bytes[index..]
-                            .get(..lead_in.len())
-                            .is_some_and(|word| word.eq_ignore_ascii_case(lead_in.as_bytes()))
-                        {
-                            starts.insert(index + lead_in.len());
-                        }
-                    }
-                }
-            }
-        }
-        starts
-            .into_iter()
-            .filter(|&at| at < self.text.len() && !self.is_protected(at))
-            .map(|at| (at, self.verb_at(at).map(str::to_string)))
-            .collect()
-    }
-
-    /// The lexicon verb spelled by the word at `enc`, if any. A hyphenated
-    /// word ("set-up") is not a verb.
-    fn verb_at(&self, enc: usize) -> Option<&'static str> {
-        let word: String = self.text[enc..]
-            .chars()
-            .take_while(char::is_ascii_alphabetic)
-            .collect();
-        if self.text[enc + word.len()..]
-            .chars()
-            .next()
-            .is_some_and(|next| next.is_alphanumeric() || next == '-' || next == '_')
-        {
-            return None;
-        }
-        let word = word.to_ascii_lowercase();
-        LEXICON.iter().copied().find(|verb| *verb == word)
-    }
-}
-
-/// Parse one statement source (§7.3). Every clause gets a `Clause`; each
-/// clause that starts with a lexicon verb and yields no structured statement
-/// gets an `Opaque` statement.
-pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
+/// Parse one statement source (§7.3) with the given extraction environment.
+/// Every clause gets a `Clause`; each clause that starts with a lexicon verb
+/// and yields no structured statement gets an `Opaque` statement.
+pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSource {
     let enc = Encoded::new(source);
-    let mut p = Parser::new(&enc, source);
+    let mut p = Parser::new(&enc, source, env);
     p.inits = p.parse_initializers();
     for (at, verb) in enc.clause_starts(is_prose(source)) {
         // An Infra-linked operation is spelled by its link text ("Append").
@@ -894,6 +668,11 @@ pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
     p.out
 }
 
+/// Parse one statement source with the default (SP1) environment.
+pub(crate) fn parse_source(source: &StatementSource) -> ParsedSource {
+    parse_source_with(source, &Env::default())
+}
+
 fn is_prose(source: &StatementSource) -> bool {
     matches!(source.context, SourceContext::Prose { .. })
 }
@@ -902,7 +681,8 @@ fn is_prose(source: &StatementSource) -> bool {
 /// mutation link, or is a `PASSIVE` set (§7.5 statement source test).
 pub(crate) fn has_mutation_clause(source: &StatementSource) -> bool {
     let enc = Encoded::new(source);
-    let mut p = Parser::new(&enc, source);
+    let env = Env::default();
+    let mut p = Parser::new(&enc, source, &env);
     enc.clause_starts(is_prose(source))
         .into_iter()
         .any(|(at, verb)| verb.is_some() || p.infra_op(at).is_some() || p.try_passive(at))
@@ -921,13 +701,15 @@ pub(crate) fn initializer_intro(source: &StatementSource) -> Option<Option<TypeR
     });
     let enc = Encoded::new(source);
     let ty = intro.captures(&enc.text)?.name("ty")?.start();
-    Some(Parser::new(&enc, source).new_type(ty))
+    let env = Env::default();
+    Some(Parser::new(&enc, source, &env).new_type(ty))
 }
 
 /// The whole source as one `VALUE`.
 pub(crate) fn parse_value(source: &StatementSource) -> Expr {
     let enc = Encoded::new(source);
-    let p = Parser::new(&enc, source);
+    let env = Env::default();
+    let p = Parser::new(&enc, source, &env);
     p.expr(0, p.value_end(0, None))
 }
 
@@ -949,7 +731,8 @@ pub(crate) fn parse_path_span(
     span: TextSpan,
 ) -> Option<(Path, PathRoles)> {
     let enc = Encoded::new(source);
-    let p = Parser::new(&enc, source);
+    let env = Env::default();
+    let p = Parser::new(&enc, source, &env);
     let text = source.text.get(span.start..span.end)?;
     let start = enc.to_enc(span.start + (text.len() - text.trim_start().len()));
     let end = enc.to_enc(span.end - (text.len() - text.trim_end().len()));
@@ -969,7 +752,10 @@ pub(crate) fn parse_path_span(
 /// `span` of the source text as one `VALUE`.
 pub(crate) fn parse_expr_span(source: &StatementSource, span: TextSpan) -> Expr {
     let enc = Encoded::new(source);
-    Parser::new(&enc, source).expr(enc.to_enc(span.start), enc.to_enc(span.end))
+    let env = Env::default();
+    let start = enc.to_enc(span.start);
+    let end = enc.to_enc(span.end);
+    Parser::new(&enc, source, &env).expr(start, end)
 }
 
 /// A `<dl>` initializer entry (§7.3): the label's first link is the field,
@@ -1019,58 +805,9 @@ pub(crate) fn parse_branch_label(
     out
 }
 
-/// A parsed `PATH` with the link positions its statement assigns roles to.
-struct PathParse {
-    path: Path,
-    end: usize,
-    /// Link index of each hop; `None` for code members and slots.
-    hop_links: Vec<Option<usize>>,
-    root_link: Option<usize>,
-    /// Encoded ranges whose links are reads (`ROOT'` phrases, subscripts).
-    read_ranges: Vec<(usize, usize)>,
-}
-
-/// An Infra-linked mutation's target, its operand range, and the statement
-/// end.
-type InfraTarget = (PathParse, Option<(usize, usize)>, usize);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RootKind {
-    Var,
-    This,
-    /// `the`: the link followed `the `.
-    Link {
-        link: usize,
-        the: bool,
-    },
-    Pronoun,
-    Phrase,
-}
-
-struct Parser<'a> {
-    enc: &'a Encoded,
-    source: &'a StatementSource,
-    out: ParsedSource,
-    /// Clause starts that already produced an `Opaque` statement.
-    opaque_clauses: Vec<usize>,
-    /// End of the last structured statement; clauses before it are inside it.
-    covered_until: usize,
-    /// Encoded position of each initializer's `a new` → its `Init` id.
-    inits: BTreeMap<usize, String>,
-}
-
-impl<'a> Parser<'a> {
-    fn new(enc: &'a Encoded, source: &'a StatementSource) -> Self {
-        Self {
-            enc,
-            source,
-            out: ParsedSource::default(),
-            opaque_clauses: Vec::new(),
-            covered_until: 0,
-            inits: BTreeMap::new(),
-        }
-    }
-
+/// Statement productions: `try_*`, `push*`, `role`, `target_roles`, `read_roles`.
+/// Grammar helpers live in `grammar.rs` as a second `impl Parser<'_>` block.
+impl Parser<'_> {
     /// A clause starting with a link to an `INFRA_OPS` anchor: `⟦L⟧ OPERAND
     /// PREP PATH`, or `⟦L⟧ PATH` for an operation without prepositions
     /// (`map-set` takes `PATH[key] to VALUE`, `list-extend` an optional
@@ -1110,7 +847,10 @@ impl<'a> Parser<'a> {
 
     /// The link at `at` when it targets an `INFRA_OPS` anchor: its index, the
     /// position after it, the operation and its prepositions.
-    fn infra_op(&self, at: usize) -> Option<(usize, usize, MutationOp, &'static [&'static str])> {
+    pub(crate) fn infra_op(
+        &self,
+        at: usize,
+    ) -> Option<(usize, usize, MutationOp, &'static [&'static str])> {
         let (Placeholder::Link(link), after_link) = self.enc.placeholder(at)? else {
             return None;
         };
@@ -1573,624 +1313,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// A chained continuation target (`… to x and B to y`) starting at `start`.
-struct Chained {
-    start: usize,
-    path: PathParse,
-}
-
-/// Grammar helpers over the encoded text.
-impl Parser<'_> {
-    fn lit(&self, pos: usize, s: &str) -> bool {
-        self.enc.text[pos..].starts_with(s)
-    }
-
-    /// The position after the first of `words` that starts at `pos`.
-    fn keyword(&self, pos: usize, words: &[&str]) -> Option<usize> {
-        words
-            .iter()
-            .find(|word| self.lit(pos, word))
-            .map(|word| pos + word.len())
-    }
-
-    fn find(&self, pos: usize, s: &str) -> Option<usize> {
-        self.enc.text[pos..].find(s).map(|found| pos + found)
-    }
-
-    /// Canonical source text of an encoded range.
-    fn src_text(&self, start: usize, end: usize) -> String {
-        let span = self.enc.span(start, end);
-        self.source.text[span.start..span.end].to_string()
-    }
-
-    /// Encoded range rendered with every link replaced by `_`.
-    fn render(&self, start: usize, end: usize) -> String {
-        let mut out = String::new();
-        let mut pos = start;
-        while pos < end {
-            match self.enc.placeholder(pos) {
-                Some((Placeholder::Link(_), after)) => {
-                    out.push('_');
-                    pos = after;
-                }
-                Some((Placeholder::Var(_), after)) => {
-                    out.push_str(&self.src_text(pos, after));
-                    pos = after;
-                }
-                None => {
-                    let ch = self.enc.text[pos..].chars().next().expect("in bounds");
-                    out.push(ch);
-                    pos += ch.len_utf8();
-                }
-            }
-        }
-        out.trim().to_string()
-    }
-
-    /// `END`: `.`, `,`, `;`, ` and `, ` if `, ` otherwise`, or end of text.
-    fn is_end(&self, pos: usize) -> bool {
-        pos == self.enc.text.len()
-            || [".", ",", ";", " and ", " if ", " otherwise"]
-                .iter()
-                .any(|end| self.lit(pos, end))
-    }
-
-    fn is_this_link(&self, link: usize) -> bool {
-        self.source.links[link]
-            .target
-            .as_ref()
-            .is_some_and(|target| {
-                target.spec.eq_ignore_ascii_case("WEBIDL") && target.anchor == "this"
-            })
-    }
-
-    fn field_hop(&self, link: usize) -> Hop {
-        let link = &self.source.links[link];
-        Hop::Field {
-            link_id: link.id.clone(),
-            target: link.target.clone(),
-            visible_text: link.visible_text.clone(),
-        }
-    }
-
-    /// `TARGETS`: a `PATH`, then `(", and " | ", " | " and ") ⟦L⟧ TRAILER?`
-    /// continuations sharing its root and prefix hops (an implicit root
-    /// also takes `the ⟦L⟧`). The whole list must end where `accept` holds.
-    fn targets(
-        &self,
-        pos: usize,
-        to_terminated: bool,
-        accept: impl Fn(&Self, usize) -> bool,
-    ) -> Option<(Vec<PathParse>, usize)> {
-        let first = self.path(pos, to_terminated)?;
-        let mut end = first.end;
-        let mut more = Vec::new();
-        if !first.path.hops.is_empty() && first.path.subscript.is_none() {
-            while let Some(mut next) = self.keyword(end, &[", and ", ", ", " and "]) {
-                if first.path.root == Root::Implicit {
-                    next = self.keyword(next, &["the "]).unwrap_or(next);
-                }
-                // `this's ⟦A⟧ and this's ⟦B⟧`: a full path repeating the root.
-                if matches!(first.path.root, Root::This | Root::Var(_)) {
-                    if let Some(path) = self.path(next, to_terminated).filter(|p| {
-                        p.path.root == first.path.root
-                            && !p.path.hops.is_empty()
-                            && p.path.subscript.is_none()
-                    }) {
-                        end = path.end;
-                        more.push(path);
-                        continue;
-                    }
-                }
-                let Some((hop, Some(link), after)) = self.hop(next) else {
-                    break;
-                };
-                end = self.trailer(after);
-                more.push(self.with_last_hop(&first, hop, link, end));
-            }
-        }
-        if !accept(self, end) {
-            return None;
-        }
-        let mut targets = vec![first];
-        targets.append(&mut more);
-        Some((targets, end))
-    }
-
-    /// `basis` with its last hop replaced by the linked `hop`: the same root
-    /// and prefix hops.
-    fn with_last_hop(&self, basis: &PathParse, hop: Hop, link: usize, end: usize) -> PathParse {
-        let mut path = basis.path.clone();
-        path.hops.pop();
-        path.hops.push(hop);
-        let mut hop_links = basis.hop_links.clone();
-        hop_links.pop();
-        hop_links.push(Some(link));
-        PathParse {
-            path,
-            end,
-            hop_links,
-            root_link: basis.root_link,
-            read_ranges: Vec::new(),
-        }
-    }
-
-    /// `PATH`. With `to_terminated`, also `the ⟦L⟧ of ROOT'` where `ROOT'`
-    /// runs up to ` to `.
-    fn path(&self, pos: usize, to_terminated: bool) -> Option<PathParse> {
-        if to_terminated {
-            if let Some(path) = self.of_path(pos) {
-                return Some(path);
-            }
-        }
-        let (mut root, kind, mut at) = self.root(pos)?;
-        let mut read_ranges = Vec::new();
-        if kind == RootKind::Phrase {
-            read_ranges.push((pos, at));
-        }
-        let mut hops = Vec::new();
-        let mut hop_links = Vec::new();
-        if kind == RootKind::Pronoun {
-            let (hop, link, end) = self.hop(at)?;
-            hops.push(hop);
-            hop_links.push(link);
-            at = end;
-        }
-        loop {
-            if let Some(after) = self.keyword(at, &["'s ", "’s "]) {
-                let Some((hop, link, end)) = self.hop(after) else {
-                    break;
-                };
-                hops.push(hop);
-                hop_links.push(link);
-                at = end;
-            } else if let Some((name, end)) = self.slot(at) {
-                hops.push(Hop::Slot { name });
-                hop_links.push(None);
-                at = end;
-            } else {
-                break;
-            }
-        }
-        let mut root_link = None;
-        if let RootKind::Link { link, the } = kind {
-            // Only `the ⟦L⟧` is receiver-less (§7.3); a bare link without
-            // hops stays a `Root::Link` path with no field hop.
-            if hops.is_empty() && the {
-                root = Root::Implicit;
-                hops.push(self.field_hop(link));
-                hop_links.push(Some(link));
-                if self.source.links[link].visible_text.starts_with('`') {
-                    at = self.attribute_suffix(at).unwrap_or(at);
-                }
-            } else {
-                root_link = Some(link);
-            }
-        }
-        if kind == RootKind::Phrase && hops.is_empty() {
-            return None;
-        }
-        if !hops.is_empty() {
-            at = self.trailer(at);
-        }
-        let mut subscript = None;
-        if self.lit(at, "[") {
-            let close = self.matching_bracket(at)?;
-            subscript = Some(Box::new(self.expr(at + 1, close)));
-            read_ranges.push((at + 1, close));
-            at = close + 1;
-        }
-        Some(PathParse {
-            path: Path {
-                root,
-                hops,
-                subscript,
-            },
-            end: at,
-            hop_links,
-            root_link,
-            read_ranges,
-        })
-    }
-
-    fn of_path(&self, pos: usize) -> Option<PathParse> {
-        let the = self.keyword(pos, &["the "]).unwrap_or(pos);
-        let (Placeholder::Link(link), after) = self.enc.placeholder(the)? else {
-            return None;
-        };
-        let root_start = self.keyword(after, &[" of "])?;
-        // `ROOT'` stays inside the clause: it ends at ` to ` before the value
-        // end and never spans `, `.
-        let root_end = self
-            .find(root_start, " to ")
-            .filter(|&to| to < self.value_end(root_start, None))?;
-        if self.enc.text[root_start..root_end].contains(", ") {
-            return None;
-        }
-        let root = match self.root(root_start) {
-            Some((root, RootKind::Var | RootKind::This, end)) if end == root_end => root,
-            Some((root @ Root::Link { .. }, RootKind::Link { .. }, end)) if end == root_end => root,
-            _ => Root::Opaque {
-                text: self.src_text(root_start, root_end),
-            },
-        };
-        Some(PathParse {
-            path: Path {
-                root,
-                hops: vec![self.field_hop(link)],
-                subscript: None,
-            },
-            end: root_end,
-            hop_links: vec![Some(link)],
-            root_link: None,
-            read_ranges: vec![(root_start, root_end)],
-        })
-    }
-
-    /// `ROOT`: `⟦V⟧`, `this`, `the`? `⟦L⟧`, a pronoun, or a 1–6 word phrase
-    /// followed by `POSS HOP`.
-    fn root(&self, pos: usize) -> Option<(Root, RootKind, usize)> {
-        if let Some(end) = self.keyword(pos, &["its ", "their "]) {
-            let text = self.enc.text[pos..end - 1].to_string();
-            return Some((Root::Opaque { text }, RootKind::Pronoun, end));
-        }
-        let direct = self.direct_root(pos);
-        if let Some((_, _, end)) = direct {
-            if self.keyword(end, &["'s ", "’s ", ".[["]).is_some() {
-                return direct;
-            }
-        }
-        // "this element's F", "the ⟦`img`⟧ element's F"
-        self.phrase_root(pos).or(direct)
-    }
-
-    /// `⟦V⟧`, `this`, or `the`? `⟦L⟧` / `the ⟦V⟧`.
-    fn direct_root(&self, pos: usize) -> Option<(Root, RootKind, usize)> {
-        let at = self.keyword(pos, &["the "]).unwrap_or(pos);
-        match self.enc.placeholder(at) {
-            Some((Placeholder::Var(var), end)) => {
-                Some((Root::Var(self.enc.vars[var].clone()), RootKind::Var, end))
-            }
-            Some((Placeholder::Link(link), end)) => Some(self.link_root(link, end, at > pos)),
-            None if at == pos && self.lit(pos, "this") && !self.word_continues(pos + 4) => {
-                Some((Root::This, RootKind::This, pos + 4))
-            }
-            None => None,
-        }
-    }
-
-    fn link_root(&self, link: usize, end: usize, the: bool) -> (Root, RootKind, usize) {
-        if self.is_this_link(link) {
-            return (Root::This, RootKind::This, end);
-        }
-        let root = Root::Link {
-            link_id: self.source.links[link].id.clone(),
-            target: self.source.links[link].target.clone(),
-        };
-        (root, RootKind::Link { link, the }, end)
-    }
-
-    fn phrase_root(&self, pos: usize) -> Option<(Root, RootKind, usize)> {
-        let mut at = self.keyword(pos, &["the "]).unwrap_or(pos);
-        // "set the element's F" is a clause, not a phrase "set the element".
-        if at == pos && self.enc.verb_at(pos).is_some() {
-            return None;
-        }
-        for _ in 0..6 {
-            let word_end = self.word_end(at)?;
-            if let Some(after) = self.keyword(word_end, &["'s ", "’s "]) {
-                self.hop(after)?;
-                let text = self.src_text(pos, word_end);
-                return Some((Root::Opaque { text }, RootKind::Phrase, word_end));
-            }
-            at = self.keyword(word_end, &[" "])?;
-        }
-        None
-    }
-
-    /// End of a phrase word at `pos`: `[A-Za-z][\w-]*` other than a word
-    /// that ends a noun phrase, a code token, or a link.
-    fn word_end(&self, pos: usize) -> Option<usize> {
-        const STOP_WORDS: [&str; 14] = [
-            "to", "and", "or", "if", "then", "be", "is", "are", "by", "with", "from", "into", "as",
-            "for",
-        ];
-        if let Some((Placeholder::Link(_), end)) = self.enc.placeholder(pos) {
-            return Some(end);
-        }
-        if let Some((_, end)) = self.code(pos) {
-            return Some(end);
-        }
-        let bytes = self.enc.text.as_bytes();
-        if !bytes.get(pos)?.is_ascii_alphabetic() {
-            return None;
-        }
-        let mut end = pos + 1;
-        while end < bytes.len()
-            && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'_' | b'-'))
-        {
-            end += 1;
-        }
-        (!STOP_WORDS.contains(&&self.enc.text[pos..end])).then_some(end)
-    }
-
-    fn word_continues(&self, pos: usize) -> bool {
-        self.enc
-            .text
-            .as_bytes()
-            .get(pos)
-            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
-    }
-
-    /// `HOP`: `⟦L⟧`, or `` `name` attribute`` with an optional ` value`. A
-    /// linked code member (`` ⟦`name`⟧ attribute``) is a field hop.
-    fn hop(&self, pos: usize) -> Option<(Hop, Option<usize>, usize)> {
-        if let Some((Placeholder::Link(link), end)) = self.enc.placeholder(pos) {
-            let end = if self.source.links[link].visible_text.starts_with('`') {
-                self.attribute_suffix(end).unwrap_or(end)
-            } else {
-                end
-            };
-            return Some((self.field_hop(link), Some(link), end));
-        }
-        let (name, end) = self.code(pos)?;
-        let end = self.attribute_suffix(end)?;
-        Some((Hop::CodeMember { name }, None, end))
-    }
-
-    /// ` attribute(s)` or ` IDL attribute(s)`, with an optional ` value`.
-    fn attribute_suffix(&self, pos: usize) -> Option<usize> {
-        let end = [
-            " attributes",
-            " attribute",
-            " IDL attributes",
-            " IDL attribute",
-        ]
-        .iter()
-        .find(|word| self.lit(pos, word) && !self.word_continues(pos + word.len()))
-        .map(|word| pos + word.len())?;
-        Some(
-            self.keyword(end, &[" value"])
-                .filter(|&value| !self.word_continues(value))
-                .unwrap_or(end),
-        )
-    }
-
-    /// A backtick code token at `pos`, unescaped, and the position after it.
-    fn code(&self, pos: usize) -> Option<(String, usize)> {
-        if !self.lit(pos, "`") {
-            return None;
-        }
-        let mut name = String::new();
-        let mut chars = self.enc.text[pos + 1..].char_indices();
-        while let Some((offset, ch)) = chars.next() {
-            match ch {
-                '\\' => name.push(chars.next()?.1),
-                '`' => return Some((name, pos + 1 + offset + 1)),
-                _ => name.push(ch),
-            }
-        }
-        None
-    }
-
-    /// `.[[Name]]` directly after a root or hop; ecmarkup writes the slot as a
-    /// variable (`.⟦V⟧` spelling `[[Name]]`).
-    fn slot(&self, pos: usize) -> Option<(String, usize)> {
-        let dot = self.keyword(pos, &["."])?;
-        let (name, end) = match self.enc.placeholder(dot) {
-            Some((Placeholder::Var(var), end)) => {
-                let name = self.enc.vars[var].strip_prefix("[[")?.strip_suffix("]]")?;
-                (name, end)
-            }
-            _ => {
-                let start = self.keyword(dot, &["[["])?;
-                let close = self.find(start, "]]")?;
-                (&self.enc.text[start..close], close + 2)
-            }
-        };
-        (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
-            .then(|| (name.to_string(), end))
-    }
-
-    /// `TRAILER`: ` flag`, ` flags`, ` state` or ` boolean` as a whole word.
-    fn trailer(&self, pos: usize) -> usize {
-        [" flags", " flag", " state", " boolean"]
-            .iter()
-            .find(|word| self.lit(pos, word) && !self.word_continues(pos + word.len()))
-            .map_or(pos, |word| pos + word.len())
-    }
-
-    fn matching_bracket(&self, open: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        for (offset, byte) in self.enc.text.as_bytes()[open..].iter().enumerate() {
-            match byte {
-                b'[' => depth += 1,
-                b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(open + offset);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    /// End of a `VALUE` starting at `start`. With `chain` (the target of the
-    /// statement being parsed), a chained `Set` continuation also ends it.
-    fn value_end(&self, start: usize, chain: Option<&PathParse>) -> usize {
-        let text = &self.enc.text;
-        for (offset, _) in text[start..].char_indices() {
-            let i = start + offset;
-            if self.enc.is_protected(i) {
-                continue;
-            }
-            let rest = &text[i..];
-            if rest.starts_with(". ")
-                || rest == "."
-                || rest.starts_with(';')
-                || rest.starts_with(", then ")
-                || rest.starts_with(", and then ")
-                || rest.starts_with(", otherwise")
-            {
-                return i;
-            }
-            if let Some(after) = self.keyword(i, &[", and ", ", ", " and "]) {
-                if self.verb_follows(after) {
-                    return i;
-                }
-            }
-            if chain.is_some_and(|basis| self.chained_continuation(i, basis).is_some()) {
-                return i;
-            }
-        }
-        text.len()
-    }
-
-    /// A lexicon verb or an Infra operation link, then a space, at `pos`.
-    fn verb_follows(&self, pos: usize) -> bool {
-        if let Some((_, after_link, ..)) = self.infra_op(pos) {
-            return self.lit(after_link, " ");
-        }
-        self.enc
-            .verb_at(pos)
-            .is_some_and(|verb| self.lit(pos + verb.len(), " "))
-    }
-
-    /// The target of a chained continuation at `pos`, followed by ` to `:
-    /// - a `PATH` with hops or a variable root that doesn't span `, `;
-    /// - a bare `⟦L⟧ TRAILER?`, which shares the receiver of `basis` (the
-    ///   previous target), as in "Set R's A to x, B to y". It needs a
-    ///   receiver: after a receiver-less or hop-less target, a bare link is
-    ///   prose ("…, seek to that time", "*x* to *y*, clamped to the range").
-    fn chained_path(&self, pos: usize, basis: &PathParse) -> Option<PathParse> {
-        if let Some((hop, Some(link), after)) = self.hop(pos) {
-            let end = self.trailer(after);
-            if self.lit(end, " to ") {
-                let has_receiver = basis.path.root != Root::Implicit
-                    && !basis.path.hops.is_empty()
-                    && basis.path.subscript.is_none();
-                return has_receiver.then(|| self.with_last_hop(basis, hop, link, end));
-            }
-        }
-        self.path(pos, true).filter(|path| {
-            self.lit(path.end, " to ")
-                && (!path.path.hops.is_empty() || matches!(path.path.root, Root::Var(_)))
-                && !self.enc.text[pos..path.end].contains(", ")
-        })
-    }
-
-    /// `(", and " | ", " | " and ")` and a chained target at `end`.
-    fn chained_continuation(&self, end: usize, basis: &PathParse) -> Option<Chained> {
-        let start = self.keyword(end, &[", and ", ", ", " and "])?;
-        let path = self.chained_path(start, basis)?;
-        Some(Chained { start, path })
-    }
-
-    /// A value that starts with `be ` and a link, or with a link whose text
-    /// starts with `be `, is an invocation.
-    fn is_invocation(&self, pos: usize) -> bool {
-        if let Some(after) = self.keyword(pos, &["be "]) {
-            if matches!(self.enc.placeholder(after), Some((Placeholder::Link(_), _))) {
-                return true;
-            }
-        }
-        matches!(self.enc.placeholder(pos), Some((Placeholder::Link(link), _))
-            if self.source.links[link].visible_text.starts_with("be "))
-    }
-
-    /// `VALUE` → `Expr`.
-    fn expr(&self, start: usize, end: usize) -> Expr {
-        let text = &self.enc.text[start..end];
-        let start = start + (text.len() - text.trim_start().len());
-        let end = end - (text.len() - text.trim_end().len());
-        let text = &self.enc.text[start.min(end)..end];
-        match self.enc.placeholder(start) {
-            Some((Placeholder::Var(var), after)) if after == end => {
-                return Expr::Var(self.enc.vars[var].clone());
-            }
-            Some((Placeholder::Link(link), after)) if after == end && self.is_this_link(link) => {
-                return Expr::This;
-            }
-            _ => {}
-        }
-        if text == "this" {
-            return Expr::This;
-        }
-        if let Some(literal) = literal(text) {
-            return Expr::Literal(literal);
-        }
-        if let Some((inner, after)) = self.code(start) {
-            if after == end {
-                if let Some(literal) = literal(&inner) {
-                    return Expr::Literal(literal);
-                }
-            }
-        }
-        if let Some(after) = self.keyword(start, &["a new ", "an new "]) {
-            return Expr::New {
-                ty: self.new_type(after),
-                init: self.inits.get(&start).cloned(),
-            };
-        }
-        if let Some(path) = self.path(start, false).filter(|path| path.end == end) {
-            return Expr::Path(path.path);
-        }
-        Expr::Opaque {
-            text: self.src_text(start, end),
-        }
-    }
-
-    /// `NEWTYPE`: a link, or a code token naming an IDL interface.
-    fn new_type(&self, pos: usize) -> Option<TypeRef> {
-        if let Some((Placeholder::Link(link), _)) = self.enc.placeholder(pos) {
-            return self.source.links[link]
-                .target
-                .clone()
-                .map(TypeRef::Unresolved);
-        }
-        let (name, _) = self.code(pos)?;
-        let mut chars = name.chars();
-        let is_identifier = chars
-            .next()
-            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
-        is_identifier.then_some(TypeRef::Known(TypeKey::Idl(name)))
-    }
-}
-
-/// `true`/`false`/`null`/`undefined`, a number, or a quoted string.
-fn literal(text: &str) -> Option<Literal> {
-    match text {
-        "true" => return Some(Literal::Bool(true)),
-        "false" => return Some(Literal::Bool(false)),
-        "null" => return Some(Literal::Null),
-        "undefined" => return Some(Literal::Undefined),
-        _ => {}
-    }
-    let digits = text.strip_prefix('-').unwrap_or(text);
-    if !digits.is_empty()
-        && digits.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-        && digits.bytes().next().is_some_and(|b| b.is_ascii_digit())
-        && digits.bytes().filter(|b| *b == b'.').count() <= 1
-    {
-        return Some(Literal::Number(text.to_string()));
-    }
-    for (open, close) in [('"', '"'), ('“', '”')] {
-        if let Some(inner) = text.strip_prefix(open).and_then(|t| t.strip_suffix(close)) {
-            // A quoted code token ("`html`") is the string it spells.
-            let inner = inner
-                .strip_prefix('`')
-                .and_then(|t| t.strip_suffix('`'))
-                .filter(|t| !t.contains('`'))
-                .unwrap_or(inner);
-            return Some(Literal::String(inner.to_string()));
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 pub(crate) mod tests_support {
     use super::StatementSource;
@@ -2215,6 +1337,7 @@ pub(crate) mod tests_support {
 mod tests {
     use super::tests_support::sources;
     use super::*;
+    use crate::state::model::TypeKey;
 
     fn one(step: &str) -> (StatementSource, ParsedSource) {
         let source = sources(&[step]).remove(0);
@@ -3069,5 +2192,43 @@ mod tests {
         assert_eq!(call_id("src-a", "link-1"), call_id("src-a", "link-1"));
         assert_ne!(call_id("src-a", "link-1"), call_id("src-a", "link-2"));
         assert!(call_id("src-a", "link-1").starts_with("call-"));
+    }
+
+    /// SP1's statements and occurrence roles for one multi-form step list, pinned
+    /// before the grammar moves to grammar.rs. Update the literal only when a later
+    /// task changes SP1 output on purpose, and say why in its commit body.
+    #[test]
+    fn sp1_parse_of_a_multi_form_fixture_is_pinned() {
+        let steps = [
+            "Let <var>x</var> be <var>d</var>'s <a href=\"#f\">f</a>.",
+            "Set <var>d</var>'s <a href=\"#f\">f</a> to true.",
+            "Set <var>a</var>'s <a href=\"#g\">g</a> and <var>b</var>'s <a href=\"#g\">g</a> to null.",
+            "<a href=\"https://infra.spec.whatwg.org/#list-append\">Append</a> <var>x</var> to <var>d</var>'s <a href=\"#h\">h</a>.",
+            "Let <var>e</var> be a new <a href=\"#event\">event</a> whose <a href=\"#type\">type</a> is <code>load</code>.",
+            "Set <var>d</var>'s <a href=\"#f\">f</a> to the result of running <a href=\"#run\">run</a> given <var>x</var>.",
+        ];
+        let got: Vec<String> = sources(&steps)
+            .iter()
+            .map(|src| {
+                let p = parse_source(src);
+                format!(
+                    "{:?} | {:?}",
+                    p.statements
+                        .iter()
+                        .map(|s| (&s.kind, s.span))
+                        .collect::<Vec<_>>(),
+                    p.link_roles
+                )
+            })
+            .collect();
+        let want: Vec<&str> = vec![
+            r##"[(Let { var: "x", value: Path(Path { root: Var("d"), hops: [Field { link_id: "src-2314753dcbff666aba41857592bbaf409ba535b2d73d3afa8eab32d38b36c934", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }) }, TextSpan { start: 0, end: 18 })] | {0: (Read, "stmt-a93309e1f9134971e60692c1013e33eb3743f5315e250cfb1aa66adf77f48796")}"##,
+            r##"[(Set { targets: [Path { root: Var("d"), hops: [Field { link_id: "src-8479fb6fb8287e762d07630bb01259c7ae64f8e1d0df9363f59f5276dee0aea4", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }], value: Literal(Bool(true)), form: To }, TextSpan { start: 0, end: 19 })] | {0: (Write, "stmt-7aa9b61f42bc96f5868a16cdc18e52c63f9ac46bc19728fc8ab137387069e701")}"##,
+            r##"[(Opaque { reason: UnparsedTarget, verb: Some("set"), target_text: Some("*a*'s _ and *b*'s _") }, TextSpan { start: 0, end: 31 })] | {}"##,
+            r##"[(Mutate { op: Append, target: Path { root: Var("d"), hops: [Field { link_id: "src-f4e72ec47b9aa1ff3324e43f10524bc7e5be3d31cd04f38799e211692c2e3963", target: Some(AnchorTarget { spec: "HTML", anchor: "h" }), visible_text: "h" }], subscript: None }, operand: Some(Var("x")), basis: InfraLink(AnchorTarget { spec: "INFRA", anchor: "list-append" }) }, TextSpan { start: 0, end: 21 })] | {1: (Write, "stmt-a42f9d814b6054e1b18cc295eb44904d817f1f3af37a1bdc6e1a9acc44bbff3b")}"##,
+            r##"[(Init { constructed: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), entries: [InitEntry { field: Field { link_id: "src-e512ac427d9e15dc6b48b91bb630b159462b568ff1f259a6667e6c7c258ab347", target: Some(AnchorTarget { spec: "HTML", anchor: "type" }), visible_text: "type" }, value: Opaque { text: "`load`" } }], form: WhoseList }, TextSpan { start: 11, end: 43 }), (Let { var: "e", value: New { ty: Some(Unresolved(AnchorTarget { spec: "HTML", anchor: "event" })), init: Some("stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8") } }, TextSpan { start: 0, end: 43 })] | {0: (Read, "stmt-64b9ac000c9c7b93deb580c9682dbe3afbdf7589eeceb35dd873728b23e081de"), 1: (Init, "stmt-435756353184c4234abc1bea20f0e2715f4d28220955a92844a51230203a88e8")}"##,
+            r##"[(Set { targets: [Path { root: Var("d"), hops: [Field { link_id: "src-4c9d44d6f62ce27f89265357f0c781fb468c341c66d6dbf5973b154e97360921", target: Some(AnchorTarget { spec: "HTML", anchor: "f" }), visible_text: "f" }], subscript: None }], value: Opaque { text: "the result of running run given *x*" }, form: To }, TextSpan { start: 0, end: 50 })] | {0: (Write, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3"), 1: (Read, "stmt-0d778edcb455a9939e1829e5acd63340da295b8858e4f7018ce958447592b0e3")}"##,
+        ];
+        assert_eq!(got, want);
     }
 }
