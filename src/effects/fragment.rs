@@ -560,21 +560,38 @@ impl<'a> FragmentBuilder<'a> {
             .map(|s| (s.source.node_id.as_str(), s))
             .collect();
         let steps_by_id = steps_by_id(algorithm);
+        let bodies: HashMap<_, _> = algorithm
+            .bodies
+            .iter()
+            .map(|b| (b.source.node_id.as_str(), b))
+            .collect();
         for body in &algorithm.bodies {
             for item in &body.items {
-                if let BodyItem::Step(step_id) = item {
-                    if self.nodes.contains_key(step_id) {
-                        let site = site_for_step(step_id, &steps_by_id);
-                        self.add_edge(
-                            &body.source.node_id,
-                            step_id,
-                            Relationship::Invoke,
-                            Execution::Inline,
-                            site,
+                let (target, site) = match item {
+                    BodyItem::Step(step_id) => (step_id, site_for_step(step_id, &steps_by_id)),
+                    BodyItem::Body(body_id) => {
+                        let Some(entry) = bodies.get(body_id.as_str()) else {
+                            continue;
+                        };
+                        let site = site_for_identity(
+                            &entry.source,
                             None,
+                            Some(body_id),
+                            None,
+                            &steps_by_id,
                         );
+                        (body_id, site)
                     }
-                }
+                    _ => continue,
+                };
+                self.add_edge(
+                    &body.source.node_id,
+                    target,
+                    Relationship::Invoke,
+                    Execution::Inline,
+                    site,
+                    None,
+                );
             }
         }
         for step in &algorithm.steps {
@@ -1625,6 +1642,30 @@ mod tests {
         assert_eq!(
             decode_fragment(&encode_fragment(&fragment)).unwrap(),
             fragment
+        );
+    }
+
+    #[test]
+    fn setter_entry_body_is_invoked_from_the_root() {
+        let catalog = engine_fixture_catalog();
+        let sources = corpus(&[(
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            r##"<div data-algorithm=""><p>The <dfn id="x" data-dfn-type="attribute"><code>x</code></dfn> getter steps are:</p><ol><li><p>Return 1.</p></li></ol></div>
+<div data-algorithm=""><p>The <code><a href="#x">x</a></code> setter steps are:</p><ol><li><p>Return.</p></li></ol></div>"##,
+        )]);
+        let algorithm = &sources[0].structure.as_ref().unwrap().algorithms[0];
+        let setter = &algorithm.bodies[1];
+        let fragment = build_fragment(&input_for(&sources[0], &catalog, "generic"));
+        assert!(
+            fragment
+                .edges
+                .iter()
+                .any(|edge| edge.from == algorithm.root_body_id
+                    && edge.to == setter.source.node_id
+                    && edge.relation == Relationship::Invoke),
+            "{:?}",
+            fragment.edges
         );
     }
 

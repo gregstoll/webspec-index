@@ -436,9 +436,14 @@ pub(crate) fn resolve_href(href: &str, spec: &str, base_url: &str) -> Option<Anc
 pub(crate) fn structural_body_nodes(document: &Html) -> HashSet<ego_tree::NodeId> {
     find_algorithm_candidates(document)
         .into_iter()
-        .filter_map(|candidate| match candidate.body? {
-            CandidateBody::List(list) => Some(list.id()),
-            CandidateBody::SourceEmuAlg(emu_alg) => Some(emu_alg.id()),
+        .flat_map(|candidate| {
+            let body = candidate.body.map(|body| match body {
+                CandidateBody::List(list) => list.id(),
+                CandidateBody::SourceEmuAlg(emu_alg) => emu_alg.id(),
+            });
+            body.into_iter()
+                .chain(candidate.extra_bodies.iter().map(|list| list.id()))
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -500,6 +505,9 @@ struct AlgorithmCandidate<'a> {
     title: Option<String>,
     owner: ElementRef<'a>,
     body: Option<CandidateBody<'a>>,
+    /// Step lists of dfn-less algorithm divs that point back to this anchor
+    /// ("The <a>x</a> setter steps are:"), each an extra entry body.
+    extra_bodies: Vec<ElementRef<'a>>,
     order: usize,
 }
 
@@ -532,10 +540,12 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
             title,
             owner: clause,
             body,
+            extra_bodies: Vec::new(),
             order: position(&clause),
         });
     }
 
+    let mut continued = Vec::new();
     let div_selector =
         Selector::parse("div.algorithm, div[data-algorithm]").expect("valid algorithm selector");
     for container in document.select(&div_selector) {
@@ -543,6 +553,13 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
             continue;
         }
         let Some(first) = first_definition_outside_list(&container) else {
+            let intro = container.children().find_map(ElementRef::wrap);
+            if let (Some(anchor), Some(list)) = (
+                intro.and_then(|p| super::sections::continued_anchor(&p)),
+                first_outer_list(&container),
+            ) {
+                continued.push((anchor.to_string(), container, list));
+            }
             continue;
         };
         let pairs = algorithm_pairs(&container);
@@ -557,6 +574,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
                 title: nonempty_text(&first),
                 owner: container,
                 body,
+                extra_bodies: Vec::new(),
                 order: position(&container),
             });
             continue;
@@ -578,6 +596,7 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
                 title: nonempty_text(&dfn),
                 owner,
                 body: Some(CandidateBody::List(list)),
+                extra_bodies: Vec::new(),
                 order: position(&owner),
             });
         }
@@ -602,8 +621,47 @@ fn find_algorithm_candidates<'a>(document: &'a Html) -> Vec<AlgorithmCandidate<'
             title: nonempty_text(&dfn),
             owner,
             body,
+            extra_bodies: Vec::new(),
             order: position(&owner),
         });
+    }
+
+    let mut continued_titles: HashMap<&str, Option<String>> = HashMap::new();
+    if !continued.is_empty() {
+        let wanted: HashSet<&str> = continued.iter().map(|(a, _, _)| a.as_str()).collect();
+        for dfn in document.select(&dfn_selector) {
+            if let Some(id) = dfn.value().id().filter(|id| wanted.contains(id)) {
+                continued_titles
+                    .entry(id)
+                    .or_insert_with(|| nonempty_text(&dfn));
+            }
+        }
+    }
+    for (anchor, container, list) in continued {
+        match result
+            .iter_mut()
+            .find(|candidate| candidate.anchor == anchor)
+        {
+            Some(candidate) if candidate.body.is_some() => candidate.extra_bodies.push(list),
+            Some(candidate) => {
+                candidate.owner = container;
+                candidate.body = Some(CandidateBody::List(list));
+                candidate.order = position(&container);
+            }
+            None => {
+                let Some(title) = continued_titles.get(anchor.as_str()).cloned() else {
+                    continue;
+                };
+                result.push(AlgorithmCandidate {
+                    anchor,
+                    title,
+                    owner: container,
+                    body: Some(CandidateBody::List(list)),
+                    extra_bodies: Vec::new(),
+                    order: position(&container),
+                });
+            }
+        }
     }
 
     result.sort_by_key(|candidate| candidate.order);
@@ -656,6 +714,24 @@ fn extract_algorithm(
         CandidateBody::SourceEmuAlg(emu_alg) => {
             builder.parse_source_emu_alg(&emu_alg, &root_body_id);
         }
+    }
+    for list in &candidate.extra_bodies {
+        let source = source_identity(&builder.ctx, "body", &builder.path(list), Some("entry"));
+        let body_id = source.node_id.clone();
+        builder.algorithm.bodies.push(StructuralBody {
+            source,
+            kind: BodyKind::Algorithm,
+            name: None,
+            parent_body_id: Some(root_body_id.clone()),
+            defined_at_step_id: None,
+            items: Vec::new(),
+            range: None,
+        });
+        builder
+            .body_mut(&root_body_id)
+            .items
+            .push(BodyItem::Body(body_id.clone()));
+        builder.parse_list(list, &body_id, None, &[]);
     }
     builder.finish_remainders();
     Some(builder.algorithm)
@@ -3386,6 +3462,63 @@ mod tests {
             .map(|a| a.source.section_anchor.as_str())
             .collect();
         assert_eq!(anchors, ["ancestor-origins-list-creation-steps", "second"]);
+    }
+
+    #[test]
+    fn setter_steps_div_is_an_extra_body_of_the_attribute() {
+        let html = r##"<div data-algorithm=""><p>The <dfn id="x" data-dfn-type="attribute"><code>x</code></dfn> getter steps are:</p><ol><li><p>Return 1.</p></li></ol></div>
+      <div data-algorithm=""><p>The <code><a href="#x">x</a></code> setter steps are:</p><ol id="setter"><li><p>Throw.</p></li><li><p>Return.</p></li></ol></div>"##;
+        let s = extract_step_structure(html, "HTML", "https://html.spec.whatwg.org/", "hash:x");
+        assert_eq!(s.algorithms.len(), 1, "{:?}", s.algorithms);
+        let algorithm = &s.algorithms[0];
+        assert_eq!(algorithm.source.section_anchor, "x");
+        let entries: Vec<_> = algorithm
+            .bodies
+            .iter()
+            .filter(|body| body.kind == BodyKind::Algorithm)
+            .collect();
+        assert_eq!(entries.len(), 2);
+        let setter = entries[1];
+        assert_eq!(
+            setter.parent_body_id.as_deref(),
+            Some(algorithm.root_body_id.as_str())
+        );
+        assert_eq!(setter.items.len(), 2);
+        let root = &entries[0];
+        assert_eq!(root.source.node_id, algorithm.root_body_id);
+        assert_eq!(
+            root.items.last(),
+            Some(&BodyItem::Body(setter.source.node_id.clone()))
+        );
+        let setter_steps: Vec<_> = algorithm
+            .steps
+            .iter()
+            .filter(|step| step.body_id == setter.source.node_id)
+            .map(|step| step.path.clone())
+            .collect();
+        assert_eq!(setter_steps, [vec![1], vec![2]]);
+
+        let document = Html::parse_document(html);
+        let list = document
+            .select(&Selector::parse("#setter").unwrap())
+            .next()
+            .unwrap();
+        assert!(structural_body_nodes(&document).contains(&list.id()));
+    }
+
+    #[test]
+    fn setter_steps_div_without_getter_steps_becomes_the_attribute_algorithm() {
+        let html = r##"<p>The <dfn id="x" data-dfn-type="attribute"><code>x</code></dfn> getter steps are to return 1.</p>
+      <div data-algorithm=""><p>The <code><a href="#x">x</a></code> setter steps are:</p><ol><li><p>Return.</p></li></ol></div>"##;
+        let s = extract_step_structure(html, "HTML", "https://html.spec.whatwg.org/", "hash:x");
+        let anchors: Vec<_> = s
+            .algorithms
+            .iter()
+            .map(|a| a.source.section_anchor.as_str())
+            .collect();
+        assert_eq!(anchors, ["x"]);
+        assert_eq!(s.algorithms[0].steps.len(), 1);
+        assert_eq!(s.algorithms[0].bodies.len(), 1);
     }
 
     #[test]

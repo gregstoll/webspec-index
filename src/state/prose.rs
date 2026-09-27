@@ -409,6 +409,24 @@ mod tests {
     }
 
     #[test]
+    fn setter_step_list_is_an_algorithm_body_of_the_attribute() {
+        let html = crate::state::testing::PROSE_DOM.replace(
+            r##"<div class="note">"##,
+            r##"<div data-algorithm=""><p>The <dfn data-dfn-for="Event" data-dfn-type="attribute" id="dom-event-returnvalue"><code>returnValue</code></dfn> getter steps are:</p><ol><li><p>Return true.</p></li></ol></div>
+<div data-algorithm=""><p>The <a href="#dom-event-returnvalue"><code>returnValue</code></a> setter steps are:</p><ol><li><p>Set <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#stop-propagation-flag">stop propagation flag</a>.</p></li></ol></div>
+<div class="note">"##,
+        );
+        let s = state(&html);
+        let sites = crate::state::extract::derive_sites(&s);
+        let setter: Vec<_> = sites
+            .iter()
+            .filter(|x| x.class == SiteClass::Write && x.subject.anchor == "dom-event-returnvalue")
+            .map(|x| (x.context.as_str(), x.step_path.as_deref()))
+            .collect();
+        assert_eq!(setter, [("algorithm", Some("1"))]);
+    }
+
+    #[test]
     fn steps_blocks_without_idl_role_or_mutation_stay_mentions() {
         let html = r##"<h3 id="h">H</h3><p>The <dfn id="foo-steps">foo</dfn> steps are to return <a href="#f">f</a>.</p>"##;
         let s = state(html);
