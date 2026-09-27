@@ -344,12 +344,18 @@ struct ConceptIndex<'a> {
 }
 
 impl<'a> ConceptIndex<'a> {
+    /// A name maps to its first unscoped dfn, falling back to the first
+    /// `data-dfn-for` one: plain "navigable" is the concept, not `Window`'s
+    /// navigable.
     fn new(dfns: &[(ElementRef<'a>, String)]) -> Self {
         let mut index = Self {
             name_by_id: HashMap::new(),
             id_by_name: HashMap::new(),
         };
-        for (dfn, _) in dfns {
+        let (unscoped, scoped): (Vec<_>, Vec<_>) = dfns
+            .iter()
+            .partition(|(dfn, _)| dfn.value().attr("data-dfn-for").is_none());
+        for (dfn, _) in unscoped.into_iter().chain(scoped) {
             let id = dfn.value().attr("id").unwrap_or_default();
             let (name, names) = dfn_names(dfn);
             for n in &names {
@@ -1743,6 +1749,18 @@ mod tests {
             "got {:?}",
             f.initial
         );
+    }
+
+    #[test]
+    fn plain_owner_name_prefers_the_unscoped_concept() {
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="window">Window</dfn> {};</pre>
+<p>A <code><a href="#window">Window</a></code>'s <dfn data-dfn-for="Window" id="window-navigable">navigable</dfn> is the navigable whose active document is the Window's associated Document.</p>
+<p>A <dfn id="navigable">navigable</dfn> presents a document. Each navigable has:</p>
+<ul><li><p>An <dfn id="nav-id">id</dfn>, a <a href="#new-unique-internal-value">new unique internal value</a>.</p></li></ul>"##,
+            "HTML",
+        );
+        assert_eq!(owner_keys(field(&out, "nav-id")), ["HTML#navigable"]);
     }
 
     #[test]
