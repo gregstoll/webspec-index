@@ -58,7 +58,8 @@ pub(crate) fn definitional_signature(intro: &Intro, names: &NameResolver) -> Opt
         .or_else(|| Some(intro_cx.declared()))
 }
 
-/// The signature an ecmarkup clause states in its `takes … and returns …` paragraph.
+/// The signature an ecmarkup clause states in the `takes … and returns …` sentence that opens
+/// its first paragraph; the sentences after it describe the operation.
 pub(crate) fn ecmarkup_signature(intro: &Intro) -> Option<Signature> {
     static TAKES: OnceLock<Regex> = OnceLock::new();
     static ITEM: OnceLock<Regex> = OnceLock::new();
@@ -69,7 +70,7 @@ pub(crate) fn ecmarkup_signature(intro: &Intro) -> Option<Signature> {
     let text = enc.text.trim_end();
     let caps = regex(
         &TAKES,
-        r"^The .*? takes (?:no arguments|arguments? (?P<args>.+?)) and returns (?P<ret>.+?)\.$",
+        r"^The .*? takes (?:no arguments|arguments? (?P<args>.+?)) and returns (?P<ret>.+?)\.(?:\s|$)",
     )
     .captures(text)?;
     let mut params = Vec::new();
@@ -625,7 +626,7 @@ mod tests {
         );
         let r = s.returns.as_ref().unwrap();
         assert_eq!(r.basis, ReturnBasis::Ecmarkup);
-        assert!(ty(&r.ty).starts_with("opaque(a non-negative integer or"));
+        assert_eq!(ty(&r.ty), "opaque(a non-negative integer or `not-found`)");
         assert_eq!(
             s.template.as_ref().unwrap().pieces,
             vec![
@@ -639,6 +640,11 @@ mod tests {
                 P::Literal(")".into())
             ]
         );
-        assert_eq!(find(&all, "sec-caller").params.len(), 1);
+        let caller = find(&all, "sec-caller");
+        assert_eq!(caller.params.len(), 1);
+        assert_eq!(
+            ty(&caller.returns.as_ref().unwrap().ty),
+            "opaque(an integer)"
+        );
     }
 }
