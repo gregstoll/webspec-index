@@ -755,15 +755,20 @@ pub fn search_sections_fts(
 
 pub fn is_fts_syntax_error(err: &rusqlite::Error) -> bool {
     match err {
-        rusqlite::Error::SqliteFailure(_, Some(message)) => message.contains("fts5: syntax error"),
+        rusqlite::Error::SqliteFailure(_, Some(message)) => {
+            message.contains("fts5: syntax error") || message.starts_with("no such column:")
+        }
         _ => false,
     }
 }
 
+/// Rewrites `query` as a conjunction of quoted terms, so no word or punctuation
+/// is read as FTS5 syntax (`about:blank` as a column filter, `AND` as an operator).
 pub fn sanitize_for_fts(query: &str) -> Option<String> {
     let terms = query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|token| !token.is_empty())
+        .map(|token| format!("\"{token}\""))
         .collect::<Vec<_>>();
     if terms.is_empty() {
         None
@@ -2921,8 +2926,28 @@ mod tests {
         let sanitized = sanitize_for_fts("Where is attribute reflection defined?");
         assert_eq!(
             sanitized.as_deref(),
-            Some("Where is attribute reflection defined")
+            Some(r#""Where" "is" "attribute" "reflection" "defined""#)
         );
+    }
+
+    #[test]
+    fn sanitize_for_fts_quotes_operators() {
+        assert_eq!(
+            sanitize_for_fts("initial about:blank AND (").as_deref(),
+            Some(r#""initial" "about" "blank" "AND""#)
+        );
+    }
+
+    #[test]
+    fn detects_fts_column_filter_error_message() {
+        let err = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::Unknown,
+                extended_code: 1,
+            },
+            Some("no such column: about".to_string()),
+        );
+        assert!(is_fts_syntax_error(&err));
     }
 
     #[test]

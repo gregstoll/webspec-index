@@ -845,6 +845,16 @@ mod tests {
     }
 
     #[test]
+    fn search_treats_colon_as_punctuation_not_column_filter() {
+        let c = conn();
+        let v = call(&c, r#"{"type":"search","query":"target is:invalid"}"#);
+        assert_eq!(v["type"], "search", "{v}");
+        assert_eq!(v["result"]["results"][0]["anchor"], "navigate", "{v}");
+        let v = call(&c, r#"{"type":"search","query":"target AND ("}"#);
+        assert_eq!(v["result"]["results"][0]["anchor"], "navigate", "{v}");
+    }
+
+    #[test]
     fn anchors_list_refs_trace_graph_idl_dispatch() {
         let c = conn();
         assert_eq!(
