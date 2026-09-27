@@ -1,16 +1,16 @@
 name: Web
 
 on:
-  schedule:
-    - cron: "17 4 * * *"
+  # schedule:
+  #   - cron: "17 4 * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "web/**"
-      - "crates/**"
-      - "src/**"
-      - ".github/workflows/web.yml"
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "web/**"
+  #     - "crates/**"
+  #     - "src/**"
+  #     - ".github/workflows/web.yml"
 
 permissions:
   contents: read
