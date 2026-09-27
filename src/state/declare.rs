@@ -1813,6 +1813,24 @@ mod tests {
     }
 
     #[test]
+    fn parenthesized_string_alternatives_are_the_type() {
+        use crate::state::testing::ty;
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="document">Document</dfn> {};</pre>
+<p>Each <a href="#concept-document">document</a> has an associated <dfn data-dfn-for="Document" data-dfn-type="dfn" id="concept-document-type">type</dfn> ("<code>xml</code>" or "<code>html</code>"), <dfn data-dfn-for="Document" data-dfn-type="dfn" id="concept-document-mode">mode</dfn> ("<code>no-quirks</code>", "<code>quirks</code>", or "<code>limited-quirks</code>"), and <dfn data-dfn-for="Document" data-dfn-type="dfn" id="concept-document-allow-dsr">allow declarative shadow roots</dfn> (a boolean).</p>"##,
+            "DOM",
+        );
+        assert_eq!(
+            ty(&field(&out, "concept-document-type").declared_type),
+            r#""xml" | "html""#
+        );
+        assert_eq!(
+            ty(&field(&out, "concept-document-mode").declared_type),
+            r#""no-quirks" | "quirks" | "limited-quirks""#
+        );
+    }
+
+    #[test]
     fn purpose_clauses_are_not_types() {
         use crate::state::testing::ty;
         let out = run_declare(

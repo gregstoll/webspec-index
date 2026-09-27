@@ -718,6 +718,7 @@ fn extract_type_phrase(
     static R3: OnceLock<Regex> = OnceLock::new(); // (a|an T)
     static R4: OnceLock<Regex> = OnceLock::new(); // that is (an|a)? T
     static R5: OnceLock<Regex> = OnceLock::new(); // (null or (an|a)? T)
+    static R6: OnceLock<Regex> = OnceLock::new(); // ("a", "b", or "c")
 
     // Each regex captures T in group 1.
     // Articles use `(?:an|a|either)\s+` (longer alternatives first, space required)
@@ -737,6 +738,7 @@ fn extract_type_phrase(
             r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|\s+with\s+the\s+following\b|[\.;:\)]|$)",
         ),
         (&R5, r"^\s*\(null\s+or\s+(?:(?:an|a)\s+)?(.+?)\)"),
+        (&R6, r#"^\s*\(("[^"]+"(?:,\s*"[^"]+")*,?\s+or\s+"[^"]+")\)"#),
     ];
 
     for (cell, source) in patterns {
