@@ -3,7 +3,8 @@ use crate::parse::steps::{
     StructuralSegment, StructuralSpec, TextSpan,
 };
 use crate::state::ir::{
-    Expr, Hop, Path, Root, SourceContext, Statement, StatementKind, StatementSource,
+    Call, Expr, Hop, Path, Predicate, Root, RunContext, SourceContext, Statement, StatementKind,
+    StatementSource,
 };
 use crate::state::model::Literal;
 use crate::state::StateSpec;
@@ -89,6 +90,10 @@ impl SliceIndex {
 struct Lookups<'s> {
     /// `Init` statements by id, for `Expr::New { init: Some(id) }`.
     inits: BTreeMap<&'s str, &'s Statement>,
+    /// Calls by id, for `Expr::Call(id)`.
+    calls: BTreeMap<&'s str, &'s Call>,
+    /// Sources by id, for the text a call's spans index into.
+    sources: BTreeMap<&'s str, &'s StatementSource>,
 }
 
 /// A statement of one algorithm: the index of its step, the statement, and its source.
@@ -113,12 +118,17 @@ pub fn build_slice_indexes(structure: &StructuralSpec, state: &StateSpec) -> Vec
             step_at.insert(step.source.node_id.as_str(), (a, s));
         }
     }
-    let sources: BTreeMap<&str, &StatementSource> = state
-        .sources
-        .iter()
-        .map(|source| (source.id.as_str(), source))
-        .collect();
     let lookups = Lookups {
+        sources: state
+            .sources
+            .iter()
+            .map(|source| (source.id.as_str(), source))
+            .collect(),
+        calls: state
+            .calls
+            .iter()
+            .map(|call| (call.id.as_str(), call))
+            .collect(),
         inits: state
             .statements
             .iter()
@@ -128,7 +138,7 @@ pub fn build_slice_indexes(structure: &StructuralSpec, state: &StateSpec) -> Vec
     };
     let mut buckets: Vec<Vec<Placed>> = (0..kept.len()).map(|_| Vec::new()).collect();
     for statement in &state.statements {
-        let Some(&source) = sources.get(statement.source_id.as_str()) else {
+        let Some(&source) = lookups.sources.get(statement.source_id.as_str()) else {
             continue;
         };
         let step_id = match &source.context {
@@ -288,7 +298,7 @@ fn build_one<'a, 's>(
                 DefKind::Store,
                 root_var(target),
                 uses_of(names),
-                Some(render_path(target, source)),
+                Some(render_path(target, source, lookups)),
             )
         };
         match &placed.statement.kind {
@@ -403,21 +413,88 @@ fn expr_vars<'s>(expr: &'s Expr, lookups: &Lookups<'s>, out: &mut Vec<&'s str>) 
         }
         Expr::Opaque { text } => out.extend(scan_starred(text)),
         Expr::This | Expr::Literal(_) | Expr::New { init: None, .. } => {}
-        Expr::Call(_) | Expr::AlgorithmRef { .. } => {}
+        Expr::Call(id) => call_vars(id, lookups, out),
+        Expr::AlgorithmRef { .. } | Expr::EnumValue { .. } => {}
         Expr::List(items) => {
             for item in items {
                 expr_vars(item, lookups, out);
             }
         }
-        Expr::EnumValue { .. } => {}
         Expr::Conditional {
-            condition: _,
+            condition,
             then,
             otherwise,
         } => {
+            predicate_vars(condition, lookups, out);
             expr_vars(then, lookups, out);
             expr_vars(otherwise, lookups, out);
         }
+    }
+}
+
+/// Variables a call reads: those mentioned in its argument region, and its receiver's. Positional
+/// arguments exist only as region text until bind time.
+fn call_vars<'s>(id: &str, lookups: &Lookups<'s>, out: &mut Vec<&'s str>) {
+    let Some(&call) = lookups.calls.get(id) else {
+        return;
+    };
+    if let Some(&source) = lookups.sources.get(call.source_id.as_str()) {
+        out.extend(in_span(&source.tokens, &source.links, &call.region));
+    }
+    if let Some(receiver) = &call.receiver {
+        expr_vars(receiver, lookups, out);
+    }
+}
+
+/// Variables the operands of `predicate` read.
+fn predicate_vars<'s>(predicate: &'s Predicate, lookups: &Lookups<'s>, out: &mut Vec<&'s str>) {
+    match predicate {
+        Predicate::Is { operand, .. } | Predicate::Exists { operand, .. } => {
+            expr_vars(operand, lookups, out)
+        }
+        Predicate::Compare { lhs, rhs, .. } => {
+            expr_vars(lhs, lookups, out);
+            expr_vars(rhs, lookups, out);
+        }
+        Predicate::OneOf {
+            operand, values, ..
+        } => {
+            expr_vars(operand, lookups, out);
+            for value in values {
+                expr_vars(value, lookups, out);
+            }
+        }
+        Predicate::Contains {
+            container, item, ..
+        } => {
+            expr_vars(container, lookups, out);
+            expr_vars(item, lookups, out);
+        }
+        Predicate::HasAttribute { element, .. } => expr_vars(element, lookups, out),
+        Predicate::Holds { subjects, call, .. } => {
+            for subject in subjects {
+                expr_vars(subject, lookups, out);
+            }
+            if let Some(id) = call {
+                call_vars(id, lookups, out);
+            }
+        }
+        Predicate::RunningOn { context } => match context {
+            RunContext::InParallel => {}
+            RunContext::Queue(expr) | RunContext::EventLoopTask(expr) => {
+                expr_vars(expr, lookups, out)
+            }
+        },
+        Predicate::And(predicates) | Predicate::Or(predicates) => {
+            for predicate in predicates {
+                predicate_vars(predicate, lookups, out);
+            }
+        }
+        Predicate::Implies(premise, conclusion) => {
+            predicate_vars(premise, lookups, out);
+            predicate_vars(conclusion, lookups, out);
+        }
+        Predicate::Opaque { text } => out.extend(scan_starred(text)),
     }
 }
 
@@ -438,7 +515,7 @@ fn scan_starred(text: &str) -> impl Iterator<Item = &str> {
 
 /// The store target as prose: `*d*'s f`, `this's [[slot]]`, `*m*[*k*]`. The possessive follows
 /// the source's typography.
-fn render_path(path: &Path, source: &StatementSource) -> String {
+fn render_path(path: &Path, source: &StatementSource, lookups: &Lookups) -> String {
     let possessive = if source.text.contains("’s") {
         "’s "
     } else {
@@ -466,13 +543,13 @@ fn render_path(path: &Path, source: &StatementSource) -> String {
     let mut rendered = parts.join(possessive);
     if let Some(subscript) = &path.subscript {
         rendered.push('[');
-        rendered.push_str(&subscript_text(subscript, source));
+        rendered.push_str(&subscript_text(subscript, source, lookups));
         rendered.push(']');
     }
     rendered
 }
 
-fn subscript_text(expr: &Expr, source: &StatementSource) -> String {
+fn subscript_text(expr: &Expr, source: &StatementSource, lookups: &Lookups) -> String {
     match expr {
         Expr::Var(n) => format!("*{n}*"),
         Expr::Literal(literal) => match literal {
@@ -484,11 +561,42 @@ fn subscript_text(expr: &Expr, source: &StatementSource) -> String {
             Literal::Failure => "failure".to_owned(),
         },
         Expr::Opaque { text } => text.clone(),
-        Expr::Path(path) => render_path(path, source),
+        Expr::Path(path) => render_path(path, source, lookups),
         Expr::This => "this".to_owned(),
         Expr::New { .. } => "a new value".to_owned(),
-        Expr::Call(_) | Expr::AlgorithmRef { .. } | Expr::EnumValue { .. } => String::new(),
-        Expr::List(_) | Expr::Conditional { .. } => String::new(),
+        Expr::EnumValue { text, .. } => format!("\"`{text}`\""),
+        Expr::List(items) if items.is_empty() => "« »".to_owned(),
+        Expr::List(items) => {
+            let items: Vec<String> = items
+                .iter()
+                .map(|item| subscript_text(item, source, lookups))
+                .collect();
+            format!("« {} »", items.join(", "))
+        }
+        Expr::Call(id) => lookups
+            .calls
+            .get(id.as_str())
+            .map(|call| {
+                lookups
+                    .sources
+                    .get(call.source_id.as_str())
+                    .and_then(|source| source.text.get(call.span.start..call.span.end))
+                    .map_or_else(|| call.callee.visible_text.clone(), str::to_owned)
+            })
+            .unwrap_or_default(),
+        Expr::AlgorithmRef { link_id, .. } => source
+            .links
+            .iter()
+            .find(|link| &link.id == link_id)
+            .map(|link| link.visible_text.clone())
+            .unwrap_or_default(),
+        Expr::Conditional {
+            then, otherwise, ..
+        } => format!(
+            "either {} or {}",
+            subscript_text(then, source, lookups),
+            subscript_text(otherwise, source, lookups)
+        ),
     }
 }
 
@@ -552,7 +660,7 @@ pub(crate) fn derive_parents(paths: &[String]) -> Vec<Option<u32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::testing::{slice_index, slice_indexes_html};
+    use crate::state::testing::{slice_index, slice_indexes_html, var};
 
     #[test]
     fn slice_index_json_is_compact_and_round_trips() {
@@ -874,6 +982,185 @@ mod tests {
         let e = edge(&index, "1", DefKind::Store);
         assert_eq!(e.target.as_deref(), Some("*parent*’s children"));
         assert_eq!(used(&index, &e), ["node"]);
+    }
+
+    #[test]
+    fn code_keyed_subscripts_are_rendered_in_store_targets() {
+        let index = one(
+            r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given <var>d</var> and <var>v</var>:</p><ol><li><p>Set <var>d</var>’s <a href="#m">m</a>["<code>k</code>"] to <var>v</var>.</p></li></ol></div><p><dfn id="m">m</dfn></p>"##,
+        );
+        let e = edge(&index, "1", DefKind::Store);
+        assert_eq!(e.target.as_deref(), Some("*d*’s m[\"`k`\"]"));
+        assert_eq!(used(&index, &e), ["v"]);
+    }
+
+    #[test]
+    fn every_subscript_kind_renders_as_text() {
+        use crate::state::ir::{
+            tests_support::sources, CallForm, Callee, ExecutionHint, Predicate, Test,
+        };
+        let html = r##"<a href="#algo">run</a> given <var>x</var> or <a href="#ref">ref</a>"##;
+        let source = sources(&[html]).remove(0);
+        let link = |text: &str| {
+            source
+                .links
+                .iter()
+                .find(|link| link.visible_text == text)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let given = source.text.find(" given").unwrap();
+        let or = source.text.find(" or ").unwrap();
+        let call = Call {
+            id: "c1".into(),
+            source_id: source.id.clone(),
+            statement_id: "s1".into(),
+            parent_call: None,
+            nested: vec![],
+            callee: Callee {
+                link_id: link("run"),
+                target: None,
+                visible_text: "run".into(),
+            },
+            form: CallForm::ResultOf,
+            span: TextSpan { start: 0, end: or },
+            region: TextSpan {
+                start: given,
+                end: or,
+            },
+            receiver: None,
+            named: vec![],
+            body_args: vec![],
+            hint: ExecutionHint::Inline,
+        };
+        let lookups = Lookups {
+            inits: BTreeMap::new(),
+            calls: BTreeMap::from([("c1", &call)]),
+            sources: BTreeMap::from([(source.id.as_str(), &source)]),
+        };
+        let text = |expr: &Expr| subscript_text(expr, &source, &lookups);
+        assert_eq!(
+            text(&Expr::EnumValue {
+                text: "k".into(),
+                target: None
+            }),
+            "\"`k`\""
+        );
+        assert_eq!(
+            text(&Expr::List(vec![
+                var("a"),
+                Expr::List(vec![var("b"), Expr::Literal(Literal::Number("1".into()))])
+            ])),
+            "« *a*, « *b*, 1 » »"
+        );
+        assert_eq!(text(&Expr::Call("c1".into())), "run given *x*");
+        assert_eq!(
+            text(&Expr::AlgorithmRef {
+                link_id: link("ref"),
+                target: None
+            }),
+            "ref"
+        );
+        assert_eq!(
+            text(&Expr::Conditional {
+                condition: Box::new(Predicate::Is {
+                    operand: var("a"),
+                    test: Test::Null,
+                    negated: false
+                }),
+                then: Box::new(var("b")),
+                otherwise: Box::new(Expr::This)
+            }),
+            "either *b* or this"
+        );
+    }
+
+    #[test]
+    fn calls_and_conditions_in_set_values_are_uses() {
+        use crate::state::ir::{CallForm, Callee, ExecutionHint, Predicate, StatementKind, Test};
+        let html = r##"<div class="algorithm"><p>To <dfn id="go">go</dfn> given <var>d</var>, <var>x</var>, <var>y</var>, <var>c</var> and <var>e</var>:</p><ol>
+<li><p>Set <var>d</var>’s <a href="#f">f</a> to the result of running <a href="#run">run</a> given <var>x</var> and <var>y</var>.</p></li>
+<li><p>Set <var>e</var> to <var>x</var> if <var>c</var> is true; otherwise null.</p></li></ol></div>
+<p><dfn id="f">f</dfn> <dfn id="run">run</dfn></p>"##;
+        let structure = crate::parse::steps::extract_step_structure(
+            html,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "hash:t",
+        );
+        let mut state = crate::state::testing::extract_html(html, "HTML");
+        let first = state
+            .statements
+            .iter()
+            .position(|s| matches!(&s.kind, StatementKind::Set { targets, .. } if !targets[0].hops.is_empty()))
+            .unwrap();
+        let source = state
+            .sources
+            .iter()
+            .find(|source| source.id == state.statements[first].source_id)
+            .unwrap()
+            .clone();
+        let run = source
+            .links
+            .iter()
+            .find(|link| link.visible_text == "run")
+            .unwrap();
+        state.calls.push(Call {
+            id: "c1".into(),
+            source_id: source.id.clone(),
+            statement_id: state.statements[first].id.clone(),
+            parent_call: None,
+            nested: vec![],
+            callee: Callee {
+                link_id: run.id.clone(),
+                target: None,
+                visible_text: "run".into(),
+            },
+            form: CallForm::ResultOf,
+            span: TextSpan {
+                start: run.span.start,
+                end: source.text.len(),
+            },
+            region: TextSpan {
+                start: run.span.end,
+                end: source.text.len(),
+            },
+            receiver: Some(var("d")),
+            named: vec![],
+            body_args: vec![],
+            hint: ExecutionHint::Inline,
+        });
+        let StatementKind::Set { value, .. } = &mut state.statements[first].kind else {
+            unreachable!()
+        };
+        *value = Expr::Call("c1".into());
+        let second = state
+            .statements
+            .iter()
+            .position(|s| matches!(&s.kind, StatementKind::Set { targets, .. } if targets[0].hops.is_empty()))
+            .unwrap();
+        let StatementKind::Set { value, .. } = &mut state.statements[second].kind else {
+            unreachable!()
+        };
+        *value = Expr::Conditional {
+            condition: Box::new(Predicate::Is {
+                operand: var("c"),
+                test: Test::True,
+                negated: false,
+            }),
+            then: Box::new(var("x")),
+            otherwise: Box::new(Expr::Literal(Literal::Null)),
+        };
+        let index = build_slice_indexes(&structure, &state).remove(0);
+        let e = edge(&index, "1", DefKind::Store);
+        let mut u = used(&index, &e);
+        u.sort();
+        assert_eq!(u, ["d", "x", "y"], "call region and receiver are uses");
+        let e = edge(&index, "2", DefKind::Set);
+        let mut u = used(&index, &e);
+        u.sort();
+        assert_eq!(u, ["c", "x"], "the condition's operand is a use");
     }
 
     #[test]

@@ -608,10 +608,10 @@ pub const NAV_HTML: &str = r##"<div data-algorithm=""><p>To <dfn id="navigate">n
 pub const INSERT_DOM: &str = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-node">Node</dfn> {};</pre>
 <p>A <dfn data-dfn-type="dfn" id="concept-node">node</dfn> is a <code><a href="#interface-node">Node</a></code> object.</p>
 <div class="algorithm"><p>To <dfn data-dfn-type="dfn" id="concept-node-insert">insert</dfn> a <a href="#concept-node">node</a> <var>node</var> into a <a href="#concept-node">node</a> <var>parent</var> before null or a <a href="#concept-node">node</a> <var>child</var>, with an optional boolean <dfn data-dfn-for="insert" data-dfn-type="dfn" id="insert-suppressobservers"><var>suppressObservers</var></dfn> (default false):</p>
-<ol><li><p>Let <var>nodes</var> be <var>node</var>'s <a href="#concept-tree-child">children</a>, if <var>node</var> is a <code>DocumentFragment</code> node; otherwise « <var>node</var> ».</p></li>
+<ol><li><p>Let <var>nodes</var> be <var>node</var>’s <a href="#concept-tree-child">children</a>, if <var>node</var> is a <code>DocumentFragment</code> node; otherwise « <var>node</var> ».</p></li>
 <li><p>For each <var>node</var> of <var>nodes</var>, in <a href="#concept-tree-order">tree order</a>:</p><ol><li><p>Continue.</p></li></ol></li></ol></div>
 <div class="algorithm"><p>To <dfn data-dfn-type="dfn" id="concept-node-replace">replace</dfn> a <a href="#concept-node">node</a> <var>child</var> with a <a href="#concept-node">node</a> <var>node</var> within a <a href="#concept-node">node</a> <var>parent</var>:</p>
-<ol><li><p>Let <var>referenceChild</var> be <var>child</var>'s <a href="#concept-tree-next-sibling">next sibling</a>.</p></li>
+<ol><li><p>Let <var>referenceChild</var> be <var>child</var>’s <a href="#concept-tree-next-sibling">next sibling</a>.</p></li>
 <li><p><a href="#concept-node-insert">Insert</a> <var>node</var> into <var>parent</var> before <var>referenceChild</var> with <a href="#insert-suppressobservers">suppressObservers</a> set to true.</p></li></ol></div>"##;
 
 pub const EVENT_DOM: &str = r##"<pre class="idl">interface <dfn data-dfn-type="interface" id="interface-event">Event</dfn> {
@@ -621,11 +621,11 @@ pub const EVENT_DOM: &str = r##"<pre class="idl">interface <dfn data-dfn-type="i
 <p>Each <a href="#concept-event">event</a> has a <dfn data-dfn-for="Event" id="dispatch-flag">dispatch flag</dfn> and an <dfn data-dfn-for="Event" id="initialized-flag">initialized flag</dfn>.</p>
 <p>An <dfn data-dfn-type="dfn" id="concept-event">event</dfn> is an <code><a href="#interface-event">Event</a></code> object.</p>
 <div class="algorithm"><p>The <dfn data-dfn-for="Event" data-dfn-type="method" id="dom-event-initevent"><code>initEvent(<var>type</var>, <var>bubbles</var>, <var>cancelable</var>)</code></dfn> method steps are:</p>
-<ol><li><p>If <a href="https://webidl.spec.whatwg.org/#this">this</a>'s <a href="#dispatch-flag">dispatch flag</a> is set, then return.</p></li>
+<ol><li><p>If <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#dispatch-flag">dispatch flag</a> is set, then return.</p></li>
 <li><p><a href="#concept-event-initialize">Initialize</a> <a href="https://webidl.spec.whatwg.org/#this">this</a> with <var>type</var>, <var>bubbles</var>, and <var>cancelable</var>.</p></li></ol></div>
 <div class="algorithm"><p>To <dfn data-dfn-for="Event" data-dfn-type="dfn" id="concept-event-initialize">initialize</dfn> an <var>event</var>, with <var>type</var>, <var>bubbles</var>, and <var>cancelable</var>, run these steps:</p>
-<ol><li><p>Set <var>event</var>'s <a href="#initialized-flag">initialized flag</a>.</p></li></ol></div>
-<p>The <dfn data-dfn-for="Event" data-dfn-type="attribute" id="dom-event-type"><code>type</code></dfn> getter steps are to return <a href="https://webidl.spec.whatwg.org/#this">this</a>'s <a href="#event-type">type</a>.</p>"##;
+<ol><li><p>Set <var>event</var>’s <a href="#initialized-flag">initialized flag</a>.</p></li></ol></div>
+<p>The <dfn data-dfn-for="Event" data-dfn-type="attribute" id="dom-event-type"><code>type</code></dfn> getter steps are to return <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#event-type">type</a>.</p>"##;
 
 pub const FALLBACK_HTML: &str = r##"<pre><code class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</code></pre>
 <p>Each <code><a href="#document">Document</a></code> has an <dfn id="concept-document-about-base-url">about base URL</dfn>, a <a href="https://url.spec.whatwg.org/#concept-url">URL</a> or null, initially null.</p>
