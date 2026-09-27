@@ -396,14 +396,23 @@ impl Binder<'_> {
     /// The alignment text: the region up to the named-argument part.
     fn alignment(&self) -> (usize, usize) {
         let len = self.source.text.len();
-        let start = self.call.region.start.min(len);
+        let mut start = self.call.region.start.min(len);
         let mut end = self.call.region.end.clamp(start, len);
         if let Some(named) = self.call.named.iter().map(|arg| arg.span.start).min() {
             end = named.clamp(start, end);
             let before = &self.masked[start..end];
             if let Some(lead) = NAMED_LEADS.iter().find(|lead| before.ends_with(*lead)) {
                 end -= lead.len();
+                if self.masked[start..end].ends_with(", and") {
+                    end -= ", and".len();
+                }
             }
+        }
+        start += callee_noun_len(&self.masked[start..end]);
+        const CATCHING: &str = ", catching any exceptions";
+        let (_, trimmed) = self.trim(start, end);
+        if self.masked[start..trimmed].ends_with(CATCHING) {
+            end = trimmed - CATCHING.len();
         }
         let body_bound = self
             .args
@@ -423,24 +432,38 @@ impl Binder<'_> {
         let slots = self.slots(pieces);
         let mut cursor = start;
         let mut found: Vec<Found> = Vec::new();
+        let mut unlocated: Vec<usize> = Vec::new();
         for (index, (sep, param)) in slots.into_iter().enumerate() {
             let bound = self.is_bound(param);
+            let juxtaposed = match &sep {
+                Sep::Literal(literal) if index == 0 && GIVEN_CLASS.contains(&literal.as_str()) => {
+                    self.juxtaposed_argument(start, end)
+                }
+                _ => None,
+            };
             let located = match &sep {
-                Sep::First if index == 0 => Some((cursor, cursor)),
+                _ if juxtaposed.is_some() => juxtaposed.map(|at| (at, at)),
+                Sep::First if index == 0 => Some((cursor, self.after_given(cursor, end))),
                 Sep::First => None,
                 Sep::Literal(literal) => self.find_literal(literal, cursor, end),
                 Sep::List => self.find_list_separator(cursor, end),
             };
-            let Some((sep_start, arg_start)) = located else {
+            let sep = if juxtaposed.is_some() {
+                Sep::First
+            } else {
+                sep
+            };
+            let Some((sep_start, mut arg_start)) = located else {
                 if bound {
                     continue;
                 }
                 if self.signature.params[param].optional {
                     break;
                 }
-                self.missing(param);
+                unlocated.push(param);
                 continue;
             };
+            arg_start += self.keyword_continuation(&sep, arg_start, end);
             cursor = arg_start;
             let first = matches!(sep, Sep::First);
             found.push(Found {
@@ -454,6 +477,12 @@ impl Binder<'_> {
                 },
                 first,
             });
+        }
+        for param in unlocated {
+            match self.steps_named_after_to(&found, param, end) {
+                Some(steps) => found.push(steps),
+                None => self.missing(param),
+            }
         }
         let leading_end = match found.first() {
             Some(first) if first.first => start,
@@ -482,6 +511,93 @@ impl Binder<'_> {
                 None => {}
             }
         }
+    }
+
+    /// Where the first argument starts when the call omits the template's
+    /// leading `given`/`with` and names the argument right after the callee
+    /// ("canonicalize a sanitizer element *item*"): the region's first word
+    /// is a variable or `this`, not the keyword or another preposition.
+    fn juxtaposed_argument(&self, start: usize, end: usize) -> Option<usize> {
+        let (at, end) = self.trim(start, end);
+        if at >= end {
+            return None;
+        }
+        let variable = self
+            .source
+            .tokens
+            .iter()
+            .any(|token| token.kind == InlineTokenKind::Variable && token.span.start == at);
+        let text = &self.source.text[at..end];
+        let this = text
+            .strip_prefix("this")
+            .is_some_and(|rest| !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+        (variable || this).then_some(at)
+    }
+
+    /// The length of a keyword continuing a located separator before the
+    /// argument: `by` after `given` ("run the classic script given by *el*'s
+    /// result"), `given`/`with` after a list separator ("*a*, given *b*, *c*").
+    fn keyword_continuation(&self, sep: &Sep, arg_start: usize, end: usize) -> usize {
+        let rest = &self.masked[arg_start..end];
+        let keyword = match sep {
+            Sep::Literal(literal) if GIVEN_CLASS.contains(&literal.as_str()) => Some(" by"),
+            Sep::List => GIVEN_CLASS.iter().copied().find(|k| rest.starts_with(k)),
+            _ => None,
+        };
+        keyword
+            .filter(|k| rest.starts_with(k) && rest[k.len()..].starts_with(' '))
+            .map_or(0, str::len)
+    }
+
+    /// A steps parameter no separator located, passed as a steps variable
+    /// after the last argument: "… given *global* to run *afterPopulated*".
+    fn steps_named_after_to(&self, found: &[Found], param: usize, end: usize) -> Option<Found> {
+        let params = &self.signature.params;
+        let position = |p: usize| match params[p].passing {
+            Passing::Positional { index } => Some(index),
+            _ => None,
+        };
+        let last = found.last()?;
+        if !is_steps_type(&params[param].type_text) || position(param)? < position(last.param)? {
+            return None;
+        }
+        let text = &self.masked[last.arg_start..end];
+        let (lead, offset) = [" to run ", " to perform "]
+            .iter()
+            .find_map(|lead| text.find(lead).map(|offset| (*lead, offset)))?;
+        let arg_start = last.arg_start + offset + lead.len();
+        let (at, arg_end) = self.trim(arg_start, end);
+        let variable = self.source.tokens.iter().any(|token| {
+            token.kind == InlineTokenKind::Variable
+                && token.span.start == at
+                && token.span.end == arg_end
+        });
+        variable.then(|| Found {
+            param,
+            sep_start: last.arg_start + offset,
+            arg_start,
+            via: BoundVia::Literal(lead.trim().to_string()),
+            first: false,
+        })
+    }
+
+    /// Where a first argument the template names right after the callee
+    /// starts when the call introduces it with `given`/`with` anyway
+    /// ("convert to a list of name-value pairs with *entry list*").
+    fn after_given(&self, start: usize, end: usize) -> usize {
+        let (at, end) = self.trim(start, end);
+        GIVEN_CLASS
+            .iter()
+            .find_map(|keyword| {
+                let rest = self.masked[at..end].strip_prefix(keyword)?;
+                let rest = rest
+                    .strip_prefix(" by")
+                    .filter(|r| r.starts_with(' '))
+                    .unwrap_or(rest);
+                rest.starts_with(' ').then(|| end - rest.len() + 1)
+            })
+            .filter(|&arg| arg < end)
+            .unwrap_or(start)
     }
 
     /// The positional slots after the callee with their separators.
@@ -659,23 +775,28 @@ impl Binder<'_> {
     /// trimmed span; `None` when it is empty.
     fn argument(&mut self, param: usize, start: usize, end: usize) -> Option<(Expr, TextSpan)> {
         let (mut start, mut end) = self.trim(start, end);
-        // Strip " if given" suffix: "*x* if given" means forward *x* when present.
-        const IF_GIVEN: &str = " if given";
-        if self.source.text[start..end].ends_with(IF_GIVEN) {
-            end -= IF_GIVEN.len();
-            let (s, e) = self.trim(start, end);
-            start = s;
-            end = e;
+        // "*x* if given" forwards *x* when present; "*a*, *b*, and *c*
+        // respectively" lists values in parameter order.
+        for suffix in [" if given", " respectively"] {
+            if self.source.text[start..end].ends_with(suffix) {
+                (start, end) = self.trim(start, end - suffix.len());
+            }
+        }
+        if let Some(open) = self.trailing_remark(start, end) {
+            (start, end) = self.trim(start, open);
         }
         let text = &self.source.text;
-        let type_text = &self.signature.params[param].type_text;
-        let lead = type_text.len() + 1;
-        if !type_text.is_empty()
-            && start + lead < end
-            && self.masked[start..].starts_with(type_text.as_str())
-            && self.masked[start + type_text.len()..].starts_with(' ')
-        {
-            start += lead;
+        let param = &self.signature.params[param];
+        let led_by = |phrase: &str| {
+            !phrase.is_empty()
+                && start + phrase.len() + 1 < end
+                && self.masked[start..].starts_with(phrase)
+                && self.masked[start + phrase.len()..].starts_with(' ')
+        };
+        if led_by(&param.type_text) {
+            start += param.type_text.len() + 1;
+        } else if led_by(&param.name) {
+            start += param.name.len() + 1;
         }
         if start >= end {
             return None;
@@ -700,6 +821,36 @@ impl Binder<'_> {
         let enc = self.parser.enc;
         let expr = self.parser.expr_at(enc.to_enc(start), enc.to_enc(end));
         Some((expr, span))
+    }
+
+    /// The `(` of a parenthesized prose remark ending `start..end` after a
+    /// value ("*title* (which could be the empty string)"): its first
+    /// character is a plain lowercase letter, so tuples like `(*x*, *y*)`
+    /// never qualify.
+    fn trailing_remark(&self, start: usize, end: usize) -> Option<usize> {
+        if !self.masked[start..end].ends_with(')') {
+            return None;
+        }
+        let mut depth = 0usize;
+        for (offset, ch) in self.masked[start..end].char_indices().rev() {
+            match ch {
+                ')' => depth += 1,
+                '(' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let open = start + offset;
+                        let text = &self.source.text[open + 1..end];
+                        let plain = text.starts_with(|c: char| c.is_ascii_lowercase())
+                            && self.masked.as_bytes()[open + 1] == text.as_bytes()[0];
+                        let spaced = self.masked[start..open].ends_with(' ');
+                        let value = !self.masked[start..open].trim().is_empty();
+                        return (plain && spaced && value).then_some(open);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// The first whole-word, case-insensitive occurrence of `literal` in
@@ -773,6 +924,28 @@ fn body_intro() -> &'static Regex {
         )
         .unwrap()
     })
+}
+
+/// The length of a leading `steps`/`algorithm` that completes the callee's
+/// name ("run the module type from module request steps given …"): only
+/// when an argument keyword or the region end follows it.
+fn callee_noun_len(region: &str) -> usize {
+    let rest = region.trim_start();
+    let lead = region.len() - rest.len();
+    ["steps", "algorithm"]
+        .iter()
+        .find_map(|noun| {
+            let after = rest.strip_prefix(noun)?;
+            let tail = after.trim_end_matches(|c: char| c.is_whitespace() || c == ',' || c == '.');
+            let keyword = GIVEN_CLASS.iter().any(|k| {
+                after
+                    .strip_prefix(' ')
+                    .and_then(|a| a.strip_prefix(k))
+                    .is_some_and(|a| a.starts_with(' '))
+            });
+            (tail.is_empty() || keyword).then_some(lead + noun.len())
+        })
+        .unwrap_or(0)
 }
 
 /// A parameter type phrase naming steps or an algorithm.
@@ -916,6 +1089,168 @@ mod tests {
         let (b, _) = bound(html, "HTML", "c", "2").remove(0);
         assert_eq!(b.confidence, Confidence::Partial);
         assert_eq!(b.args[2].value, ArgValue::Unbound);
+    }
+
+    #[test]
+    fn juxtaposed_first_argument_stands_for_an_omitted_given() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="canon">canonicalize a name</dfn> given a string <var>name</var> and a string <var>ns</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a string <var>item</var>:</p><ol>
+<li><p><a href="#canon">Canonicalize a name</a> <var>item</var>.</p></li>
+<li><p><a href="#canon">Canonicalize a name</a> <var>item</var> and <var>x</var>.</p></li>
+<li><p><a href="#canon">Canonicalize a name</a> this and <var>x</var>.</p></li>
+<li><p><a href="#canon">Canonicalize a name</a> from <var>item</var> and <var>x</var>.</p></li>
+<li><p><a href="#canon">Canonicalize a name</a> the item and <var>x</var>.</p></li>
+</ol></div>"##;
+        let first = |step: &str| bound(html, "HTML", "c", step).remove(0).0;
+        let b = first("1");
+        assert_eq!(b.confidence, Confidence::Partial);
+        assert_eq!(
+            arg(&b, 0),
+            (
+                &ArgValue::Expr(var("item")),
+                &BoundVia::Literal(String::new())
+            )
+        );
+        assert_eq!(
+            b.issues,
+            vec![BindingIssue::MissingRequiredArgument("ns".into())]
+        );
+        let b = first("2");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(var("item")));
+        assert_eq!(
+            arg(&b, 1),
+            (&ArgValue::Expr(var("x")), &BoundVia::ListPosition)
+        );
+        let b = first("3");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(Expr::This));
+        for step in ["4", "5"] {
+            let b = first(step);
+            assert_ne!(b.confidence, Confidence::Exact, "step {step}");
+            assert_ne!(b.args[0].value, ArgValue::Expr(var("item")), "step {step}");
+        }
+    }
+
+    #[test]
+    fn keyword_before_a_bare_slot_callee_noun_and_trailing_remarks_are_not_arguments() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="conv">convert to pairs</dfn> <var>list</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>The <dfn id="mtype">module type from request</dfn> steps, given a string <var>request</var>, are as follows:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="text">create a text</dfn> given a document <var>doc</var> and a string <var>data</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="trav">traverse</dfn> given a navigable <var>n</var>, an integer <var>delta</var>, and an optional document <var>sourceDocument</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a list <var>l</var>:</p><ol>
+<li><p><a href="#conv">Convert to pairs</a> with <var>l</var>.</p></li>
+<li><p>Set <var>m</var> to the result of running the <a href="#mtype">module type from request</a> steps given <var>l</var>.</p></li>
+<li><p><a href="#text">Create a text</a> given <var>d</var> and <var>t</var> (which could be the empty string).</p></li>
+<li><p><a href="#text">Create a text</a> given <var>d</var> and (<var>t</var>, <var>u</var>).</p></li>
+<li><p><a href="#trav">Traverse</a> given <var>n</var>, <var>l</var>, and with <a href="#sourcedocument">sourceDocument</a> set to <var>d</var>.</p></li>
+<li><p>Let <var>m</var> be the result of running the <a href="#mtype">module type from request</a> steps of <var>l</var>.</p></li>
+</ol></div>"##;
+        let first = |step: &str| {
+            bound(html, "HTML", "c", step)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| panic!("no call in step {step}"))
+                .0
+        };
+        let b = first("1");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(var("l")));
+        let b = first("2");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(var("l")));
+        let b = first("3");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("t")));
+        let span = b.args[1].span.unwrap();
+        assert_eq!(span.end - span.start, "*t*".len());
+        assert_ne!(first("4").confidence, Confidence::Exact);
+        let b = first("5");
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("l")));
+        assert!(
+            !b.issues
+                .iter()
+                .any(|i| matches!(i, BindingIssue::OpaqueArgument(_))),
+            "{:?}",
+            b.issues
+        );
+        assert_ne!(first("6").confidence, Confidence::Exact);
+    }
+
+    #[test]
+    fn keyword_continuations_steps_variables_and_trailing_idioms() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="q">queue a global task</dfn> on a <a href="#task-source">task source</a> <var>source</var>, with a <a href="#global-object">global object</a> <var>global</var> and a series of steps <var>steps</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="run">run a script</dfn> given a script <var>script</var> and an optional boolean <var>rethrow</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="report">report an exception</dfn> <var>exception</var> for a global object <var>global</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="deact">deactivate</dfn> given a document <var>doc</var>, a user involvement <var>ui</var>, and an entry <var>entry</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a global object <var>g</var>:</p><ol>
+<li><p><a href="#q">Queue a global task</a> on <var>s</var> given <var>g</var> to run <var>afterPopulated</var>.</p></li>
+<li><p><a href="#q">Queue a global task</a> on <var>s</var> given <var>g</var> to run the steps of <var>a</var>.</p></li>
+<li><p><a href="#run">Run a script</a> given by <var>el</var>'s <a href="#result">result</a>.</p></li>
+<li><p><a href="#report">Report an exception</a> given by <var>status</var> for <var>g</var>.</p></li>
+<li><p><a href="#deact">Deactivate</a> <var>d</var>, given <var>u</var> and <var>e</var>.</p></li>
+<li><p><a href="#deact">Deactivate</a> given <var>d</var>, <var>u</var>, and <var>e</var> respectively.</p></li>
+<li><p><a href="#run">Run a script</a> given <var>s</var> and <var>r</var> if given, catching any exceptions.</p></li>
+</ol></div>"##;
+        let first = |step: &str| bound(html, "HTML", "c", step).remove(0).0;
+        let b = first("1");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("g")));
+        assert_eq!(
+            arg(&b, 2),
+            (
+                &ArgValue::Expr(var("afterPopulated")),
+                &BoundVia::Literal("to run".into())
+            )
+        );
+        let b = first("2");
+        assert_eq!(b.confidence, Confidence::Partial);
+        assert_eq!(b.args[2].value, ArgValue::Unbound);
+        let b = first("3");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert!(matches!(&b.args[0].value, ArgValue::Expr(Expr::Path(_))));
+        let b = first("4");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[0].value, ArgValue::Expr(var("status")));
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("g")));
+        for step in ["5", "6"] {
+            let b = first(step);
+            assert_eq!(
+                b.confidence,
+                Confidence::Exact,
+                "step {step}: {:?}",
+                b.issues
+            );
+            assert_eq!(
+                b.args.iter().map(|a| a.value.clone()).collect::<Vec<_>>(),
+                vec![
+                    ArgValue::Expr(var("d")),
+                    ArgValue::Expr(var("u")),
+                    ArgValue::Expr(var("e"))
+                ],
+                "step {step}"
+            );
+        }
+        let b = first("7");
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(b.args[1].value, ArgValue::Expr(var("r")));
+    }
+
+    #[test]
+    fn argument_led_by_its_parameter_name_binds_the_value() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="split">split</dfn> a node <var>node</var> with integer <var>offset</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a node <var>n</var>:</p><ol>
+<li><p><a href="#split">Split</a> <var>n</var> with offset <var>o</var>.</p></li>
+<li><p><a href="#split">Split</a> <var>n</var> with offsets <var>o</var>.</p></li>
+</ol></div>"##;
+        let (b, _) = bound(html, "HTML", "c", "1").remove(0);
+        assert_eq!(b.confidence, Confidence::Exact, "{:?}", b.issues);
+        assert_eq!(
+            arg(&b, 1),
+            (&ArgValue::Expr(var("o")), &BoundVia::Literal("with".into()))
+        );
+        let (b, _) = bound(html, "HTML", "c", "2").remove(0);
+        assert_eq!(b.confidence, Confidence::Partial);
     }
 
     #[test]

@@ -360,7 +360,9 @@ impl Rates {
     }
 }
 
-/// §14.5 floor on exact bindings of calls to `To` targets with parameters.
+/// §14.5 floor on exact bindings of calls to `To` targets with parameters, checked over the
+/// `To`-like targets: `when the steps say` and given-list intros are call templates parsed
+/// exactly like `To` (§8.1.6), and `bind` treats all three alike.
 fn binding_floor(spec: &str) -> f64 {
     if spec == "HTML" {
         70.0
@@ -478,7 +480,7 @@ fn report_bindings(conn: &rusqlite::Connection, snapshots: [i64; 2], review: boo
         );
         println!("  bound {} calls in {ms:.2} ms", bindings.len());
         if to_like.exact_pct() < binding_floor(spec) {
-            println!("FLOOR {spec} exact bindings below §14.5");
+            println!("FLOOR {spec} exact bindings of calls to To-like targets below §14.5");
             ok = false;
         }
         if spec == "HTML" && ms >= HTML_BIND_BUDGET_MS {
