@@ -9,6 +9,8 @@ use crate::state::model::Literal;
 
 /// Separators between `NAMEDARG`s, longest first.
 const NAMED_SEPARATORS: [&str; 3] = [", and ", ", ", " and "];
+/// Control words that start a clause of their own after a separator.
+const CLAUSE_HEADS: [&str; 5] = ["return", "abort", "throw", "continue", "break"];
 /// Words an unlinked `ARGNAME` ending in `flag` may span.
 const MAX_FLAG_WORDS: usize = 6;
 
@@ -56,6 +58,7 @@ impl Parser<'_> {
         }
         let (link_start, link_end) = self.link_range(link)?;
         let region_start = link_end.min(region_end);
+        let region_end = self.clause_end(region_start, region_end);
         let (region_end, hint) = self.cut_in_parallel(region_start, region_end);
         let named = self.named_args(region_start, region_end, &id);
         self.set_role(link, LinkRole::Callee { call: id.clone() });
@@ -88,6 +91,21 @@ impl Parser<'_> {
             (Placeholder::Link(index), end) if index == link => Some((start, end)),
             _ => None,
         }
+    }
+
+    /// `region_end`, or the first top-level separator before a clause of its
+    /// own (`, and return`).
+    fn clause_end(&self, region_start: usize, region_end: usize) -> usize {
+        self.top_level(region_start, region_end)
+            .into_iter()
+            .find(|&at| {
+                self.keyword(at, &NAMED_SEPARATORS).is_some_and(|after| {
+                    CLAUSE_HEADS.iter().any(|word| {
+                        self.lit(after, word) && !self.word_continues(after + word.len())
+                    })
+                })
+            })
+            .unwrap_or(region_end)
     }
 
     /// `region_end` without a trailing ` in parallel` (plain text or a link
