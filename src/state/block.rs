@@ -181,6 +181,7 @@ pub(crate) fn sentences(p: &Pattern) -> Vec<Range<usize>> {
         if depth == 0
             && matches!(bytes[i], b'.' | b':')
             && (i + 1 == p.text.len() || bytes[i + 1] == b' ')
+            && !ends_with_abbreviation(&p.text[..i])
         {
             out.push(start..i + 1);
             start = (i + 2).min(p.text.len());
@@ -193,6 +194,16 @@ pub(crate) fn sentences(p: &Pattern) -> Vec<Range<usize>> {
         out.push(start..p.text.len())
     }
     out
+}
+
+/// `before` ends with "i.e" or "e.g" as a word, so the period after it does
+/// not end a sentence.
+fn ends_with_abbreviation(before: &str) -> bool {
+    ["i.e", "e.g"].iter().any(|abbr| {
+        before
+            .strip_suffix(abbr)
+            .is_some_and(|head| !head.chars().next_back().is_some_and(char::is_alphanumeric))
+    })
 }
 
 #[cfg(test)]
@@ -246,6 +257,18 @@ mod tests {
         let p = pattern(&t);
         let s = sentences(&p);
         assert_eq!(&p.text[s[1].clone()], "Each navigable has:");
+    }
+
+    #[test]
+    fn sentences_do_not_split_after_abbreviations() {
+        let t = block(
+            r#"<p>Media elements have a <dfn id="c">current playback position</dfn>, which must initially (i.e. in the absence of media data) be zero seconds. It is a time, e.g. 3 seconds.</p>"#,
+            "p",
+        );
+        let p = pattern(&t);
+        let s = sentences(&p);
+        assert_eq!(s.len(), 2);
+        assert_eq!(&p.text[s[1].clone()], "It is a time, e.g. 3 seconds.");
     }
 
     #[test]
