@@ -189,7 +189,7 @@ fn parse_single_alt(s: &str, links: &[(String, TypeRef)]) -> TypeExpr {
     }
 
     TypeExpr::Opaque {
-        text: s.trim().to_string(),
+        text: with_link_text(s.trim(), links),
     }
 }
 
@@ -412,7 +412,7 @@ fn intro_infra(
         .unwrap_or_else(|| {
             (
                 TypeExpr::Opaque {
-                    text: arg.trim().to_string(),
+                    text: with_link_text(arg.trim(), links),
                 },
                 false,
             )
@@ -743,6 +743,7 @@ fn extract_type_phrase(
                 serial_list_prefix(raw_t).to_string()
             };
             let phrase_str = substitute_quoted_code_tokens(&phrase_str, pat, tokens);
+            let phrase_str = substitute_code_and_var_tokens(&phrase_str, pat, tokens);
             return Some(renumber_links(&phrase_str, pat, tokens, resolve));
         }
     }
@@ -880,14 +881,52 @@ fn link_to_text_and_ref(
 /// than stopping at the placeholder boundary.  `⟦Dn⟧` stays, so a value still
 /// ends before the next dfn.
 pub(crate) fn substitute_text_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
+    substitute_slots(s, pat, tokens, |token| match token {
+        BlockToken::Code(text) | BlockToken::Link { text, .. } => Some(text),
+        _ => None,
+    })
+}
+
+/// Substitute `⟦Cn⟧` and `⟦Vn⟧` placeholders with their text: a type phrase
+/// only resolves links, so code and variables are read as words.
+fn substitute_code_and_var_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
+    substitute_slots(s, pat, tokens, |token| match token {
+        BlockToken::Code(text) | BlockToken::Var(text) => Some(text),
+        _ => None,
+    })
+}
+
+/// Substitute each placeholder whose token `text_of` maps to a text.
+fn substitute_slots(
+    s: &str,
+    pat: &Pattern,
+    tokens: &[BlockToken],
+    text_of: impl Fn(&BlockToken) -> Option<&String>,
+) -> String {
     static RE: OnceLock<Regex> = OnceLock::new();
-    regex(&RE, r"⟦[CL](\d+)⟧")
+    regex(&RE, r"⟦[A-Z](\d+)⟧")
         .replace_all(s, |caps: &regex::Captures<'_>| {
             let n: usize = caps[1].parse().unwrap_or(usize::MAX);
-            match pat.slots.get(n).map(|&ti| &tokens[ti]) {
-                Some(BlockToken::Code(text) | BlockToken::Link { text, .. }) => text.clone(),
-                _ => caps[0].to_string(),
-            }
+            pat.slots
+                .get(n)
+                .and_then(|&ti| text_of(&tokens[ti]))
+                .cloned()
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .into_owned()
+}
+
+/// `phrase` with each `⟦Ln⟧` replaced by the text of `links[n]`, for opaque
+/// type text.
+fn with_link_text(phrase: &str, links: &[(String, TypeRef)]) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(&RE, r"⟦L(\d+)⟧")
+        .replace_all(phrase, |caps: &regex::Captures<'_>| {
+            caps[1]
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| links.get(n))
+                .map_or_else(|| caps[0].to_string(), |(text, _)| text.clone())
         })
         .into_owned()
 }

@@ -1752,6 +1752,26 @@ mod tests {
     }
 
     #[test]
+    fn opaque_types_show_link_and_code_text() {
+        use crate::state::testing::ty;
+        let out = run_declare(
+            r##"<p>A <dfn id="session-history-entry">session history entry</dfn> is a struct with the following items:</p>
+<ul><li><p><dfn id="she-scroll-position">scroll position data</dfn>, which is scroll position data for the <a href="#she-document">document</a>'s <a href="#restorable-scrollable-regions">restorable scrollable regions</a>.</p></li></ul>
+<p>A <code><a href="#notrestoredreasons">NotRestoredReasons</a></code> object has a <dfn id="nrr-reasons">reasons array</dfn>, a <code>FrozenArray&lt;<a href="#notrestoredreasondetails">NotRestoredReasonDetails</a>&gt;</code> or null, initially null.</p>
+<pre class="idl">interface <dfn id="notrestoredreasons">NotRestoredReasons</dfn> {};</pre>"##,
+            "HTML",
+        );
+        assert_eq!(
+            ty(&field(&out, "she-scroll-position").declared_type),
+            "opaque(scroll position data for the document's restorable scrollable regions)"
+        );
+        assert_eq!(
+            ty(&field(&out, "nrr-reasons").declared_type),
+            "opaque(FrozenArray<NotRestoredReasonDetails>) | null"
+        );
+    }
+
+    #[test]
     fn plain_owner_name_prefers_the_unscoped_concept() {
         let out = run_declare(
             r##"<pre class="idl">interface <dfn id="window">Window</dfn> {};</pre>
