@@ -1,5 +1,6 @@
-//! Prose statement sources (§7.5): mutation clauses in normative prose
-//! outside structural algorithm bodies.
+//! Prose statement sources (§7.5): normative prose blocks outside structural
+//! algorithm bodies that hold a mutation clause or state IDL getter, setter,
+//! method or constructor steps.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -152,15 +153,27 @@ pub(crate) fn prose_sources(
             out.callouts_excluded += u32::from(mutation);
             continue;
         }
-        if !mutation {
-            for target in source.links.iter().filter_map(|link| link.target.as_ref()) {
-                *out.mentions
-                    .entry(format!("{}#{}", target.spec, target.anchor))
-                    .or_default() += 1;
+        let found = if mutation {
+            subject(&element, &source.text, spec, base_url, scope)
+        } else {
+            steps_subject(&element, &source.text, spec, base_url).filter(|(_, role)| {
+                matches!(
+                    role,
+                    ProseRole::Getter
+                        | ProseRole::Setter
+                        | ProseRole::Method
+                        | ProseRole::Constructor
+                )
+            })
+        };
+        let Some((subject, role)) = found else {
+            if !mutation {
+                for target in source.links.iter().filter_map(|link| link.target.as_ref()) {
+                    *out.mentions
+                        .entry(format!("{}#{}", target.spec, target.anchor))
+                        .or_default() += 1;
+                }
             }
-            continue;
-        }
-        let Some((subject, role)) = subject(&element, &source.text, spec, base_url, scope) else {
             continue;
         };
         if subject.anchor != provisional {
@@ -267,9 +280,20 @@ fn normalized(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The block's subject and role, first match wins: a `The X [role] steps are
-/// to` block whose first `dfn[id]`/`a[href]` is X; the block's only
-/// `dfn[id]`; the reference scope.
+fn dfn_id<'a>(element: &ElementRef<'a>) -> Option<&'a str> {
+    let value = element.value();
+    (value.name() == "dfn").then(|| value.id()).flatten()
+}
+
+fn local(spec: &str, anchor: &str) -> AnchorTarget {
+    AnchorTarget {
+        spec: spec.to_string(),
+        anchor: anchor.to_string(),
+    }
+}
+
+/// The block's subject and role, first match wins: [`steps_subject`]; the
+/// block's only `dfn[id]`; the reference scope.
 fn subject(
     block: &ElementRef<'_>,
     text: &str,
@@ -277,55 +301,58 @@ fn subject(
     base_url: &str,
     scope: Option<&str>,
 ) -> Option<(AnchorTarget, ProseRole)> {
+    if let Some(found) = steps_subject(block, text, spec, base_url) {
+        return Some(found);
+    }
+    let elements = own_elements(block);
+    let mut dfns = elements.iter().filter_map(dfn_id);
+    if let (Some(id), None) = (dfns.next(), dfns.next()) {
+        return Some((local(spec, id), ProseRole::Normative));
+    }
+    scope.map(|anchor| (local(spec, anchor), ProseRole::Normative))
+}
+
+/// Subject rule 1: a `The X [role] steps are to` block whose first
+/// `dfn[id]`/`a[href]` is X.
+fn steps_subject(
+    block: &ElementRef<'_>,
+    text: &str,
+    spec: &str,
+    base_url: &str,
+) -> Option<(AnchorTarget, ProseRole)> {
     static STEPS: OnceLock<Regex> = OnceLock::new();
     let steps = STEPS.get_or_init(|| {
         Regex::new(r"^The (?P<x>.+?) (?:(?P<role>getter|setter|method|constructor) )?steps are to ")
             .expect("valid regex")
     });
-    let local = |anchor: &str| AnchorTarget {
-        spec: spec.to_string(),
-        anchor: anchor.to_string(),
-    };
-    fn dfn_id<'a>(element: &ElementRef<'a>) -> Option<&'a str> {
-        let value = element.value();
-        (value.name() == "dfn").then(|| value.id()).flatten()
-    }
-    let elements = own_elements(block);
-
-    if let Some(captures) = steps.captures(text) {
-        let first = elements.iter().find_map(|element| {
-            if let Some(id) = dfn_id(element) {
-                return Some((element, Some(local(id))));
-            }
-            let href = (element.value().name() == "a")
-                .then(|| element.value().attr("href"))
-                .flatten()?;
-            Some((element, resolve_href(href, spec, base_url)))
-        });
-        if let Some((element, Some(target))) = first {
-            if normalized(&element.text().collect::<String>()) == normalized(&captures["x"]) {
-                let role = match captures.name("role").map(|m| m.as_str()) {
-                    Some("getter") => ProseRole::Getter,
-                    Some("setter") => ProseRole::Setter,
-                    Some("method") => ProseRole::Method,
-                    Some("constructor") => ProseRole::Constructor,
-                    _ => ProseRole::Steps,
-                };
-                return Some((target, role));
-            }
+    let captures = steps.captures(text)?;
+    let (element, target) = own_elements(block).into_iter().find_map(|element| {
+        if let Some(id) = dfn_id(&element) {
+            return Some((element, Some(local(spec, id))));
         }
+        let href = (element.value().name() == "a")
+            .then(|| element.value().attr("href"))
+            .flatten()?;
+        Some((element, resolve_href(href, spec, base_url)))
+    })?;
+    let target = target?;
+    if normalized(&element.text().collect::<String>()) != normalized(&captures["x"]) {
+        return None;
     }
-
-    let mut dfns = elements.iter().filter_map(dfn_id);
-    if let (Some(id), None) = (dfns.next(), dfns.next()) {
-        return Some((local(id), ProseRole::Normative));
-    }
-    scope.map(|anchor| (local(anchor), ProseRole::Normative))
+    let role = match captures.name("role").map(|m| m.as_str()) {
+        Some("getter") => ProseRole::Getter,
+        Some("setter") => ProseRole::Setter,
+        Some("method") => ProseRole::Method,
+        Some("constructor") => ProseRole::Constructor,
+        _ => ProseRole::Steps,
+    };
+    Some((target, role))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::state::model::{SiteClass, StateSpec};
+    use crate::state::ir::{ProseRole, SourceContext};
+    use crate::state::model::{OccurrenceClass, SiteClass, StateSpec};
 
     fn state(html: &str) -> StateSpec {
         crate::state::testing::extract_html(html, "DOM")
@@ -334,7 +361,7 @@ mod tests {
     const EVENT: &str = crate::state::testing::PROSE_DOM;
 
     #[test]
-    fn method_and_setter_steps_are_prose_writes_getter_is_a_mention() {
+    fn method_and_setter_steps_are_prose_writes_getter_is_a_read_source() {
         let s = state(EVENT);
         let sites = crate::state::extract::derive_sites(&s);
         let writes: Vec<_> = sites
@@ -349,7 +376,29 @@ mod tests {
                 ("dom-event-cancelbubble", Some("setter"))
             ]
         );
-        assert_eq!(s.prose_mentions.get("DOM#stop-propagation-flag"), Some(&1));
+        let getter = s
+            .sources
+            .iter()
+            .find(|x| {
+                matches!(
+                    x.context,
+                    SourceContext::Prose {
+                        role: ProseRole::Getter,
+                        ..
+                    }
+                )
+            })
+            .expect("getter block is a source");
+        assert_eq!(getter.subject.anchor, "dom-event-cancelbubble");
+        let getter_classes: Vec<_> = s
+            .occurrences
+            .iter()
+            .filter(|o| o.source_id == getter.id)
+            .map(|o| o.class)
+            .collect();
+        assert!(!getter_classes.is_empty());
+        assert!(getter_classes.iter().all(|c| *c == OccurrenceClass::Read));
+        assert_eq!(s.prose_mentions.get("DOM#stop-propagation-flag"), None);
         assert_eq!(s.coverage.prose_callouts_excluded, 2);
         let method = sites
             .iter()
@@ -357,6 +406,14 @@ mod tests {
             .unwrap();
         assert_eq!(method.context, "prose");
         assert_eq!(method.text, "… set this’s stop propagation flag.");
+    }
+
+    #[test]
+    fn steps_blocks_without_idl_role_or_mutation_stay_mentions() {
+        let html = r##"<h3 id="h">H</h3><p>The <dfn id="foo-steps">foo</dfn> steps are to return <a href="#f">f</a>.</p>"##;
+        let s = state(html);
+        assert!(s.sources.iter().all(|x| !x.id.starts_with("prose-")));
+        assert_eq!(s.prose_mentions.get("DOM#f"), Some(&1));
     }
 
     #[test]

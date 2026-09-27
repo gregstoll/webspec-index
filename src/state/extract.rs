@@ -11,8 +11,8 @@ use crate::parse::steps::{
 };
 use crate::state::catalog::load_state_files;
 use crate::state::declare;
-use crate::state::idl_sig::IdlMembers;
-use crate::state::intro::{algorithm_intros, IdIndex};
+use crate::state::idl_sig::{idl_signature, IdlMembers};
+use crate::state::intro::{algorithm_intros, prose_intro, IdIndex};
 use crate::state::ir::{
     self, Expr, Hop, InitForm, MutationOp, OpBasis, OpaqueReason, Path, ProseRole, Root, SetForm,
     SourceContext, Statement, StatementKind, StatementSource,
@@ -106,7 +106,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         structure,
     );
     let members = IdlMembers::new(inputs.idl_definitions, &model);
-    let signatures = extract_signatures(&intros, &names, &members);
+    let mut signatures = extract_signatures(&intros, &names, &members);
 
     let (mut sources, mut branch_inits) = algorithm_sources(structure);
     sources.extend(intros.into_iter().map(|intro| intro.source));
@@ -118,6 +118,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         inputs.sections,
         inputs.body_nodes.as_ref(),
     );
+    add_prose_signatures(&prose.sources, &ids, &members, &mut signatures);
     let prose_sources = prose.sources.len() as u32;
     sources.extend(prose.sources);
     let mut statements = Vec::new();
@@ -184,13 +185,56 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
     }
 }
 
-/// Signature coverage (§6.2): algorithms, forms, templates, `To`-like
-/// parameter type bases and IDL signatures found in the IDL.
+/// The IDL signature of each getter, setter, method or constructor prose
+/// source whose subject has none yet (§8.1.2).
+fn add_prose_signatures(
+    sources: &[StatementSource],
+    ids: &IdIndex,
+    members: &IdlMembers,
+    signatures: &mut Vec<Signature>,
+) {
+    let mut signed: HashSet<String> = signatures
+        .iter()
+        .map(|signature| signature.algorithm.anchor.clone())
+        .collect();
+    for source in sources {
+        let SourceContext::Prose { role, .. } = source.context else {
+            continue;
+        };
+        if !matches!(
+            role,
+            ProseRole::Getter | ProseRole::Setter | ProseRole::Method | ProseRole::Constructor
+        ) || signed.contains(&source.subject.anchor)
+        {
+            continue;
+        }
+        let Some(signature) =
+            prose_intro(ids, source, role).and_then(|intro| idl_signature(&intro, members))
+        else {
+            continue;
+        };
+        signed.insert(source.subject.anchor.clone());
+        signatures.push(signature);
+    }
+}
+
+/// Signature coverage (§6.2) of structural algorithms: forms, templates,
+/// `To`-like parameter type bases and IDL signatures found in the IDL.
+/// Signatures of prose IDL steps are not algorithms and are not counted.
 fn count_signatures(
     structure: &StructuralSpec,
     signatures: &[Signature],
     coverage: &mut CoverageCounters,
 ) {
+    let algorithms: HashSet<&str> = structure
+        .algorithms
+        .iter()
+        .map(|algorithm| algorithm.source.section_anchor.as_str())
+        .collect();
+    let signatures: Vec<&Signature> = signatures
+        .iter()
+        .filter(|signature| algorithms.contains(signature.algorithm.anchor.as_str()))
+        .collect();
     let signed: HashSet<&str> = signatures
         .iter()
         .map(|signature| signature.algorithm.anchor.as_str())
@@ -1541,6 +1585,29 @@ mod tests {
         assert_eq!(c.template_signatures, 3);
         assert_eq!(c.to_params.values().sum::<u32>(), 6 + 3 + 2);
         assert_eq!((c.idl_signatures, c.idl_from_idl), (1, 0));
+    }
+
+    #[test]
+    fn idl_role_prose_blocks_are_sources_with_signatures() {
+        use crate::state::ir::SourceContext;
+        use crate::state::testing::{signature, ty, EVENT_DOM};
+        let state = extract(EVENT_DOM, "DOM");
+        let getter = state
+            .sources
+            .iter()
+            .find(|s| s.subject.anchor == "dom-event-type")
+            .expect("getter block is a source");
+        assert!(matches!(getter.context, SourceContext::Prose { .. }));
+        assert_eq!(
+            ty(&signature(&state, "dom-event-type")
+                .returns
+                .as_ref()
+                .unwrap()
+                .ty),
+            "idl-type:DOMString"
+        );
+        // Coverage counts algorithm signatures only: `initEvent`, not the getter.
+        assert_eq!(state.coverage.idl_signatures, 1);
     }
 
     #[test]

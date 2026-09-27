@@ -22,7 +22,7 @@
     {"field": "DOM#stop-propagation-flag",
      "writes": ["DOM#concept-event-initialize:2", "DOM#concept-event-dispatch:10", "DOM#dom-event-stoppropagation (method)",
                 "DOM#dom-event-stopimmediatepropagation (method)", "DOM#dom-event-cancelbubble (setter)"],
-     "inits": [], "negatives": {"DOM#dom-event-cancelbubble (getter)": "absent"}},
+     "inits": [], "negatives": {"DOM#dom-event-cancelbubble (getter)": "read"}},
     {"field": "HTML#active-sandboxing-flag-set", "writes": [],
      "inits": ["HTML#creating-a-new-browsing-context:15", "HTML#initialise-the-document-object:9"], "negatives": {}},
     {"field": "HTML#open-dialogs-list", "writes": ["HTML#dialog-setup-steps:4", "HTML#dialog-cleanup-steps:1"], "inits": [], "negatives": {}}

@@ -147,7 +147,6 @@ fn algorithm_intro(
 }
 
 /// An intro built from an IDL-role prose source: its text is the intro.
-#[allow(dead_code)]
 pub(crate) fn prose_intro(
     index: &IdIndex,
     source: &StatementSource,
