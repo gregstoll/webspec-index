@@ -82,8 +82,12 @@ fn strip_article(s: &str) -> &str {
 /// Used both by `declared_type` and by stage C YAML processing (which supplies
 /// its own resolved link list).
 pub(crate) fn parse_type_phrase(phrase: &str, links: &[(String, TypeRef)]) -> TypeExpr {
-    // Normalise "-or-null" shorthand before splitting.
-    let normalised = phrase.replace("-or-null", " or null");
+    // Normalise "-or-null" shorthand and drop the "zero or more" / "one or more"
+    // quantifiers of a collection argument before splitting on "or".
+    let normalised = phrase
+        .replace("-or-null", " or null")
+        .replace("zero or more ", "")
+        .replace("one or more ", "");
     let parts = split_on_or(normalised.trim());
     let exprs: Vec<TypeExpr> = parts
         .into_iter()

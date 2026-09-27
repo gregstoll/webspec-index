@@ -1772,6 +1772,20 @@ mod tests {
     }
 
     #[test]
+    fn zero_or_more_is_a_collection_argument_not_an_alternative() {
+        use crate::state::testing::ty;
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="eventtarget">EventTarget</dfn> {};</pre>
+<p>Each <code><a href="#eventtarget">EventTarget</a></code> object has an associated <dfn id="event-listener-list">event listener list</dfn> (a <a href="https://infra.spec.whatwg.org/#list">list</a> of zero or more <a href="#concept-event-listener">event listeners</a>). It is initially the empty list.</p>"##,
+            "DOM",
+        );
+        assert_eq!(
+            ty(&field(&out, "event-listener-list").declared_type),
+            "list<DOM#concept-event-listener>"
+        );
+    }
+
+    #[test]
     fn plain_owner_name_prefers_the_unscoped_concept() {
         let out = run_declare(
             r##"<pre class="idl">interface <dfn id="window">Window</dfn> {};</pre>
