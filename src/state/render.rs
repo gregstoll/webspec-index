@@ -1,14 +1,16 @@
 //! Markdown renderings of state query results (§10.2–§10.5).
+use crate::state::bind::{issue_code, BindingIssue, Confidence};
 use crate::state::ir::{Expr, Hop, Root};
 use crate::state::model::{
-    AnchorRole, InfraKind, InitialValue, Literal, OwnerBasis, Primitive, StateIssueCode, TypeExpr,
-    TypeKey, TypeRef,
+    AnchorRole, InfraKind, InitialValue, Literal, OwnerBasis, Param, Passing, Primitive,
+    ReturnBasis, Signature, StateIssueCode, TemplatePiece, TypeExpr, TypeKey, TypeRef,
 };
 use crate::state::query::{
     Coverage, FieldListEntry, FieldRow, FoundOn, InheritedFields, MemberRow, OwnerInfo, SiteInfo,
     StateCoverageResult, StateFieldListResult, StateFieldResult, StateMemberResult, StateResponse,
     StateStatus, StateTypeResult,
 };
+use crate::state::query_algorithm::{CallView, StateAlgorithmResult};
 use std::fmt::Write;
 
 pub fn response(response: &StateResponse) -> String {
@@ -17,13 +19,212 @@ pub fn response(response: &StateResponse) -> String {
         StateResponse::Type(result) => type_view(result),
         StateResponse::Member(result) => member(result),
         StateResponse::Fields(result) => field_list(result),
-        StateResponse::Algorithm(result) => format!(
-            "## {} — {}\n\n{}\n",
-            result.algorithm,
-            result.name,
-            result.template.as_deref().unwrap_or(&result.url)
-        ),
+        StateResponse::Algorithm(result) => algorithm(result),
     }
+}
+
+pub fn algorithm(result: &StateAlgorithmResult) -> String {
+    let mut out = format!("## {} — {} (algorithm)\n\n", result.algorithm, result.name);
+    let signature = result.signature.as_ref();
+    match (&result.template, signature) {
+        (Some(template), _) => {
+            let _ = writeln!(out, "Call template: {template}");
+        }
+        (None, Some(sig)) => {
+            let _ = writeln!(out, "Call template: none ({} signature)", sig.form.as_str());
+        }
+        (None, None) => out.push_str("Call template: none (no signature)\n"),
+    }
+    if let Some(this) = signature.and_then(|sig| sig.this.as_ref()) {
+        let _ = writeln!(out, "This: {}", type_expr(this, false));
+    }
+    out.push('\n');
+
+    if let Some(sig) = signature.filter(|sig| !sig.params.is_empty()) {
+        out.push_str("| # | Parameter | Type | Passing | Default |\n|---|---|---|---|---|\n");
+        for (i, param) in sig.params.iter().enumerate() {
+            let ty = if param.type_text.is_empty() {
+                "—".to_string()
+            } else {
+                param.type_text.replace("-or-", " or ")
+            };
+            let default = match (&param.default, param.optional) {
+                (Some(expr), _) => expr_text(expr),
+                (None, true) => "optional".into(),
+                (None, false) => "required".into(),
+            };
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                i + 1,
+                cell(&param.name),
+                cell(&ty),
+                cell(&passing(sig, param)),
+                cell(&default)
+            );
+        }
+        out.push('\n');
+    }
+    if let Some(sig) = signature {
+        match &sig.returns {
+            Some(returns) => {
+                let basis = match returns.basis {
+                    ReturnBasis::Intro => "stated in the intro",
+                    ReturnBasis::Idl => "IDL",
+                    ReturnBasis::Ecmarkup => "ecmarkup",
+                    ReturnBasis::ReturnStatements => "from return statements",
+                };
+                let _ = writeln!(
+                    out,
+                    "Returns: {} ({basis}).\n",
+                    type_expr(&returns.ty, false)
+                );
+            }
+            None => out.push_str("Returns: not stated.\n\n"),
+        }
+    }
+
+    let total: u32 = result.statements.values().sum();
+    let mut kinds: Vec<(&String, &u32)> = result.statements.iter().collect();
+    kinds.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
+    if kinds.is_empty() {
+        let _ = writeln!(out, "Statements: {total}");
+    } else {
+        let _ = writeln!(out, "Statements: {total} — {}", kinds.join(", "));
+    }
+    let _ = writeln!(
+        out,
+        "Opaque statements: {} · unbound calls: {}\nCoverage: may · {}",
+        result.opaque_count,
+        result.unbound_calls,
+        coverage_label(&result.status)
+    );
+
+    if let Some(opaque) = &result.opaque {
+        let _ = writeln!(out, "\n### Opaque statements ({})", opaque.len());
+        for item in opaque {
+            let _ = writeln!(
+                out,
+                "- {}— {}",
+                step_prefix(item.step_path.as_deref()),
+                item.text
+            );
+        }
+    }
+    if let Some(calls) = &result.calls {
+        let _ = writeln!(out, "\n### Calls ({})", calls.len());
+        for call in calls {
+            let _ = writeln!(
+                out,
+                "- {}{} ({}) — {}",
+                step_prefix(call.step_path.as_deref()),
+                call.callee_name,
+                call.callee,
+                confidence_label(call.confidence)
+            );
+            let args = call_args(call);
+            if !args.is_empty() {
+                let _ = writeln!(out, "  {args}");
+            }
+            if !call.issues.is_empty() {
+                let _ = writeln!(out, "  issues: {}", issues(&call.issues));
+            }
+        }
+    }
+    if let Some(callers) = &result.callers {
+        let _ = writeln!(out, "\n### Callers ({})", callers.total);
+        for group in &callers.groups {
+            let _ = writeln!(out, "- {}", group.caller);
+            for call in &group.calls {
+                let mut line = format!(
+                    "  - {}— {}",
+                    step_prefix(call.step_path.as_deref()),
+                    confidence_label(call.confidence)
+                );
+                let args = call_args(call);
+                if !args.is_empty() {
+                    let _ = write!(line, " · {args}");
+                }
+                if !call.issues.is_empty() {
+                    let _ = write!(line, " · issues: {}", issues(&call.issues));
+                }
+                let _ = writeln!(out, "{line}");
+            }
+        }
+        if callers.more > 0 {
+            let _ = writeln!(out, "({} more callers; raise --limit)", callers.more);
+        }
+    }
+    out
+}
+
+/// How an argument reaches `param`: its template position, name or receiver.
+fn passing(sig: &Signature, param: &Param) -> String {
+    match &param.passing {
+        Passing::Positional { index } => {
+            let pieces = sig.template.as_ref().map_or(&[][..], |t| &t.pieces[..]);
+            let before = pieces
+                .iter()
+                .position(|p| *p == TemplatePiece::Slot(*index))
+                .and_then(|at| at.checked_sub(1))
+                .map(|at| &pieces[at]);
+            match before {
+                Some(TemplatePiece::Literal(words)) => format!("positional, after \"{words}\""),
+                _ => "positional".into(),
+            }
+        }
+        Passing::Named => match &param.anchor {
+            Some(anchor) => format!("named ({}#{})", anchor.spec, anchor.anchor),
+            None => "named".into(),
+        },
+        Passing::Receiver => "receiver".into(),
+    }
+}
+
+fn step_prefix(step_path: Option<&str>) -> String {
+    step_path.map_or_else(String::new, |step| format!(":{step} "))
+}
+
+fn confidence_label(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::Exact => "exact",
+        Confidence::Partial => "partial",
+        Confidence::Unbound => "unbound",
+    }
+}
+
+/// `param ← value · …`, then how many arguments were left to their defaults.
+fn call_args(call: &CallView) -> String {
+    let mut parts: Vec<String> = call
+        .args
+        .iter()
+        .map(|arg| format!("{} ← {}", arg.param, arg.value))
+        .collect();
+    if call.defaulted > 0 {
+        let named = if call.defaulted_named { "named " } else { "" };
+        let noun = if call.defaulted == 1 {
+            "argument"
+        } else {
+            "arguments"
+        };
+        parts.push(format!("{} {named}{noun} defaulted", call.defaulted));
+    }
+    parts.join(" · ")
+}
+
+fn issues(issues: &[BindingIssue]) -> String {
+    issues
+        .iter()
+        .map(|issue| match issue {
+            BindingIssue::MissingRequiredArgument(detail)
+            | BindingIssue::UnknownNamedArgument(detail)
+            | BindingIssue::OpaqueArgument(detail)
+            | BindingIssue::TrailingText(detail) => format!("{}({detail})", issue_code(issue)),
+            _ => issue_code(issue).to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn field(result: &StateFieldResult) -> String {
@@ -979,6 +1180,83 @@ Coverage: may · complete — 0 unclassified, 0 possible unlinked writes. Reads 
             "{md}"
         );
         assert!(!md.contains("### Declared writes"), "{md}");
+    }
+
+    #[test]
+    fn algorithm_view_has_template_params_and_counts() {
+        use crate::state::testing::{db_with, NAV_HTML};
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        let md = response(&query(&conn, "HTML#navigate", &StateQueryOptions::default()).unwrap());
+        assert_eq!(md, "## HTML#navigate — navigate (algorithm)\n\n\
+Call template: navigate {navigable} to {url} using {sourceDocument}, with named arguments\n\n\
+| # | Parameter | Type | Passing | Default |\n|---|---|---|---|---|\n\
+| 1 | navigable | navigable | positional | required |\n\
+| 2 | url | URL | positional, after \"to\" | required |\n\
+| 3 | sourceDocument | `Document` or null | positional, after \"using\" | null |\n\
+| 4 | exceptionsEnabled | boolean | named (HTML#exceptions-enabled) | false |\n\
+| 5 | historyHandling | `NavigationHistoryBehavior` | named (HTML#navigation-hh) | \"`auto`\" |\n\
+| 6 | referrerPolicy | referrer policy | named (HTML#navigation-referrer-policy) | the empty string |\n\n\
+Returns: not stated.\n\n\
+Statements: 5 — if 1, in_parallel 1, let 1, return 1, set 1\n\
+Opaque statements: 0 · unbound calls: 0\n\
+Coverage: may · complete\n");
+    }
+
+    #[test]
+    fn algorithm_view_calls_callers_and_opaque_sections() {
+        use crate::state::testing::{db_with, NAV_HTML};
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        let options = StateQueryOptions {
+            calls: true,
+            ..StateQueryOptions::default()
+        };
+        let md = response(&query(&conn, "HTML#location-object-navigate", &options).unwrap());
+        assert!(md.contains("### Calls (1)\n- :4 navigate (HTML#navigate) — exact\n  navigable ← *navigable* · url ← *url* · sourceDocument ← *sourceDocument* · exceptionsEnabled ← true · historyHandling ← *historyHandling* · 1 named argument defaulted\n"), "{md}");
+        let options = StateQueryOptions {
+            callers: true,
+            ..StateQueryOptions::default()
+        };
+        let md = response(&query(&conn, "HTML#navigate", &options).unwrap());
+        assert!(
+            md.contains("### Callers (1)\n- HTML#location-object-navigate\n  - :4 — exact · navigable ← *navigable* ·"),
+            "{md}"
+        );
+        assert!(!md.contains("more callers"), "{md}");
+        let options = StateQueryOptions {
+            callers: true,
+            limit: Some(0),
+            ..StateQueryOptions::default()
+        };
+        let md = response(&query(&conn, "HTML#navigate", &options).unwrap());
+        assert!(
+            md.contains("### Callers (1)\n(1 more callers; raise --limit)\n"),
+            "{md}"
+        );
+
+        let other = r##"<div data-algorithm=""><p>To <dfn id="x">x</dfn> given a <var>n</var>:</p><ol><li><p><a href="https://dom.spec.whatwg.org/#concept-node-remove">Remove</a> <var>n</var>.</p></li><li><p>Add <var>n</var> to the list of reloaded things.</p></li></ol></div>"##;
+        let conn = db_with(&[("HTML", other)]);
+        let options = StateQueryOptions {
+            calls: true,
+            opaque: true,
+            ..StateQueryOptions::default()
+        };
+        let md = response(&query(&conn, "HTML#x", &options).unwrap());
+        assert!(
+            md.contains("Opaque statements: 1 · unbound calls: 1\nCoverage: may · partial\n"),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "### Opaque statements (1)\n- :2 — Add *n* to the list of reloaded things\n"
+            ),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "- :1 Remove (DOM#concept-node-remove) — unbound\n  issues: no_signature\n"
+            ),
+            "{md}"
+        );
     }
 
     #[test]
