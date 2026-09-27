@@ -23,6 +23,7 @@ pub(crate) mod prose;
 pub mod query;
 pub(crate) mod reflect;
 pub mod render;
+pub mod roles;
 pub(crate) mod rules;
 #[cfg(feature = "native")]
 pub mod service;
@@ -32,6 +33,7 @@ pub mod testing;
 pub(crate) mod tree;
 pub(crate) mod typeexpr;
 pub(crate) mod types;
+pub mod vars;
 
 pub use extract::{derive_occurrence_counts, derive_sites, extract_state, StateInputs};
 pub use model::*;

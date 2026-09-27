@@ -59,7 +59,7 @@ impl Env {
 }
 
 /// Role strength: a stronger role replaces a weaker one, never the reverse.
-fn role_rank(role: &LinkRole) -> u8 {
+pub(crate) fn role_rank(role: &LinkRole) -> u8 {
     match role {
         LinkRole::Callee { .. } => 9,
         LinkRole::ParamName { .. } => 8,
