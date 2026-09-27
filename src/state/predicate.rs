@@ -120,7 +120,7 @@ impl Parser<'_> {
         let mut parts = Vec::new();
         let mut part_start = start;
         for pos in self.top_level(start, end) {
-            if pos < part_start {
+            if pos < part_start || self.inside_comparison(pos) {
                 continue;
             }
             if let Some(separator) = separators
@@ -133,6 +133,11 @@ impl Parser<'_> {
         }
         parts.push((part_start, end));
         parts
+    }
+
+    /// Whether `pos` is the ` or ` of `greater/less than or equal to`.
+    fn inside_comparison(&self, pos: usize) -> bool {
+        self.enc.text[..pos].ends_with(" than") && self.lit(pos, " or equal to ")
     }
 
     /// `OPERAND`: an expression that is a variable, `this`, a literal, a
@@ -308,7 +313,7 @@ impl Parser<'_> {
             });
         }
         for (phrase, op) in COMPARISONS {
-            if let Some(rhs_at) = self.keyword(at, &[phrase]) {
+            if let Some(rhs_at) = self.keyword(at, &[phrase]).filter(|&rhs_at| rhs_at <= end) {
                 let rhs = self.operand(rhs_at, end)?;
                 return Some(Predicate::Compare {
                     lhs: operand,
@@ -712,6 +717,20 @@ mod tests {
             pred("<var>a</var> is null and <var>usability</var> is good"),
             Predicate::Opaque { .. }
         ));
+        let Predicate::Or(parts) =
+            pred("<var>a</var> is null or <var>b</var> is greater than or equal to <var>c</var>")
+        else {
+            panic!()
+        };
+        assert_eq!(
+            parts[1],
+            Predicate::Compare {
+                lhs: var("b"),
+                op: CmpOp::Ge,
+                rhs: var("c"),
+                negated: false
+            }
+        );
     }
 
     #[test]
