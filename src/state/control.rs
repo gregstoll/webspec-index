@@ -193,7 +193,7 @@ impl Parser<'_> {
 
     /// `VERBHEAD` at `pos`: a verb of `VERBHEADS`, a callable link, an Infra
     /// operation link, or a link to `continue`/`break`.
-    fn is_verb_head(&self, pos: usize) -> bool {
+    pub(crate) fn is_verb_head(&self, pos: usize) -> bool {
         if let Some((Placeholder::Link(link), _)) = self.enc.placeholder(pos) {
             return self.link_callability(link) != Callability::No
                 || self.infra_op(pos).is_some()
@@ -225,12 +225,25 @@ impl Parser<'_> {
     }
 
     /// `Otherwise`/`Else` (`,`|`:`)? (` if ` PRED (`, then `|`:`))?: a
-    /// sibling of the source's last `If`, whose parent it shares.
-    fn try_otherwise(&mut self, at: usize, pos: usize) -> bool {
+    /// sibling of the source's last `If`, whose parent it shares. Without
+    /// that `If`, a lowercase one inside the source belongs to a value
+    /// ("true if P; otherwise false").
+    pub(crate) fn try_otherwise(&mut self, at: usize, pos: usize) -> bool {
         let Some(word_end) = self.head_word(pos, &["Otherwise", "otherwise", "Else", "else"])
         else {
             return false;
         };
+        let previous_if = self
+            .out
+            .statements
+            .iter()
+            .rev()
+            .find(|s| matches!(s.kind, StatementKind::If { .. }))
+            .map(|s| (s.id.clone(), s.parent.clone()));
+        let lowercase = self.enc.text[pos..].starts_with(char::is_lowercase);
+        if previous_if.is_none() && at != 0 && lowercase {
+            return false;
+        }
         let after = self.keyword(word_end, &[",", ":"]).unwrap_or(word_end);
         let (condition, end, rest, colon) = match self.keyword(after, &[" if "]) {
             Some(start) => {
@@ -250,13 +263,6 @@ impl Parser<'_> {
         } else {
             BodyLoc::InlineRest
         };
-        let previous_if = self
-            .out
-            .statements
-            .iter()
-            .rev()
-            .find(|s| matches!(s.kind, StatementKind::If { .. }))
-            .map(|s| (s.id.clone(), s.parent.clone()));
         let of = previous_if.map(|(id, parent)| {
             self.inline_parent = parent;
             id
@@ -414,7 +420,7 @@ impl Parser<'_> {
         let (value, end) = if self.is_end(after) {
             (None, after)
         } else if let Some(start) = self.keyword(after, &[" "]) {
-            let end = self.value_end(start, None);
+            let end = self.statement_value_end(start, None);
             (Some(self.expr_at(start, end)), end)
         } else {
             return false;
@@ -611,7 +617,7 @@ mod tests {
     use crate::state::grammar::Env;
     use crate::state::ir::{
         parse_source_with, tests_support::sources, BlockRole, BodyLoc, Expr, LoopForm,
-        ParsedSource, Predicate, StatementKind, Test,
+        ParsedSource, Predicate, Statement, StatementKind, Test,
     };
     use crate::state::testing::var;
 
@@ -818,6 +824,47 @@ mod tests {
             parse("Optionally, return.").statements[0].kind,
             StatementKind::Return { value: None }
         ));
+    }
+
+    #[test]
+    fn a_sentence_ends_the_inline_block_and_may_start_otherwise() {
+        let p = parse(
+            "If <var>p</var> is null, then set <var>x</var> to 1. Otherwise, set <var>y</var> to 2.",
+        );
+        let [StatementKind::If { .. }, StatementKind::Set { .. }, StatementKind::Otherwise { of: Some(of), .. }, StatementKind::Set { .. }] =
+            kinds(&p)[..]
+        else {
+            panic!("{:?}", kinds(&p))
+        };
+        let if_id = &p.statements[0].id;
+        assert_eq!(of, if_id);
+        let parents: Vec<_> = p
+            .statements
+            .iter()
+            .map(|s| s.parent.as_ref().map(|q| (q.statement_id.as_str(), q.role)))
+            .collect();
+        assert_eq!(
+            parents,
+            [
+                None,
+                Some((if_id.as_str(), BlockRole::Then)),
+                None,
+                Some((p.statements[2].id.as_str(), BlockRole::Otherwise)),
+            ]
+        );
+        let p = parse("If <var>p</var> is null, then set <var>x</var> to 1. The user agent may wait, and then set <var>y</var> to 2.");
+        let last = p.statements.last().unwrap();
+        assert!(
+            matches!(
+                last,
+                Statement {
+                    kind: StatementKind::Set { .. },
+                    parent: None,
+                    ..
+                }
+            ),
+            "{last:?}"
+        );
     }
 
     #[test]

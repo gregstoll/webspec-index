@@ -645,7 +645,12 @@ pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSo
     let enc = Encoded::new(source);
     let mut p = Parser::new(&enc, source, env);
     p.inits = p.parse_initializers();
-    for (at, verb) in enc.clause_starts(is_prose(source)) {
+    let clause_starts = enc.clause_starts(is_prose(source));
+    let mut sentences = p.sentence_starts().into_iter().peekable();
+    for (at, verb) in clause_starts {
+        while let Some(sentence) = sentences.next_if(|&sentence| sentence <= at) {
+            p.sentence_boundary(sentence, sentence == at);
+        }
         // An Infra-linked operation is spelled by its link text ("Append").
         let verb = verb.or_else(|| {
             p.infra_op(at)
@@ -669,6 +674,10 @@ pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSo
             p.push_opaque(at, OpaqueReason::UnsupportedForm, verb);
         }
     }
+    for sentence in sentences {
+        p.sentence_boundary(sentence, false);
+    }
+    p.inherit_inline_blocks();
     p.scan_result_of_calls();
     p.finish_calls();
     p.out
@@ -1154,7 +1163,7 @@ impl Parser<'_> {
         value_start: usize,
         form: SetForm,
     ) -> usize {
-        let value_end = self.value_end(value_start, targets.last());
+        let value_end = self.statement_value_end(value_start, targets.last());
         let value = self.expr_at(value_start, value_end);
         let id = if targets[0].path.subscript.is_some() {
             let kind = StatementKind::Mutate {
@@ -1262,7 +1271,7 @@ impl Parser<'_> {
         let Some(value_start) = self.keyword(pos, &[" be "]) else {
             return false;
         };
-        let value_end = self.value_end(value_start, None);
+        let value_end = self.statement_value_end(value_start, None);
         let value = self.expr_at(value_start, value_end);
         let mut first_id = None;
         for var in vars {
@@ -1289,7 +1298,7 @@ impl Parser<'_> {
         let Some(value_start) = self.keyword(target.end, &[" must be set to "]) else {
             return false;
         };
-        let value_end = self.value_end(value_start, None);
+        let value_end = self.statement_value_end(value_start, None);
         let kind = StatementKind::Set {
             targets: vec![target.path.clone()],
             value: self.expr_at(value_start, value_end),
@@ -1443,6 +1452,46 @@ impl Parser<'_> {
         };
         self.opaque_clauses.push(at);
         self.push(at, end, "opaque", kind)
+    }
+
+    /// A sentence start ends the inline block it is in. One that is no
+    /// clause start may still open an `Otherwise` block ("…, then X.
+    /// Otherwise, Y."). Other heads at sentence starts are no clauses: the
+    /// `If`s there measured 3 of 98 conditions parsed on HTML.
+    fn sentence_boundary(&mut self, sentence: usize, is_clause: bool) {
+        self.inline_parent = None;
+        if !is_clause && sentence >= self.covered_until && self.try_otherwise(sentence, sentence) {
+            self.out.clauses.push(Clause {
+                start: self.enc.to_src(sentence),
+                verb: None,
+                consumed: true,
+            });
+        }
+    }
+
+    /// Each `Init` takes the inline block of the innermost other statement
+    /// containing it, the one whose clause holds the `a new`.
+    fn inherit_inline_blocks(&mut self) {
+        let statements = &self.out.statements;
+        let parents: Vec<(usize, StatementParent)> = statements
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| matches!(s.kind, StatementKind::Init { .. }) && s.parent.is_none())
+            .filter_map(|(index, init)| {
+                let owner = statements
+                    .iter()
+                    .filter(|s| {
+                        !matches!(s.kind, StatementKind::Init { .. })
+                            && s.span.start <= init.span.start
+                            && init.span.end <= s.span.end
+                    })
+                    .min_by_key(|s| s.span.end - s.span.start)?;
+                Some((index, owner.parent.clone()?))
+            })
+            .collect();
+        for (index, parent) in parents {
+            self.out.statements[index].parent = Some(parent);
+        }
     }
 
     /// Pushes a statement into the current inline block.
@@ -2676,5 +2725,95 @@ mod tests {
             ));
             let _ = Literal::Null;
         }
+    }
+
+    fn assert_one_conditional(p: &ParsedSource) -> &Expr {
+        assert!(
+            p.statements
+                .iter()
+                .all(|s| !matches!(s.kind, StatementKind::Otherwise { .. })),
+            "{:?}",
+            p.statements
+        );
+        assert_eq!(p.statements.len(), 1, "{:?}", p.statements);
+        let value = match &p.statements[0].kind {
+            StatementKind::Let { value, .. } => value,
+            StatementKind::Return { value: Some(value) } => value,
+            other => panic!("{other:?}"),
+        };
+        assert!(matches!(value, Expr::Conditional { .. }), "{value:?}");
+        value
+    }
+
+    #[test]
+    fn conditional_let_is_one_statement() {
+        let (s, p) = one("Let <var>a</var> be 1 if <var>p</var> is null; otherwise 2.");
+        let Expr::Conditional {
+            condition,
+            then,
+            otherwise,
+        } = assert_one_conditional(&p)
+        else {
+            unreachable!()
+        };
+        assert!(matches!(**condition, Predicate::Is { .. }));
+        assert_eq!(**then, Expr::Literal(Literal::Number("1".into())));
+        assert_eq!(**otherwise, Expr::Literal(Literal::Number("2".into())));
+        assert!(s.text[..p.statements[0].span.end].ends_with('2'));
+    }
+
+    #[test]
+    fn conditional_return_is_one_statement() {
+        let (_, p) = one("Return true if <var>p</var> is null; otherwise, false.");
+        assert_one_conditional(&p);
+    }
+
+    #[test]
+    fn otherwise_without_an_if_in_the_source_is_no_statement() {
+        let (_, p) = one("Set <var>x</var> to <var>a</var> if <var>p</var> is null; otherwise, set <var>x</var> to <var>b</var>.");
+        let [StatementKind::Set { .. }, StatementKind::Set { value, .. }] =
+            &p.statements.iter().map(|s| &s.kind).collect::<Vec<_>>()[..]
+        else {
+            panic!("{:?}", p.statements)
+        };
+        assert_eq!(value, &Expr::Var("b".into()));
+        let (_, p) = one("Let <var>a</var> be 1 if <var>p</var> is null; otherwise return null.");
+        assert!(matches!(
+            &p.statements.iter().map(|s| &s.kind).collect::<Vec<_>>()[..],
+            [
+                StatementKind::Let { .. },
+                StatementKind::Return {
+                    value: Some(Expr::Literal(Literal::Null))
+                }
+            ]
+        ));
+        let (_, p) = one("If <var>b</var> is true, then set <var>x</var> to <var>a</var> if <var>p</var> is null; otherwise, set <var>x</var> to <var>b</var>.");
+        assert!(p
+            .statements
+            .iter()
+            .any(|s| matches!(s.kind, StatementKind::Otherwise { of: Some(_), .. })));
+    }
+
+    #[test]
+    fn init_takes_the_inline_block_of_its_statement() {
+        let (_, p) = one(
+            r##"If <var>x</var> is null, then let <var>e</var> be a new <a href="https://dom.spec.whatwg.org/#concept-event">event</a> whose <a href="https://dom.spec.whatwg.org/#dom-event-type">type</a> is "load"."##,
+        );
+        let if_id = &p
+            .statements
+            .iter()
+            .find(|s| matches!(s.kind, StatementKind::If { .. }))
+            .unwrap()
+            .id;
+        let parent_of = |pick: fn(&StatementKind) -> bool| {
+            p.statements
+                .iter()
+                .find(|s| pick(&s.kind))
+                .and_then(|s| s.parent.clone())
+                .map(|q| (q.statement_id, q.role))
+        };
+        let then = Some((if_id.clone(), BlockRole::Then));
+        assert_eq!(parent_of(|k| matches!(k, StatementKind::Let { .. })), then);
+        assert_eq!(parent_of(|k| matches!(k, StatementKind::Init { .. })), then);
     }
 }

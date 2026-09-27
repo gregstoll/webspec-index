@@ -874,6 +874,46 @@ impl Parser<'_> {
         text.len()
     }
 
+    /// End of the `VALUE` of a `Let`, `Set`, `Return` or passive set, which
+    /// may be a `COND`: past a top-level `; otherwise(,)? B` when the value
+    /// before it has a top-level ` if ` and `B` starts with no verb (a
+    /// clause of its own: "…; otherwise return null").
+    pub(crate) fn statement_value_end(&self, start: usize, chain: Option<&PathParse>) -> usize {
+        let end = self.value_end(start, chain);
+        let Some(after) = self.keyword(end, &["; otherwise"]) else {
+            return end;
+        };
+        let otherwise_start = self.keyword(after, &[", ", " "]).unwrap_or(after);
+        if self.word_continues(after)
+            || self.verb_follows(otherwise_start)
+            || (self.enc.placeholder(otherwise_start).is_none()
+                && self.is_verb_head(otherwise_start))
+            || !self
+                .top_level(start, end)
+                .into_iter()
+                .any(|pos| pos > start && self.lit(pos, " if "))
+        {
+            return end;
+        }
+        self.value_end(otherwise_start, chain)
+    }
+
+    /// Starts of the sentences after the first: after a top-level `. `, at a
+    /// capital letter or a link whose text starts with one.
+    pub(crate) fn sentence_starts(&self) -> Vec<usize> {
+        self.top_level(0, self.enc.text.len())
+            .into_iter()
+            .filter_map(|pos| self.keyword(pos, &[". "]))
+            .filter(|&start| match self.enc.placeholder(start) {
+                Some((Placeholder::Link(link), _)) => self.source.links[link]
+                    .visible_text
+                    .starts_with(char::is_uppercase),
+                Some(_) => false,
+                None => self.enc.text[start..].starts_with(char::is_uppercase),
+            })
+            .collect()
+    }
+
     /// A lexicon verb or an Infra operation link, then a space, at `pos`.
     pub(crate) fn verb_follows(&self, pos: usize) -> bool {
         if let Some((_, after_link, ..)) = self.infra_op(pos) {

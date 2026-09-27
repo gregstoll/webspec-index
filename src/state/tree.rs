@@ -68,12 +68,21 @@ pub(crate) fn link_tree(
         if in_source().any(|s| s.id == id) {
             continue;
         }
-        let parent = match in_source()
+        // A site outside every statement follows the last statement before
+        // it: inside the inline block that statement opens, else beside it.
+        let innermost = in_source()
             .filter(|s| s.span.start <= site.span.start && site.span.end <= s.span.end)
-            .min_by_key(|s| s.span.end - s.span.start)
-        {
-            Some(innermost) => innermost.parent.clone(),
-            None => enclosing(location, &id),
+            .min_by_key(|s| s.span.end - s.span.start);
+        let preceding = in_source()
+            .filter(|s| s.span.start < site.span.start)
+            .max_by_key(|s| s.span.start);
+        let parent = match (innermost, preceding) {
+            (Some(innermost), _) => innermost.parent.clone(),
+            (None, Some(last)) => match block(&last.kind) {
+                Some((BodyLoc::InlineRest, role)) => Some(parent(last, role)),
+                _ => last.parent.clone(),
+            },
+            (None, None) => enclosing(location, &id),
         };
         statements.push(Statement {
             id,
@@ -573,6 +582,27 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn continuation_in_an_inline_block_takes_its_head() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="c">c</dfn> given <var>p</var>:</p><ol><li><p>If <var>p</var> is true, then continue these steps.</p></li><li><p>Return.</p></li></ol></div>"##;
+        let (st, _) = linked(html, "c");
+        let if_id = &st
+            .iter()
+            .find(|s| matches!(s.kind, StatementKind::If { .. }))
+            .unwrap()
+            .id;
+        let site = st
+            .iter()
+            .find(|s| matches!(s.kind, StatementKind::ContinueRemaining { .. }))
+            .expect("the site becomes a statement");
+        assert_eq!(
+            site.parent
+                .as_ref()
+                .map(|p| (p.statement_id.as_str(), p.role)),
+            Some((if_id.as_str(), BlockRole::Then))
+        );
     }
 
     #[test]
