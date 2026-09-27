@@ -9,6 +9,7 @@ pub(crate) mod declare;
 pub(crate) mod expr;
 pub mod extract;
 pub(crate) mod grammar;
+pub(crate) mod idl_sig;
 pub(crate) mod intro;
 pub mod ir;
 pub mod lookup;
