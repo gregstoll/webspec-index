@@ -11,7 +11,7 @@ use crate::state::model::{
     OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind, TypeRef,
 };
 use crate::state::typeexpr::{
-    declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text, substitute_code_tokens,
+    declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text, substitute_text_tokens,
 };
 use crate::state::types::{ConceptDfn, TypeTable};
 use regex::Regex;
@@ -851,8 +851,8 @@ pub(crate) fn declare_fields(
                     dd_text.as_deref(),
                     &resolve_fn,
                 );
-                let clause_text = substitute_code_tokens(&pat.text[clause], &pat, &tokens);
-                let next_sent_text = next_sent.map(|s| substitute_code_tokens(&s, &pat, &tokens));
+                let clause_text = substitute_text_tokens(&pat.text[clause], &pat, &tokens);
+                let next_sent_text = next_sent.map(|s| substitute_text_tokens(&s, &pat, &tokens));
                 let init = initial_value(
                     &clause_text,
                     next_sent_text.as_deref(),
@@ -1727,7 +1727,7 @@ mod tests {
     fn initial_value_quoted_code_element() {
         // Regression: `initially "<code>complete</code>"` was parsed as
         // InitialValue::Opaque with text `"` because the regex stopped at the
-        // ⟦C0⟧ placeholder.  substitute_code_tokens pre-expands it so the full
+        // ⟦C0⟧ placeholder.  substitute_text_tokens pre-expands it so the full
         // quoted string is captured.
         let out = run_declare(
             r##"<pre class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</pre>
@@ -1739,6 +1739,34 @@ mod tests {
             matches!(
                 &f.initial,
                 Some(InitialValue::Literal { value: Literal::String(s), .. }) if s == "complete"
+            ),
+            "got {:?}",
+            f.initial
+        );
+    }
+
+    #[test]
+    fn initial_value_reads_through_links() {
+        let out = run_declare(
+            r##"<p>A <dfn id="session-history-entry">session history entry</dfn> is a struct with the following items:</p>
+<ul><li><p><dfn id="she-scroll-restoration-mode">scroll restoration mode</dfn>, a <a href="#scroll-restoration-mode">scroll restoration mode</a>, initially "<code><a href="#dom-scrollrestoration-auto">auto</a></code>".</p></li>
+<li><p><dfn id="she-navigation-api-key">navigation API key</dfn>, which is a string, initially set to the result of <a href="#generating-a-random-uuid">generating a random UUID</a>.</p></li></ul>"##,
+            "HTML",
+        );
+        let f = field(&out, "she-scroll-restoration-mode");
+        assert!(
+            matches!(
+                &f.initial,
+                Some(InitialValue::Literal { value: Literal::String(s), .. }) if s == "auto"
+            ),
+            "got {:?}",
+            f.initial
+        );
+        let f = field(&out, "she-navigation-api-key");
+        assert!(
+            matches!(
+                &f.initial,
+                Some(InitialValue::Opaque { text }) if text == "the result of generating a random UUID"
             ),
             "got {:?}",
             f.initial

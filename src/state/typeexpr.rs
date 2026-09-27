@@ -854,23 +854,23 @@ fn link_to_text_and_ref(
 
 // ── Helpers used by declare.rs ───────────────────────────────────────────────
 
-/// Substitute `⟦Cn⟧` placeholders with their code text from `tokens`.
+/// Substitute `⟦Cn⟧` and `⟦Ln⟧` placeholders with their text from `tokens`.
 ///
-/// Call this before `initial_value` when the clause may contain quoted code
-/// elements (e.g. `initially "<code>complete</code>"`).  The substitution
-/// lets the initial-value regex match the whole quoted string rather than
-/// stopping at the placeholder boundary.
-pub(crate) fn substitute_code_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
+/// Call this before `initial_value`: values quote code elements
+/// (`initially "<code>complete</code>"`) and name linked concepts
+/// (`initially the result of <a>generating a random UUID</a>`).  The
+/// substitution lets the initial-value regex match the whole value rather
+/// than stopping at the placeholder boundary.  `⟦Dn⟧` stays, so a value still
+/// ends before the next dfn.
+pub(crate) fn substitute_text_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
     static RE: OnceLock<Regex> = OnceLock::new();
-    regex(&RE, r"⟦C(\d+)⟧")
+    regex(&RE, r"⟦[CL](\d+)⟧")
         .replace_all(s, |caps: &regex::Captures<'_>| {
             let n: usize = caps[1].parse().unwrap_or(usize::MAX);
-            if let Some(&ti) = pat.slots.get(n) {
-                if let BlockToken::Code(text) = &tokens[ti] {
-                    return text.clone();
-                }
+            match pat.slots.get(n).map(|&ti| &tokens[ti]) {
+                Some(BlockToken::Code(text) | BlockToken::Link { text, .. }) => text.clone(),
+                _ => caps[0].to_string(),
             }
-            caps[0].to_string()
         })
         .into_owned()
 }
