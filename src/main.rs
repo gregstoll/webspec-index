@@ -601,7 +601,10 @@ enum Command {
         calls: bool,
         #[arg(long, help = "Algorithm view: list the algorithms that call this one")]
         callers: bool,
-        #[arg(long, help = "Algorithm view: list the statements the model could not structure")]
+        #[arg(
+            long,
+            help = "Algorithm view: list the statements the model could not structure"
+        )]
         opaque: bool,
         #[arg(
             long,
