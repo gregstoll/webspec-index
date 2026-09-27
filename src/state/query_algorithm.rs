@@ -134,6 +134,19 @@ pub(crate) fn algorithm_view(
         let callee_name = title.as_deref().unwrap_or(&call.call.callee.visible_text);
         views.push(call_view(call, &binding, callee_signature, callee_name));
     }
+    let callers = if options.callers {
+        Some(caller_list(
+            conn,
+            &all_ids,
+            spec,
+            anchor,
+            signature.as_ref(),
+            &name,
+            options.limit.unwrap_or(CALLER_LIMIT),
+        )?)
+    } else {
+        None
+    };
     let opaque_count = opaque.len() as u32;
     Ok(Some(StateAlgorithmResult {
         algorithm: format!("{spec}#{anchor}"),
@@ -145,7 +158,7 @@ pub(crate) fn algorithm_view(
         opaque_count,
         opaque: options.opaque.then_some(opaque),
         calls: options.calls.then_some(views),
-        callers: None,
+        callers,
         unbound_calls,
         status: StateStatus::new(
             opaque_count == 0 && unbound_calls == 0,
@@ -153,6 +166,61 @@ pub(crate) fn algorithm_view(
             StatusCounts::default(),
         ),
     }))
+}
+
+/// Caller algorithms listed when `--limit` is not given.
+const CALLER_LIMIT: u32 = 20;
+
+/// The calls into `spec#anchor` from every indexed spec, grouped by calling
+/// algorithm and bound against `signature`; groups past `limit` are counted.
+fn caller_list(
+    conn: &Connection,
+    snapshot_ids: &[i64],
+    spec: &str,
+    anchor: &str,
+    signature: Option<&Signature>,
+    name: &str,
+    limit: u32,
+) -> Result<CallerList, StateError> {
+    let stored = db::calls_by_target(conn, snapshot_ids, spec, anchor)?;
+    let total = stored.len() as u32;
+    let mut groups: Vec<(String, Vec<&StoredCall>)> = Vec::new();
+    for call in &stored {
+        let caller = format!("{}#{}", call.spec, call.subject);
+        match groups.last_mut() {
+            Some((last, calls)) if *last == caller => calls.push(call),
+            _ => groups.push((caller, vec![call])),
+        }
+    }
+    let more = groups.len().saturating_sub(limit as usize) as u32;
+    groups.truncate(limit as usize);
+    let groups = groups
+        .into_iter()
+        .map(|(caller, mut calls)| {
+            calls.sort_by_cached_key(|c| {
+                (
+                    step_key(c.step_path.as_deref()),
+                    c.offset + c.call.span.start,
+                )
+            });
+            let calls = calls
+                .into_iter()
+                .map(|call| {
+                    let binding = match signature {
+                        Some(sig) => bind(&call.call, &call.source, sig),
+                        None => unsigned_binding(call),
+                    };
+                    call_view(call, &binding, signature, name)
+                })
+                .collect();
+            CallerGroup { caller, calls }
+        })
+        .collect();
+    Ok(CallerList {
+        total,
+        groups,
+        more,
+    })
 }
 
 fn ids_of(snapshots: &[StateSnapshot], spec: &str) -> Vec<i64> {
@@ -392,6 +460,45 @@ mod tests {
             (v.unbound_calls, v.status.coverage),
             (1, crate::state::query::Coverage::Partial)
         );
+    }
+
+    #[test]
+    fn callers_are_grouped_bound_and_capped() {
+        let html = format!("{NAV_HTML}{EXTRA_CALLERS}");
+        let conn = db_with(&[("HTML", html.as_str())]);
+        let v = view(&conn, "HTML#navigate", false, true, false, Some(2));
+        let callers = v.callers.unwrap();
+        assert_eq!(
+            (callers.total, callers.groups.len(), callers.more),
+            (3, 2, 1)
+        );
+        assert_eq!(
+            callers
+                .groups
+                .iter()
+                .map(|g| g.caller.as_str())
+                .collect::<Vec<_>>(),
+            ["HTML#go", "HTML#location-object-navigate"]
+        );
+        let go = &callers.groups[0].calls[0];
+        assert_eq!(
+            (go.step_path.as_deref(), go.callee.as_str(), go.confidence),
+            (Some("1"), "HTML#navigate", Confidence::Exact)
+        );
+        assert_eq!(
+            go.args
+                .iter()
+                .map(|a| (a.param.as_str(), a.value.as_str()))
+                .collect::<Vec<_>>(),
+            [("navigable", "*n*"), ("url", "*u*")]
+        );
+        let all = view(&conn, "HTML#navigate", false, true, false, None)
+            .callers
+            .unwrap();
+        assert_eq!((all.groups.len(), all.more), (3, 0));
+        assert!(view(&conn, "HTML#navigate", false, false, false, None)
+            .callers
+            .is_none());
     }
 
     #[test]
