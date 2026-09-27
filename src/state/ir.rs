@@ -541,7 +541,6 @@ pub enum Origin {
 }
 
 /// `call-` + sha256(source_id \0 link_id). A link is the callee of at most one call.
-#[allow(dead_code)]
 pub(crate) fn call_id(source_id: &str, link_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source_id.as_bytes());
@@ -1328,8 +1327,13 @@ pub(crate) mod tests_support {
         let html = format!(
             r#"<div class="algorithm"><p>To <dfn id="algo">algo</dfn>:</p><ol>{lis}</ol></div>"#
         );
+        sources_in(&html, "HTML")
+    }
+
+    /// Extract the structure of a whole HTML document as `spec`, return the sources of all segments.
+    pub(crate) fn sources_in(html: &str, spec: &str) -> Vec<StatementSource> {
         let structure =
-            extract_step_structure(&html, "HTML", "https://html.spec.whatwg.org/", "hash:t");
+            extract_step_structure(html, spec, "https://html.spec.whatwg.org/", "hash:t");
         crate::state::extract::algorithm_sources(&structure).0
     }
 }
