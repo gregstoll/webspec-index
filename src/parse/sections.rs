@@ -1,8 +1,10 @@
 use super::markdown::Converter;
 use crate::model::{ParsedSection, SectionType};
 use anyhow::Result;
+use regex::Regex;
 #[cfg(test)]
 use scraper::{Html, Selector};
+use std::sync::OnceLock;
 
 /// Extract content between a heading and the next section (heading or dfn)
 /// Returns the markdown-converted prose content
@@ -175,12 +177,9 @@ pub fn parse_dfn_element(
     // - Bikeshed sets data-dfn-type="argument": <dfn data-dfn-for="Window/open(url)" data-dfn-type="argument">url</dfn>
     // data-dfn-for alone means nothing here: Wattsi puts it on exported concepts such as
     // <dfn data-dfn-for="navigable" id="nav-document" data-export>active document</dfn>.
-    let has_direct_var_child = element
-        .children()
-        .filter_map(scraper::ElementRef::wrap)
-        .any(|c| c.value().name() == "var");
-
-    if has_direct_var_child || element.value().attr("data-dfn-type") == Some("argument") {
+    // The <var> must be the whole name: an algorithm's own name may mention a parameter, as in
+    // <dfn id="fire-a-synthetic-pointer-event">Firing a synthetic pointer event named <var>e</var></dfn>.
+    if is_var_only(element) || element.value().attr("data-dfn-type") == Some("argument") {
         return Ok(None);
     }
 
@@ -190,7 +189,7 @@ pub fn parse_dfn_element(
 
     // Determine section type based on context
     // (parameter dfns already skipped above)
-    let section_type = if is_inside_algorithm_div(element) {
+    let section_type = if is_algorithm_dfn(element) {
         SectionType::Algorithm
     } else if is_idl_type(element) {
         SectionType::Idl
@@ -205,6 +204,13 @@ pub fn parse_dfn_element(
         SectionType::Idl => extract_idl_content(element),
         _ => None,
     };
+    let content_text = match (
+        content_text,
+        continuation_content(element, &anchor, converter),
+    ) {
+        (Some(own), Some(more)) => Some(format!("{}\n\n{more}", own.trim_end())),
+        (content, _) => content,
+    };
 
     Ok(Some(ParsedSection {
         anchor,
@@ -217,6 +223,64 @@ pub fn parse_dfn_element(
         depth: None,
         number: None,
     }))
+}
+
+/// Steps given for this dfn right after its definition, in paragraphs that link back to it
+/// rather than defining it again: an IDL attribute's setter after its getter.
+fn continuation_content(
+    element: &scraper::ElementRef,
+    anchor: &str,
+    converter: &Converter,
+) -> Option<String> {
+    use super::markdown;
+
+    let block = enclosing_block(element)?;
+    let is_list = |e: &scraper::ElementRef| matches!(e.value().name(), "ol" | "ul" | "dl");
+    let mut last = std::iter::once(*block)
+        .chain(block.ancestors())
+        .filter_map(scraper::ElementRef::wrap)
+        .find(is_algorithm_div)
+        .unwrap_or(block);
+    if let Some(list) = last
+        .next_siblings()
+        .find_map(scraper::ElementRef::wrap)
+        .filter(is_list)
+    {
+        last = list;
+    }
+
+    let mut parts = Vec::new();
+    while let Some(next) = last.next_siblings().find_map(scraper::ElementRef::wrap) {
+        if is_algorithm_div(&next) {
+            let intro = next.children().find_map(scraper::ElementRef::wrap);
+            if intro.and_then(|p| continued_anchor(&p)) != Some(anchor) {
+                break;
+            }
+            parts.extend(extract_from_algorithm_div(&next, converter));
+            last = next;
+        } else if continued_anchor(&next) == Some(anchor) {
+            let intro = markdown::element_to_markdown(&next, converter);
+            last = next;
+            match next
+                .next_siblings()
+                .find_map(scraper::ElementRef::wrap)
+                .filter(is_list)
+            {
+                Some(list) => {
+                    parts.push(format!(
+                        "{}\n\n{}",
+                        intro.trim(),
+                        render_list(&list, converter)
+                    ));
+                    last = list;
+                }
+                None => parts.push(intro.trim().to_string()),
+            }
+        } else {
+            break;
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 /// Extract content for a definition (dfn not in algorithm, not IDL)
@@ -242,7 +306,15 @@ fn extract_definition_content(
                         converter,
                     ));
                 }
-                return Some(markdown::element_to_markdown(&parent_elem, converter));
+                let own = markdown::element_to_markdown(&parent_elem, converter);
+                return Some(match introduced_list(&parent_elem) {
+                    Some(list) => format!(
+                        "{}\n\n{}",
+                        own.trim(),
+                        render_list(&list, converter).trim_end()
+                    ),
+                    None => own,
+                });
             }
         }
         current = node.parent();
@@ -250,6 +322,30 @@ fn extract_definition_content(
 
     // Fallback: just use the dfn's text
     Some(element.text().collect::<String>().trim().to_string())
+}
+
+/// The list a definition's paragraph introduces with a trailing colon ("A `StaticRange` is
+/// valid if all of the following are true:"), which completes the definition. A list that
+/// defines terms of its own ("Each navigable has:") is left to those terms.
+fn introduced_list<'a>(block: &scraper::ElementRef<'a>) -> Option<scraper::ElementRef<'a>> {
+    if block.value().name() != "p" || !block_text(block).ends_with(':') {
+        return None;
+    }
+    let list = block
+        .next_siblings()
+        .find_map(scraper::ElementRef::wrap)
+        .filter(|e| matches!(e.value().name(), "ol" | "ul" | "dl"))?;
+    let dfn_selector = scraper::Selector::parse("dfn[id]").ok()?;
+    list.select(&dfn_selector).next().is_none().then_some(list)
+}
+
+fn render_list(list: &scraper::ElementRef, converter: &Converter) -> String {
+    use super::algorithms;
+    match list.value().name() {
+        "ol" => algorithms::render_algorithm_ol(list, converter),
+        "dl" => algorithms::render_algorithm_dl(list, converter),
+        _ => algorithms::render_ul(list, 0, converter),
+    }
 }
 
 /// Given the block that directly encloses a dfn, return the <li>/<dd> the definition owns
@@ -325,7 +421,8 @@ fn extract_algorithm_content(
         current = node.parent();
     }
 
-    None
+    // A one-sentence algorithm ("The foo() method steps are to …") is its own body.
+    extract_definition_content(element, converter)
 }
 
 /// Extract algorithm content from a div.algorithm or div[data-algorithm] container.
@@ -721,47 +818,334 @@ pub(crate) fn is_inside_algorithm_content(element: &scraper::ElementRef) -> bool
     false
 }
 
-/// Check if an element is inside a <div class="algorithm"> or followed by sibling <ol>
-/// Detects both Bikeshed style (div.algorithm wrapping) and Wattsi style (sibling ol)
-fn is_inside_algorithm_div(element: &scraper::ElementRef) -> bool {
-    // First check Bikeshed/Wattsi div pattern: div.algorithm or div[data-algorithm]
-    let mut current = element.parent();
-    while let Some(node) = current {
-        if let Some(parent_elem) = scraper::ElementRef::wrap(node) {
-            if parent_elem.value().name() == "div" {
-                let classes: Vec<_> = parent_elem.value().classes().collect();
-                if classes.contains(&"algorithm")
-                    || parent_elem.value().attr("data-algorithm").is_some()
-                {
-                    return true;
+/// Whether an element's content is a single `<var>` and nothing else but whitespace.
+fn is_var_only(element: &scraper::ElementRef) -> bool {
+    let mut vars = 0;
+    for child in element.children() {
+        match child.value() {
+            scraper::Node::Element(e) if e.name() == "var" => vars += 1,
+            scraper::Node::Element(_) => return false,
+            scraper::Node::Text(t) if !t.trim().is_empty() => return false,
+            _ => {}
+        }
+    }
+    vars == 1
+}
+
+pub(crate) fn is_algorithm_div(element: &scraper::ElementRef) -> bool {
+    element.value().name() == "div"
+        && (element.value().classes().any(|c| c == "algorithm")
+            || element.value().attr("data-algorithm").is_some())
+}
+
+fn regex(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
+    cell.get_or_init(|| Regex::new(source).expect("valid regex"))
+}
+
+/// Whether a dfn names an algorithm, i.e. its definition comes with a body of steps.
+///
+/// Beyond Bikeshed's `abstract-op` dfn type, neither generator's markup settles this: Wattsi
+/// wraps nearly every paragraph of prose in `div[data-algorithm]`, and a list after a dfn is
+/// as often a set of conditions, struct items or grammar components as it is steps. So the
+/// dfn's own block decides, and it qualifies when it
+/// - says it has steps ("The foo() method steps are to …", "… run these steps:"),
+/// - declares an algorithm ("To foo …", "When the user agent is to foo …"), or
+/// - introduces a following `<ol>` (or switch `<dl>`) that isn't a grammar or a field's value.
+///
+/// A getter written as "The foo attribute must return …" has no steps and stays a definition.
+fn is_algorithm_dfn(element: &scraper::ElementRef) -> bool {
+    match element.value().attr("data-dfn-type") {
+        Some("enum-value") => return false,
+        Some("abstract-op") => return true,
+        _ => {}
+    }
+    let Some(block) = enclosing_block(element) else {
+        return false;
+    };
+    let text = defining_text(&block);
+    // In a paragraph defining several terms, only the dfn's own sentence speaks for it:
+    // "Each stack has an associated <dfn>backup element queue</dfn> …. To <dfn>process the
+    // backup element queue</dfn> …, run these steps:".
+    let sentence = defines_several(&block).then(|| dfn_sentence(&block, element));
+    let own = sentence.as_deref().unwrap_or(&text);
+    if names_steps(own) || declares_algorithm(own, element) || has_signature(&block) {
+        return true;
+    }
+    match following_body_list(element, &block) {
+        Some("ol") => !introduces_non_steps_list(&text),
+        Some("dl") => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            regex(
+                &RE,
+                r"(?i)\balgorithm\b|\bsteps?\b|\bas follows\b|\bswitch(?:ing)?\s+on\b|\bfollowing list\b",
+            )
+            .is_match(&text)
+        }
+        _ => false,
+    }
+}
+
+/// The text that defines a dfn. A dfn placed directly in a div is defined by the div's
+/// leading inline content, not by the paragraphs and lists that follow it.
+fn defining_text(block: &scraper::ElementRef) -> String {
+    if block.value().name() != "div" {
+        return block_text(block);
+    }
+    let mut text = String::new();
+    for child in block.children() {
+        match child.value() {
+            scraper::Node::Text(t) => text.push_str(t),
+            scraper::Node::Element(e) if is_block_level(e.name()) => break,
+            scraper::Node::Element(_) => {
+                if let Some(e) = scraper::ElementRef::wrap(child) {
+                    text.extend(e.text());
                 }
             }
+            _ => {}
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
-            // Also check Wattsi pattern: if this block element has a sibling <ol>
-            // (e.g., <p>To <dfn>foo</dfn>:</p><ol>...</ol>)
-            if matches!(parent_elem.value().name(), "p" | "div" | "dd" | "li") {
-                // Check if there's a following <ol> sibling
-                let mut sibling = node.next_sibling();
-                while let Some(sib_node) = sibling {
-                    if let Some(sib_elem) = scraper::ElementRef::wrap(sib_node) {
-                        if matches!(sib_elem.value().name(), "ol" | "ul" | "dl") {
-                            return true;
-                        }
-                        // Stop if we hit another block element (not whitespace)
-                        if matches!(
-                            sib_elem.value().name(),
-                            "p" | "div" | "h2" | "h3" | "h4" | "h5" | "h6"
-                        ) {
-                            break;
-                        }
-                    }
-                    sibling = sib_node.next_sibling();
-                }
+fn is_block_level(name: &str) -> bool {
+    matches!(
+        name,
+        "p" | "div" | "ol" | "ul" | "dl" | "table" | "pre" | "blockquote" | "figure" | "section"
+    )
+}
+
+/// WebGPU's algorithm divs open with the dfn, then "**Arguments:**" and "**Returns:**".
+fn has_signature(block: &scraper::ElementRef) -> bool {
+    is_algorithm_div(block)
+        && block
+            .children()
+            .filter_map(scraper::ElementRef::wrap)
+            .filter(|c| c.value().name() == "p")
+            .any(|p| {
+                let text = block_text(&p);
+                text.starts_with("Arguments:") || text.starts_with("Returns:")
+            })
+}
+
+/// Whether a block defines more than one term (parameters aside).
+fn defines_several(block: &scraper::ElementRef) -> bool {
+    let Ok(dfn_selector) = scraper::Selector::parse("dfn[id]") else {
+        return false;
+    };
+    block
+        .select(&dfn_selector)
+        .filter(|d| !is_var_only(d) && d.value().attr("data-dfn-type") != Some("argument"))
+        .nth(1)
+        .is_some()
+}
+
+/// The sentence of a block's text that contains the dfn.
+fn dfn_sentence(block: &scraper::ElementRef, element: &scraper::ElementRef) -> String {
+    let mut before = String::new();
+    for node in block.descendants() {
+        if node.id() == element.id() {
+            break;
+        }
+        if let Some(t) = node.value().as_text() {
+            before.push_str(t);
+        }
+    }
+    let before = before.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = block_text(block);
+    let mut at = before.len().min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    let start = text[..at].rfind(". ").map_or(0, |i| i + 2);
+    let end = text[at..].find(". ").map_or(text.len(), |i| at + i + 1);
+    text[start..end].to_string()
+}
+
+/// The innermost block that holds a dfn's defining sentence.
+/// None for a dfn in a `<pre>` (IDL, grammar), which has no defining sentence.
+pub(crate) fn enclosing_block<'a>(
+    element: &scraper::ElementRef<'a>,
+) -> Option<scraper::ElementRef<'a>> {
+    element
+        .ancestors()
+        .filter_map(scraper::ElementRef::wrap)
+        .find(|e| matches!(e.value().name(), "p" | "dd" | "dt" | "li" | "div" | "pre"))
+        .filter(|e| e.value().name() != "pre")
+}
+
+fn block_text(block: &scraper::ElementRef) -> String {
+    block
+        .text()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// "The foo getter steps are to …", "… steps are:", "… consists of the following steps",
+/// "… must return the result of running the document open steps".
+fn names_steps(text: &str) -> bool {
+    static ARE_TO: OnceLock<Regex> = OnceLock::new();
+    static OTHER: OnceLock<Regex> = OnceLock::new();
+    // "… means those steps are to be run" describes steps rather than giving them.
+    regex(&ARE_TO, r"(?i)\bsteps?\b[^.]*?\b(?:are|is)\s+to\b\W*(\w*)")
+        .captures_iter(text)
+        .any(|caps| !caps[1].eq_ignore_ascii_case("be"))
+        || regex(
+            &OTHER,
+            r"(?i)\bsteps?\b[^.]*?\b(?:are|is)\s*:|\bsteps\s*:|\b(?:these|the following)\s+(?:sub)?steps\b|\bmust\b[^.]*\brun(?:ning)?\s+(?:the|these)\b[^.]*\bsteps\b|\bmeans\s+running\b",
+        )
+        .is_match(text)
+}
+
+/// "To <dfn>foo</dfn> …" (Infra's algorithm declaration), the older "When the user agent is
+/// to <dfn>foo</dfn> …" and "When the steps below require the UA to <dfn>foo</dfn> …", and
+/// "<dfn>Foo</dfn>, given …, is to return …" / "The <dfn>foo</dfn> algorithm, given …, returns …".
+fn declares_algorithm(text: &str, element: &scraper::ElementRef) -> bool {
+    static WHEN: OnceLock<Regex> = OnceLock::new();
+    static GIVEN: OnceLock<Regex> = OnceLock::new();
+    let name = block_text(element);
+    if name.is_empty() {
+        return false;
+    }
+    // Each form has to declare the dfn itself, not merely mention it: "When the parser is
+    // to operate on a stream that has <dfn>a known definite encoding</dfn>", "To ensure
+    // reactions are triggered, we introduce <dfn>[CEReactions]</dfn>", "To run steps
+    // <dfn>in parallel</dfn> means …".
+    let when = regex(
+        &WHEN,
+        r"(?i)^(?:when|if)\b[^,.]*?\b(?:(?:is|are)\s+(?:required\s+|asked\s+)?|requires?\s+(?:the\s+)?(?:user agent|UA)\s+)to\s|^when asked to\s",
+    )
+    .find(text)
+    .is_some_and(|m| {
+        // The verb phrase after "is to", give or take a verb and an article.
+        let rest = &text[m.end()..];
+        rest.find(&name)
+            .is_some_and(|at| rest[..at].split_whitespace().count() <= 3)
+    });
+    let given = regex(
+        &GIVEN,
+        r"(?i)^[^.]*?\bgiven\b[^.]*?,\s*(?:(?:is|are)\s+to|returns?)\b",
+    )
+    .is_match(text)
+        && text
+            .find(&name)
+            .is_some_and(|at| text[..at].split_whitespace().count() <= 1);
+    // The "To" sentence may follow another in the same paragraph: "A script element has
+    // steps to run when the result is ready …. To <dfn>mark as ready</dfn> …:".
+    when || given
+        || text.split(". ").enumerate().any(|(i, sentence)| {
+            let Some(rest) = sentence.strip_prefix("To ") else {
+                return false;
+            };
+            let clause = rest.split([',', ':']).next().unwrap_or(rest);
+            // Past the first sentence, "To disambiguate from a valid URL string it can also
+            // be referred to as a URL record" must not declare "URL".
+            let near = i == 0
+                || clause
+                    .find(&name)
+                    .is_some_and(|at| clause[..at].split_whitespace().count() <= 3);
+            near && clause.contains(&name)
+                && !clause.contains(" we ")
+                && !clause.contains(" means ")
+        })
+}
+
+/// A paragraph that gives more steps for a section defined elsewhere, pointing back to it
+/// instead of carrying a dfn: "The <a href=#dom-history-scroll-restoration>scrollRestoration</a>
+/// setter steps are:". Returns the anchor it links back to.
+pub(crate) fn continued_anchor<'a>(block: &scraper::ElementRef<'a>) -> Option<&'a str> {
+    static STEPS_NEXT: OnceLock<Regex> = OnceLock::new();
+    if block.value().name() != "p" {
+        return None;
+    }
+    let text = block_text(block);
+    if !names_steps(&text) {
+        return None;
+    }
+    // A step saying "If <a>cond</a> is true, run these steps:" continues nothing.
+    let in_list = block
+        .ancestors()
+        .filter_map(scraper::ElementRef::wrap)
+        .any(|a| matches!(a.value().name(), "li" | "dd" | "dt"));
+    let dfn_selector = scraper::Selector::parse("dfn[id]").ok()?;
+    if in_list || block.select(&dfn_selector).next().is_some() {
+        return None;
+    }
+    let link_selector = scraper::Selector::parse("a[href^='#']").ok()?;
+    let link = block.select(&link_selector).next()?;
+    let link_text = block_text(&link);
+    let at = text.find(&link_text)?;
+    if text[..at].split_whitespace().count() > 3
+        || !regex(&STEPS_NEXT, r"^\s*(?:\S+\s+){0,2}steps\b")
+            .is_match(&text[at + link_text.len()..])
+    {
+        return None;
+    }
+    Some(link.value().attr("href")?.trim_start_matches('#'))
+}
+
+/// The list that serves as the dfn's body: the next list sibling of its block, or, when the
+/// dfn opens an algorithm div, the div's top-level lists after the block, of which an `<ol>`
+/// wins (Bikeshed may put a `<ul>` of inputs before the steps).
+fn following_body_list(
+    element: &scraper::ElementRef,
+    block: &scraper::ElementRef,
+) -> Option<&'static str> {
+    let list_name = |e: &scraper::ElementRef| match e.value().name() {
+        "ol" => Some("ol"),
+        "ul" => Some("ul"),
+        "dl" => Some("dl"),
+        _ => None,
+    };
+    if !is_algorithm_div(block) {
+        for sibling in block.next_siblings().filter_map(scraper::ElementRef::wrap) {
+            if let Some(name) = list_name(&sibling) {
+                return Some(name);
+            }
+            if matches!(
+                sibling.value().name(),
+                "p" | "div" | "h2" | "h3" | "h4" | "h5" | "h6"
+            ) {
+                break;
             }
         }
-        current = node.parent();
     }
-    false
+    // The dfn may sit in a paragraph of the div, or directly in the div.
+    let (div, lists): (_, Vec<_>) = if is_algorithm_div(block) {
+        (*block, block.children().collect())
+    } else {
+        let div = scraper::ElementRef::wrap(block.parent()?).filter(is_algorithm_div)?;
+        (div, block.next_siblings().collect())
+    };
+    let dfn_selector = scraper::Selector::parse("dfn[id]").ok()?;
+    let owner = div.select(&dfn_selector).find(|d| {
+        d.ancestors()
+            .take_while(|a| a.id() != div.id())
+            .filter_map(scraper::ElementRef::wrap)
+            .all(|a| !matches!(a.value().name(), "ol" | "ul" | "dl"))
+    })?;
+    if owner.id() != element.id() {
+        return None;
+    }
+    let names: Vec<_> = lists
+        .into_iter()
+        .filter_map(scraper::ElementRef::wrap)
+        .filter_map(|e| list_name(&e))
+        .collect();
+    ["ol", "dl", "ul"].into_iter().find(|n| names.contains(n))
+}
+
+/// Grammars ("… if it consists of the following components"), enumerations ("… are the
+/// following") and field declarations ("Each Window object has a … list") also precede an
+/// `<ol>`, which then isn't a body of steps.
+fn introduces_non_steps_list(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(
+        &RE,
+        r"(?i)\bconsists?\s+of\b|\bmatches the following\b|\bare the following\b|\bthe following (?:components|pattern)\b|^(?:each|an?|the)\b[^.]*\bhas\s+(?:an?\s+)?(?:associated\s+)?[^.]*?(?:\.|\binitially\b)",
+    )
+    .is_match(text)
 }
 
 /// Check if a dfn element is an IDL type definition
@@ -867,7 +1251,7 @@ pub fn collect_definitions(html: &str) -> Result<Vec<ParsedSection>> {
 
     for element in document.select(&selector) {
         // Skip definitions that are inside algorithm divs (those are algorithms)
-        if is_inside_algorithm_div(&element) {
+        if is_algorithm_dfn(&element) {
             continue;
         }
 
@@ -1710,7 +2094,7 @@ mod tests {
         );
         assert_eq!(
             by_anchor("nav-document").section_type,
-            SectionType::Algorithm
+            SectionType::Definition
         );
         assert_eq!(
             by_anchor("close-a-top-level-traversable").section_type,
@@ -1822,11 +2206,10 @@ mod tests {
     }
 
     #[test]
-    fn test_wattsi_data_algorithm_with_ul() {
-        // Wattsi uses <div data-algorithm=""> (not class="algorithm") and some
-        // algorithm-like definitions use <ul> instead of <ol> for their conditions.
-        // Regression: render-blocked was classified as Definition and only returned
-        // the intro <p>, losing the <ul> conditions.
+    fn test_wattsi_data_algorithm_divs_classified_by_body() {
+        // Wattsi wraps predicates in <div data-algorithm=""> as well as algorithms. Only the
+        // one with steps is an algorithm; a predicate's <ul> of conditions is part of its
+        // definition's content.
         let html = include_str!("../../tests/fixtures/algorithms/wattsi_ul_algorithm.html");
         let converter = crate::parse::markdown::Converter::new("https://html.spec.whatwg.org");
 
@@ -1842,16 +2225,11 @@ mod tests {
 
         assert_eq!(sections.len(), 3, "Should detect all three dfns");
 
-        // render-blocked: div[data-algorithm] with <ul> body
         let render_blocked = sections
             .iter()
             .find(|s| s.anchor == "render-blocked")
             .expect("render-blocked should be present");
-        assert_eq!(
-            render_blocked.section_type,
-            SectionType::Algorithm,
-            "div[data-algorithm] should be classified as Algorithm"
-        );
+        assert_eq!(render_blocked.section_type, SectionType::Definition);
         let content = render_blocked.content_text.as_ref().unwrap();
         assert!(
             content.contains("render-blocked"),
@@ -1866,18 +2244,12 @@ mod tests {
             "Should include second condition from <ul>"
         );
 
-        // allows-adding-render-blocking-elements: div[data-algorithm] with no list body
         let allows = sections
             .iter()
             .find(|s| s.anchor == "allows-adding-render-blocking-elements")
             .expect("allows-adding should be present");
-        assert_eq!(
-            allows.section_type,
-            SectionType::Algorithm,
-            "div[data-algorithm] should be classified as Algorithm"
-        );
+        assert_eq!(allows.section_type, SectionType::Definition);
 
-        // block-rendering: div[data-algorithm] with <ol> body (normal case)
         let block_rendering = sections
             .iter()
             .find(|s| s.anchor == "block-rendering")
@@ -1889,6 +2261,169 @@ mod tests {
         );
         let content = block_rendering.content_text.as_ref().unwrap();
         assert!(content.contains("1. "), "Should include numbered steps");
+    }
+
+    fn section_types(html: &str) -> Vec<(String, SectionType)> {
+        collect_dfn_sections(html, "https://html.spec.whatwg.org")
+            .into_iter()
+            .map(|s| (s.anchor, s.section_type))
+            .collect()
+    }
+
+    #[test]
+    fn test_dfns_without_steps_are_not_algorithms() {
+        // Markup of the kinds of definitions Wattsi and Bikeshed put in algorithm divs, or
+        // before a list, that have no steps.
+        let html = r##"
+            <div data-algorithm=""><p>The attribute's missing value default and invalid value default are both the <dfn id="attr-contenteditable-inherit-state">Inherit</dfn> state.</p></div>
+            <div data-algorithm=""><p>The <code>canPlayType(type)</code> method must return the empty string if it cannot; it must return "<dfn data-dfn-for="CanPlayTypeResult" id="dom-canplaytyperesult-probably" data-dfn-type="enum-value"><code>probably</code></dfn>" if confident.</p></div>
+            <div data-algorithm=""><p>The <dfn id="dom-texttrack-mode" data-dfn-type="attribute"><code>mode</code></dfn> getter steps are to return the string switching on this's mode:</p>
+              <dl class="switch"><dt>The text track disabled mode</dt><dd>"<dfn data-dfn-for="TextTrackMode" id="dom-texttrack-disabled" data-dfn-type="enum-value"><code>disabled</code></dfn>"</dd></dl></div>
+            <div data-algorithm=""><p>A <code>Document</code> is an <dfn id="unstyled-document">unstyled document</dfn> while it matches the following conditions:</p>
+              <ul><li>The <code>Document</code> has no author style sheets.</li></ul></div>
+            <div data-algorithm=""><p>A string is a <dfn id="valid-date-string">valid date string</dfn> representing a year <var>year</var>, month <var>month</var>, and day <var>day</var> if it consists of the following components in the given order:</p>
+              <ol><li>A valid month string</li><li>A U+002D HYPHEN-MINUS character (-)</li></ol></div>
+            <div data-algorithm=""><p>The <dfn data-dfn-for="DataTransferItem" id="dom-datatransferitem-type" data-dfn-type="attribute"><code>type</code></dfn> attribute must return the empty string if the <code>DataTransferItem</code> object is in the disabled mode.</p></div>
+            <p>Each media element has an <dfn id="assigned-media-provider-object">assigned media provider object</dfn>, which is a media provider object or null, initially null.</p>
+            <dl class="domintro"><dt><code>media.srcObject</code></dt><dd>Allows the media element to be assigned a media provider object.</dd></dl>
+            <div class="algorithm" data-algorithm=""><p>A <code>StaticRange</code> is <dfn data-dfn-for="StaticRange" id="staticrange-valid" data-export="">valid</dfn> if all of the following are true:</p>
+              <ul><li>Its start and end are in the same node tree.</li></ul></div>
+            <p>A <dfn id="no-cors-safelisted-request-header-name" data-export="">no-CORS-safelisted request-header name</dfn> is a header name that is a byte-case-insensitive match for one of</p>
+            <ul><li>`Accept`</li></ul>
+        "##;
+        let types = section_types(html);
+        for (anchor, section_type) in &types {
+            let expected = if anchor == "dom-texttrack-mode" {
+                SectionType::Algorithm
+            } else {
+                SectionType::Definition
+            };
+            assert_eq!(section_type, &expected, "{anchor}");
+        }
+        assert_eq!(types.len(), 10, "{types:?}");
+    }
+
+    #[test]
+    fn test_dfns_with_steps_are_algorithms() {
+        let html = r##"
+            <p>The <dfn data-dfn-for="Node" id="dom-node-textcontent" data-dfn-type="attribute"><code>textContent</code></dfn> getter steps are to return the result of running get text content with this.</p>
+            <p>The <dfn id="dom-namednodemap-setnameditem" data-dfn-type="method"><code>setNamedItem(attr)</code></dfn> method steps are to return the result of setting an attribute given attr and element.</p>
+            <div data-algorithm=""><p>The <code>checkValidity()</code> method, when invoked, must run the <dfn id="check-validity-steps">check validity steps</dfn> on this element.</p></div>
+            <p>To <dfn id="set-text-content">set text content</dfn> with a node <var>node</var> and a string <var>value</var>, do as defined below, switching on the interface <var>node</var> implements:</p>
+            <dl class="switch"><dt>Element</dt><dd>String replace all.</dd></dl>
+            <p>When a user agent is to <dfn id="announce-the-connection">announce the connection</dfn>, the user agent must queue a task.</p>
+            <p><dfn id="byte-serializing-a-request-origin">Byte-serializing a request origin</dfn>, given a request <var>request</var>, is to return the result of serializing a request origin with <var>request</var>.</p>
+            <p>The <dfn id="concept-domain-to-ascii-parser">domain parser ToASCII</dfn> algorithm, given a scalar value string <var>domain</var>, returns the result of running Unicode ToASCII with <var>domain</var>.</p>
+            <div class="algorithm"><p>To check if the environment settings object <var>environment</var> is <dfn id="is-offline">offline</dfn>:</p>
+              <ul><li>If the user agent assumes it does not have internet connectivity, then return true.</li></ul></div>
+            <p>To get a byte sequence <var>bytes</var> <dfn id="byte-sequence-as-a-body">as a body</dfn>, return the body of the result of safely extracting <var>bytes</var>.</p>
+            <p>When the steps below require the UA to <dfn id="generate-implied-end-tags">generate implied end tags</dfn>, then, while the current node is a dd element, the UA must pop the current node.</p>
+            <p>A script element has <dfn id="steps-to-run-when-the-result-is-ready">steps to run when the result is ready</dfn>, which are a series of steps or null, initially null. To <dfn id="mark-as-ready">mark as ready</dfn> a script element <var>el</var> given a <var>result</var>:</p>
+            <ol><li>Set el's result to result.</li></ol>
+            <div data-algorithm=""><p>The <dfn id="inner-navigate-event-firing-algorithm">inner navigate event firing algorithm</dfn> consists of the following steps, given a <var>navigation</var>:</p>
+              <ol><li>If navigation has entries and events disabled, then return true.</li></ol></div>
+            <p>The <dfn id="dom-range-collapse" data-dfn-type="method">collapse(toStart)</dfn> method steps are to, if toStart is true, set end to start; otherwise set start to end.</p>
+            <p>The <dfn id="dom-document-open" data-dfn-type="method">open(unused1, unused2)</dfn> method must return the result of running the document open steps with this.</p>
+            <p>When a fetch group <var>fetchGroup</var> is <dfn id="concept-fetch-group-terminate">terminated</dfn>:</p>
+            <ol><li>For each fetch record, terminate it.</li></ol>
+            <div data-algorithm=""><p>The <dfn id="rules-for-parsing-a-legacy-colour-value">rules for parsing a legacy color value</dfn>, given a string input, return a CSS color or failure.</p>
+              <p class="note">Some obsolete legacy attributes parse colors.</p>
+              <ol><li>If input is the empty string, then return failure.</li></ol></div>
+        "##;
+        let types = section_types(html);
+        for (anchor, section_type) in &types {
+            // A field whose value is steps, in the same paragraph as an algorithm
+            let expected = if anchor == "steps-to-run-when-the-result-is-ready" {
+                SectionType::Definition
+            } else {
+                SectionType::Algorithm
+            };
+            assert_eq!(section_type, &expected, "{anchor}");
+        }
+        assert_eq!(types.len(), 17, "{types:?}");
+    }
+
+    #[test]
+    fn test_declaration_forms_must_declare_the_dfn() {
+        let html = r##"
+            <p>To ensure custom element reactions are triggered appropriately, we introduce the <dfn id="cereactions">[CEReactions]</dfn> IDL extended attribute.</p>
+            <p>To supplement the above extended attributes we also introduce <dfn id="xattr-reflectrange">[ReflectRange]</dfn>.</p>
+            <p>To run steps <dfn id="in-parallel">in parallel</dfn> means those steps are to be run, one after another.</p>
+            <p>When the HTML parser is to operate on an input byte stream that has <dfn id="a-known-definite-encoding">a known definite encoding</dfn>, then the character encoding is that encoding.</p>
+            <div class="example"><p>For these examples, we'll use a fake worklet, whose steps are to paint.</p>
+            <pre><code class="idl">interface <dfn id="fakeworkletglobalscope" data-dfn-type="interface">FakeWorkletGlobalScope</dfn> {};</code></pre></div>
+        "##;
+        assert_eq!(
+            section_types(html),
+            vec![
+                ("cereactions".to_string(), SectionType::Definition),
+                ("xattr-reflectrange".to_string(), SectionType::Definition),
+                ("in-parallel".to_string(), SectionType::Definition),
+                (
+                    "a-known-definite-encoding".to_string(),
+                    SectionType::Definition
+                ),
+                ("fakeworkletglobalscope".to_string(), SectionType::Idl),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_definition_content_includes_its_condition_list() {
+        let html = r##"
+            <div class="algorithm" data-algorithm=""><p>A <code>StaticRange</code> is <dfn id="staticrange-valid">valid</dfn> if all of the following are true:</p>
+              <ul><li>Its start and end are in the same node tree.</li><li>Its start offset is between 0 and its start node's length.</li></ul></div>
+            <p>Each <a href="#navigable">navigable</a> has:</p>
+            <ul><li><p>An <dfn id="nav-id">id</dfn>.</p></li></ul>
+        "##;
+        let sections = collect_dfn_sections(html, "https://dom.spec.whatwg.org");
+        let valid = sections[0].content_text.as_deref().unwrap();
+        assert!(valid.starts_with("A `StaticRange` is **valid**"), "{valid}");
+        assert!(valid.contains("same node tree"), "{valid}");
+        assert!(valid.contains("start node's length"), "{valid}");
+        assert_eq!(sections[1].content_text.as_deref(), Some("An **id**."));
+    }
+
+    #[test]
+    fn test_attribute_content_includes_its_setter_steps() {
+        let html = r##"
+            <div data-algorithm="">
+            <p>The <dfn data-dfn-for="History" id="dom-history-scroll-restoration" data-dfn-type="attribute"><code>scrollRestoration</code></dfn> getter steps are:</p>
+            <ol><li><p>Return this's scroll restoration mode.</p></li></ol>
+            </div>
+            <div data-algorithm="">
+            <p>The <code><a href="#dom-history-scroll-restoration">scrollRestoration</a></code> setter steps are:</p>
+            <ol><li><p>Set this's scroll restoration mode to the given value.</p></li></ol>
+            </div>
+            <div data-algorithm="">
+            <p>The <dfn data-dfn-for="History" id="dom-history-state" data-dfn-type="attribute"><code>state</code></dfn> getter steps are:</p>
+            <ol><li><p>Return this's state.</p></li></ol>
+            </div>
+        "##;
+        let sections = collect_dfn_sections(html, "https://html.spec.whatwg.org");
+        let content = sections[0].content_text.as_deref().unwrap();
+        assert!(content.contains("getter steps are"), "{content}");
+        assert!(content.contains("to the given value"), "{content}");
+        assert!(!content.contains("state"), "{content}");
+    }
+
+    #[test]
+    fn test_algorithm_name_mentioning_a_parameter_is_indexed() {
+        let html = r##"
+            <div data-algorithm="">
+            <p><dfn id="fire-a-synthetic-pointer-event">Firing a synthetic pointer event named
+            <var>e</var></dfn> at <var>target</var>, with an optional <var>not trusted flag</var>, means
+            running these steps:</p>
+            <ol><li><p>Let <var>event</var> be the result of creating an event.</p></li></ol>
+            </div>
+        "##;
+        assert_eq!(
+            section_types(html),
+            vec![(
+                "fire-a-synthetic-pointer-event".to_string(),
+                SectionType::Algorithm
+            )]
+        );
     }
 
     // -- TC39/ecmarkup emu-clause tests --

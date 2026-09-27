@@ -1,39 +1,121 @@
 // Cross-reference extraction from <a> elements
 use super::algorithms::step_number;
+use super::sections::{continued_anchor, enclosing_block, is_algorithm_div};
 use crate::model::{ParsedReference, ParsedSection, RefKind, SectionType};
 use crate::spec_registry::SpecRegistry;
+use ego_tree::NodeId;
 use scraper::{ElementRef, Html};
+use std::collections::HashMap;
+
+/// The part of the document an algorithm defined by a `<dfn>` covers.
+struct AlgorithmScope {
+    anchor: String,
+    /// Subtrees that make up the algorithm: its algorithm div, or its defining block and
+    /// the list after it.
+    roots: Vec<NodeId>,
+    /// The defining sentence of an algorithm without a list body ("The foo() method steps
+    /// are to return …"), which is its only step.
+    sentence: Option<NodeId>,
+}
+
+impl AlgorithmScope {
+    fn new(anchor: String, block: ElementRef) -> Self {
+        let div = std::iter::once(*block)
+            .chain(block.ancestors())
+            .filter_map(ElementRef::wrap)
+            .find(is_algorithm_div);
+        if let Some(div) = div {
+            let has_list = div
+                .children()
+                .filter_map(ElementRef::wrap)
+                .any(|c| matches!(c.value().name(), "ol" | "ul" | "dl"));
+            return AlgorithmScope {
+                anchor,
+                roots: vec![div.id()],
+                sentence: (!has_list).then_some(block.id()),
+            };
+        }
+        let mut roots = vec![block.id()];
+        let list = block
+            .next_siblings()
+            .find_map(ElementRef::wrap)
+            .filter(|e| matches!(e.value().name(), "ol" | "ul" | "dl"));
+        let has_list = list.is_some();
+        roots.extend(list.map(|l| l.id()));
+        AlgorithmScope {
+            anchor,
+            roots,
+            sentence: (!has_list).then_some(block.id()),
+        }
+    }
+
+    fn contains(&self, node: ego_tree::NodeRef<'_, scraper::Node>) -> bool {
+        std::iter::once(node)
+            .chain(node.ancestors())
+            .any(|n| self.roots.contains(&n.id()))
+    }
+}
+
+/// The section a paragraph of further steps continues (see [`continued_anchor`]), if the
+/// document defines it outside a heading.
+fn continued_section<'s>(
+    block: &ElementRef,
+    types: &HashMap<&'s str, SectionType>,
+) -> Option<&'s str> {
+    let (&anchor, section_type) = types.get_key_value(continued_anchor(block)?)?;
+    matches!(
+        section_type,
+        SectionType::Algorithm | SectionType::Definition
+    )
+    .then_some(anchor)
+}
+
+/// Whether a numbered list is the rest of a definition rather than steps: the components
+/// of a grammar ("A string is a valid date string … if it consists of the following
+/// components in the given order:") are not steps of anything.
+fn list_introduced_by_definition(item: &ElementRef, types: &HashMap<&str, SectionType>) -> bool {
+    let Some(list) = item.parent().and_then(ElementRef::wrap) else {
+        return false;
+    };
+    let Ok(dfn_selector) = scraper::Selector::parse("dfn[id]") else {
+        return false;
+    };
+    let Some(intro) = list.prev_siblings().find_map(ElementRef::wrap) else {
+        return false;
+    };
+    if !matches!(intro.value().name(), "p" | "dd" | "li") {
+        return false;
+    }
+    let mut defined = intro
+        .select(&dfn_selector)
+        .filter_map(|d| types.get(d.value().attr("id")?))
+        .peekable();
+    defined.peek().is_some() && defined.all(|t| *t == SectionType::Definition)
+}
 
 /// Extract all cross-references from a parsed HTML document.
 ///
-/// Uses a single document-order pass: walk all nodes, track the "current section"
-/// (only headings and algorithms set it), and when we hit a link, attribute it to
-/// that section.  Definition sub-sections are intentionally skipped for attribution
-/// because they don't establish a new scope for algorithm steps and prose that
-/// follow them.
+/// Uses a single document-order pass: walk all nodes, track the section in scope, and
+/// attribute each link to it. A heading's scope lasts until the next heading. An
+/// algorithm defined by a `<dfn>` covers only its own markup (see [`AlgorithmScope`]);
+/// past it, the heading is back in scope, so prose after an algorithm isn't credited to
+/// it. Definitions set no scope: a parameter or a term defined in an algorithm's intro
+/// must not take over the links in its steps.
 pub fn extract_references(
     document: &Html,
     spec_name: &str,
     sections: &[ParsedSection],
     registry: &SpecRegistry,
 ) -> Vec<ParsedReference> {
-    // Build lookup set of section anchors that establish reference scope.
-    // Only headings and algorithms create persistent scope; definitions are
-    // sub-sections that shouldn't override the enclosing algorithm/heading.
-    let scope_anchors: std::collections::HashSet<&str> = sections
+    let types: HashMap<&str, SectionType> = sections
         .iter()
-        .filter(|s| {
-            matches!(
-                s.section_type,
-                SectionType::Heading | SectionType::Algorithm
-            )
-        })
-        .map(|s| s.anchor.as_str())
+        .map(|s| (s.anchor.as_str(), s.section_type))
         .collect();
 
     let mut seen = std::collections::HashSet::new();
     let mut references = Vec::new();
-    let mut current_section: Option<String> = None;
+    let mut heading: Option<String> = None;
+    let mut algorithm: Option<AlgorithmScope> = None;
 
     // Single document-order pass over all nodes
     for node_ref in document.root_element().descendants() {
@@ -41,10 +123,26 @@ pub fn extract_references(
             continue;
         };
 
-        // Check if this element defines a scope section
-        if let Some(id) = elem.value().attr("id") {
-            if scope_anchors.contains(id) {
-                current_section = Some(id.to_string());
+        if algorithm.as_ref().is_some_and(|a| !a.contains(node_ref)) {
+            algorithm = None;
+        }
+
+        match elem.value().attr("id").and_then(|id| types.get(id)) {
+            Some(SectionType::Algorithm) if elem.value().name() == "dfn" => {
+                if let Some(block) = enclosing_block(&elem) {
+                    let id = elem.value().attr("id").unwrap_or_default();
+                    algorithm = Some(AlgorithmScope::new(id.to_string(), block));
+                }
+            }
+            // Headings, and ecmarkup clauses, which hold their algorithm's whole text.
+            Some(SectionType::Heading | SectionType::Algorithm) => {
+                heading = elem.value().attr("id").map(str::to_string);
+                algorithm = None;
+            }
+            _ => {
+                if let Some(anchor) = continued_section(&elem, &types) {
+                    algorithm = Some(AlgorithmScope::new(anchor.to_string(), elem));
+                }
             }
         }
 
@@ -55,14 +153,28 @@ pub fn extract_references(
                     continue;
                 }
 
-                if let Some(ref section) = current_section {
+                let section = algorithm.as_ref().map(|a| &a.anchor).or(heading.as_ref());
+                if let Some(section) = section {
                     if let Some((mut to_spec, to_anchor)) = parse_href(href, registry) {
                         // Resolve intra-spec placeholder to the actual spec name
                         if to_spec == "self" {
                             to_spec = spec_name.to_string();
                         }
 
-                        let ctx = link_context(&elem);
+                        let mut ctx = link_context(&elem);
+                        if ctx.kind == RefKind::Prose {
+                            // The only step of a one-sentence algorithm is its sentence.
+                            let sentence = algorithm.as_ref().and_then(|a| a.sentence);
+                            if sentence.is_some_and(|s| elem.ancestors().any(|n| n.id() == s)) {
+                                ctx.kind = RefKind::Step;
+                            }
+                        } else if ctx.kind == RefKind::Step
+                            && ctx
+                                .outermost_step
+                                .is_some_and(|li| list_introduced_by_definition(&li, &types))
+                        {
+                            ctx = LinkContext::prose();
+                        }
 
                         // Deduplicate by call site. Step number alone is too coarse:
                         // a switch renders as a <dl> inside one step, so branches
@@ -134,18 +246,32 @@ fn parse_href(href: &str, registry: &SpecRegistry) -> Option<(String, String)> {
 
 /// Where a link sits within its section: which algorithm step encloses it, what
 /// that step says, which steps guard it, and whether it is a call at all.
-struct LinkContext {
+struct LinkContext<'a> {
     step_path: Option<String>,
     step_text: Option<String>,
     guard_path: Vec<String>,
     kind: RefKind,
+    /// The top-level step the link sits in.
+    outermost_step: Option<ElementRef<'a>>,
 }
 
-fn link_context(link: &ElementRef) -> LinkContext {
+impl LinkContext<'_> {
+    fn prose() -> Self {
+        LinkContext {
+            step_path: None,
+            step_text: None,
+            guard_path: Vec::new(),
+            kind: RefKind::Prose,
+            outermost_step: None,
+        }
+    }
+}
+
+fn link_context<'a>(link: &ElementRef<'a>) -> LinkContext<'a> {
     let mut callout = false;
     let mut idl = false;
     // Enclosing <li> elements, innermost first.
-    let mut items: Vec<(usize, ElementRef)> = Vec::new();
+    let mut items: Vec<(usize, ElementRef<'a>)> = Vec::new();
 
     for ancestor in link.ancestors() {
         let Some(elem) = ElementRef::wrap(ancestor) else {
@@ -203,6 +329,7 @@ fn link_context(link: &ElementRef) -> LinkContext {
         step_text,
         guard_path,
         kind,
+        outermost_step: items.first().map(|(_, elem)| *elem),
     }
 }
 
@@ -1147,5 +1274,160 @@ mod tests {
             1,
             "same target twice in one step is one call site"
         );
+    }
+
+    fn section(anchor: &str, section_type: SectionType) -> ParsedSection {
+        ParsedSection {
+            section_type,
+            ..algo_section(anchor)
+        }
+    }
+
+    fn from_and_kind(refs: &[ParsedReference], to: &str) -> (String, RefKind) {
+        let r = find(refs, to);
+        (r.from_anchor.clone(), r.kind)
+    }
+
+    #[test]
+    fn test_prose_after_an_algorithm_belongs_to_the_heading() {
+        // A definition after an algorithm sets no scope of its own, and the algorithm before
+        // it must not take its links.
+        let html = r##"
+            <h2 id="interface-namednodemap">Interface NamedNodeMap</h2>
+            <div data-algorithm=""><p>The <dfn id="dom-namednodemap-item">item(index)</dfn> method steps are:</p>
+            <ol><li><p>Return <a href="#attribute-list">this's attribute list</a>[index].</p></li></ol></div>
+            <p>The <dfn id="dom-namednodemap-length">length</dfn> attribute must return <a href="#size">the size</a>.</p>
+        "##;
+        let refs = extract(
+            html,
+            "TEST",
+            &[
+                section("interface-namednodemap", SectionType::Heading),
+                algo_section("dom-namednodemap-item"),
+                section("dom-namednodemap-length", SectionType::Definition),
+            ],
+            &SpecRegistry::new(),
+        );
+        assert_eq!(
+            from_and_kind(&refs, "attribute-list"),
+            ("dom-namednodemap-item".to_string(), RefKind::Step)
+        );
+        assert_eq!(
+            from_and_kind(&refs, "size"),
+            ("interface-namednodemap".to_string(), RefKind::Prose)
+        );
+    }
+
+    #[test]
+    fn test_one_sentence_algorithm_links_are_steps() {
+        let html = r##"
+            <h2 id="interface-namednodemap">Interface NamedNodeMap</h2>
+            <p>The <dfn id="dom-namednodemap-setnameditem">setNamedItem(attr)</dfn> method steps are to return the result of
+            <a href="#concept-element-attributes-set">setting an attribute</a> given attr and element.</p>
+            <p>Unrelated prose about <a href="#attributes">attributes</a>.</p>
+        "##;
+        let refs = extract(
+            html,
+            "TEST",
+            &[
+                section("interface-namednodemap", SectionType::Heading),
+                algo_section("dom-namednodemap-setnameditem"),
+            ],
+            &SpecRegistry::new(),
+        );
+        assert_eq!(
+            from_and_kind(&refs, "concept-element-attributes-set"),
+            ("dom-namednodemap-setnameditem".to_string(), RefKind::Step)
+        );
+        assert_eq!(
+            from_and_kind(&refs, "attributes"),
+            ("interface-namednodemap".to_string(), RefKind::Prose)
+        );
+    }
+
+    #[test]
+    fn test_setter_paragraph_continues_its_attribute() {
+        // Wattsi gives the setter its own algorithm div, which links back to the attribute's
+        // dfn instead of defining anything.
+        let html = r##"
+            <h2 id="the-history-interface">The History interface</h2>
+            <p>To <dfn id="set-text-content">set text content</dfn>, switching on the interface:</p>
+            <dl class="switch"><dt>Element</dt><dd>String replace all.</dd></dl>
+            <div data-algorithm=""><p>The <dfn id="dom-history-scroll-restoration">scrollRestoration</dfn> getter steps are:</p>
+            <ol><li><p>Return <a href="#she-scroll-restoration-mode">scroll restoration mode</a>.</p></li></ol></div>
+            <div data-algorithm=""><p>The <code><a href="#dom-history-scroll-restoration">scrollRestoration</a></code> setter steps are:</p>
+            <ol><li><p>If this's document is not <a href="#fully-active">fully active</a>, then throw.</p></li>
+            <li><p>Set this's <a href="#she-scroll-restoration-mode">scroll restoration mode</a> to the given value.</p></li></ol></div>
+            <p>The <a href="#dom-node-textcontent">textContent</a> setter steps are to <a href="#set-text-content">set text content</a> with this and the given value.</p>
+            <hr>
+        "##;
+        let refs = extract(
+            html,
+            "TEST",
+            &[
+                section("the-history-interface", SectionType::Heading),
+                algo_section("set-text-content"),
+                algo_section("dom-history-scroll-restoration"),
+                algo_section("dom-node-textcontent"),
+            ],
+            &SpecRegistry::new(),
+        );
+        let setter_write = refs
+            .iter()
+            .find(|r| {
+                r.to_anchor == "she-scroll-restoration-mode" && r.step_path.as_deref() == Some("2")
+            })
+            .expect("setter step 2");
+        assert_eq!(setter_write.from_anchor, "dom-history-scroll-restoration");
+        assert_eq!(
+            from_and_kind(&refs, "fully-active"),
+            ("dom-history-scroll-restoration".to_string(), RefKind::Step)
+        );
+        assert_eq!(
+            from_and_kind(&refs, "set-text-content"),
+            ("dom-node-textcontent".to_string(), RefKind::Step)
+        );
+    }
+
+    #[test]
+    fn test_step_linking_a_definition_continues_nothing() {
+        let html = r##"
+            <p>To <dfn id="navigate">navigate</dfn>:</p>
+            <ol>
+                <li><p>If <a href="#cond">cond</a> steps are to run, run these steps:</p>
+                    <ol><li><p>Call <a href="#inner">inner</a>.</p></li></ol></li>
+            </ol>
+        "##;
+        let refs = extract(
+            html,
+            "TEST",
+            &[
+                algo_section("navigate"),
+                section("cond", SectionType::Definition),
+            ],
+            &SpecRegistry::new(),
+        );
+        assert_eq!(find(&refs, "inner").from_anchor, "navigate");
+    }
+
+    #[test]
+    fn test_grammar_components_are_not_steps() {
+        let html = r##"
+            <h2 id="dates">Dates</h2>
+            <div data-algorithm=""><p>A string is a <dfn id="valid-date-string">valid date string</dfn> if it consists of the following components in the given order:</p>
+            <ol><li>A <a href="#valid-month-string">valid month string</a></li><li>A U+002D HYPHEN-MINUS character (-)</li></ol></div>
+        "##;
+        let refs = extract(
+            html,
+            "TEST",
+            &[
+                section("dates", SectionType::Heading),
+                section("valid-date-string", SectionType::Definition),
+            ],
+            &SpecRegistry::new(),
+        );
+        let r = find(&refs, "valid-month-string");
+        assert_eq!((r.from_anchor.as_str(), r.kind), ("dates", RefKind::Prose));
+        assert_eq!(r.step_path, None);
     }
 }

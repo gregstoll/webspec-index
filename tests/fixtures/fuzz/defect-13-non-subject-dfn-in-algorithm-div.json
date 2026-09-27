@@ -4,7 +4,7 @@
   "base_url": "https://html.spec.whatwg.org",
   "anchor": "dom-window-releaseevents",
   "invariant": "T1",
-  "status": "known_bug",
+  "status": "fixed",
   "bug": "#13 a dfn inside an algorithm div is typed Algorithm even when it is not the div's subject",
   "signature": "T1|algorithm/algo-none|not-an-algorithm:algo-div-non-subject",
   "expected": {
