@@ -7,6 +7,7 @@ use regex::Regex;
 use crate::parse::idl_defs::normalize_owner;
 use crate::state::grammar::{Encoded, Env, Parser};
 use crate::state::intro::Intro;
+use crate::state::ir::StatementSource;
 use crate::state::model::{
     Param, Passing, ReturnBasis, ReturnType, Signature, SignatureForm, SignatureIssue, Template,
     TemplatePiece, TypeBasis, TypeExpr, TypeRef,
@@ -72,12 +73,7 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
 
     let env = Env::default();
     let mut parser = Parser::new(&enc, &intro.source, &env);
-    let links: Vec<(String, TypeRef)> = intro
-        .source
-        .links
-        .iter()
-        .map(|link| (link.visible_text.clone(), names.link_type(link)))
-        .collect();
+    let links = type_links(&intro.source, names);
 
     let mut pieces = Vec::new();
     let head = parser.src_text(head_start, dfn_start);
@@ -227,17 +223,26 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
     })
 }
 
+/// Each link's visible text and the type it denotes in a type position.
+pub(crate) fn type_links(source: &StatementSource, names: &NameResolver) -> Vec<(String, TypeRef)> {
+    source
+        .links
+        .iter()
+        .map(|link| (link.visible_text.clone(), names.link_type(link)))
+        .collect()
+}
+
 /// The type phrase ending a glue: the words from `k` on, `core_start` after
 /// its article words.
-struct TypePhrase {
-    k: usize,
-    core_start: usize,
-    ty: TypeExpr,
-    basis: TypeBasis,
+pub(crate) struct TypePhrase {
+    pub k: usize,
+    pub core_start: usize,
+    pub ty: TypeExpr,
+    pub basis: TypeBasis,
 }
 
 /// The longest suffix of `words` that is an intro type phrase.
-fn type_phrase(
+pub(crate) fn type_phrase(
     text: &str,
     words: &[(usize, usize)],
     links: &[(String, TypeRef)],
@@ -278,7 +283,7 @@ fn starts_typed(core: &str) -> bool {
 
 /// Encoded ranges of the words in `start..end`: whitespace-separated, with
 /// every `,` a word of its own.
-fn words(text: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
+pub(crate) fn words(text: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut push = |word_start: usize, word_end: usize| {
         let mut s = word_start;
