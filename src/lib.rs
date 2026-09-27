@@ -568,7 +568,9 @@ fn search_sections_pr(
                 spec: row.get(1)?,
                 title: row.get(2)?,
                 section_type: row.get(3)?,
-                snippet: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                snippet: confine_snippet_marks(
+                    &row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                ),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -741,7 +743,7 @@ pub fn search_sections_fts(
             spec: row.get(1)?,
             title: row.get(2)?,
             section_type: row.get(3)?,
-            snippet: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            snippet: confine_snippet_marks(&row.get::<_, Option<String>>(4)?.unwrap_or_default()),
         })
     };
     if let Some(spec_name) = spec {
@@ -751,6 +753,152 @@ pub fn search_sections_fts(
         stmt.query_map((query, limit), map_row)?
             .collect::<rusqlite::Result<Vec<_>>>()
     }
+}
+
+const MARK_OPEN: &str = "<mark>";
+const MARK_CLOSE: &str = "</mark>";
+
+/// Confines the `<mark>` tags FTS5 puts around matches in a markdown snippet to
+/// visible text: link targets lose them, and a code span holding a match is
+/// highlighted as a whole.
+pub fn confine_snippet_marks(snippet: &str) -> String {
+    let mut out = String::with_capacity(snippet.len());
+    // `open` follows the FTS5 highlight stream, `emitted` whether `out` has an
+    // unclosed `<mark>`.
+    let mut open = false;
+    let mut emitted = false;
+    let mut rest = snippet;
+
+    // A snippet cut off inside a link target starts with the target's tail.
+    if let Some(tail) = rest.strip_prefix("...") {
+        if let Some(close) = tail.find(')') {
+            let prefix = &tail[..close];
+            if !prefix.contains(|c: char| c.is_whitespace() || "[]()`".contains(c)) {
+                out.push_str("...");
+                rest = copy_link_target(tail, &mut out, &mut open);
+            }
+        }
+    }
+
+    while let Some(c) = rest.chars().next() {
+        if let Some(after) = rest.strip_prefix(MARK_OPEN) {
+            open = true;
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix(MARK_CLOSE) {
+            open = false;
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix("](") {
+            if emitted {
+                out.push_str(MARK_CLOSE);
+                emitted = false;
+            }
+            out.push_str("](");
+            rest = copy_link_target(after, &mut out, &mut open);
+        } else if c == '`' {
+            let fence_len = rest.len() - rest.trim_start_matches('`').len();
+            let (fence, after) = rest.split_at(fence_len);
+            let Some(close) = find_code_span_close(after, fence_len) else {
+                sync_mark(&mut out, open, &mut emitted);
+                out.push_str(fence);
+                rest = after;
+                continue;
+            };
+            let mut touched = open;
+            let mut code = String::with_capacity(close);
+            let mut inner = &after[..close];
+            while let Some(ch) = inner.chars().next() {
+                if let Some(next) = inner.strip_prefix(MARK_OPEN) {
+                    open = true;
+                    touched = true;
+                    inner = next;
+                } else if let Some(next) = inner.strip_prefix(MARK_CLOSE) {
+                    open = false;
+                    inner = next;
+                } else {
+                    code.push(ch);
+                    inner = &inner[ch.len_utf8()..];
+                }
+            }
+            if touched && !emitted {
+                out.push_str(MARK_OPEN);
+                emitted = true;
+            }
+            out.push_str(fence);
+            out.push_str(&code);
+            out.push_str(fence);
+            rest = &after[close + fence_len..];
+        } else {
+            sync_mark(&mut out, open, &mut emitted);
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    if emitted {
+        out.push_str(MARK_CLOSE);
+    }
+    out
+}
+
+/// Opens or closes a `<mark>` in `out` so it matches the highlight state before
+/// visible text is written.
+fn sync_mark(out: &mut String, open: bool, emitted: &mut bool) {
+    if open != *emitted {
+        out.push_str(if open { MARK_OPEN } else { MARK_CLOSE });
+        *emitted = open;
+    }
+}
+
+/// Copies a link target up to and including its closing parenthesis, dropping
+/// highlight tags but tracking their state; returns the text after it.
+fn copy_link_target<'a>(target: &'a str, out: &mut String, open: &mut bool) -> &'a str {
+    let mut depth = 1usize;
+    let mut rest = target;
+    while let Some(c) = rest.chars().next() {
+        if let Some(after) = rest.strip_prefix(MARK_OPEN) {
+            *open = true;
+            rest = after;
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix(MARK_CLOSE) {
+            *open = false;
+            rest = after;
+            continue;
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    rest
+}
+
+/// Byte offset in `text` of the backtick run of exactly `fence_len` that closes
+/// a code span.
+fn find_code_span_close(text: &str, fence_len: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            let start = i;
+            while i < bytes.len() && bytes[i] == b'`' {
+                i += 1;
+            }
+            if i - start == fence_len {
+                return Some(start);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 pub fn is_fts_syntax_error(err: &rusqlite::Error) -> bool {
@@ -2935,6 +3083,81 @@ mod tests {
         assert_eq!(
             sanitize_for_fts("initial about:blank AND (").as_deref(),
             Some(r#""initial" "about" "blank" "AND""#)
+        );
+    }
+
+    #[test]
+    fn search_markdown_keeps_link_targets_and_code_spans_intact() {
+        let conn = db::open_test_db().unwrap();
+        let spec_id =
+            write::insert_or_get_spec(&conn, "HTML", "https://html.spec.whatwg.org", "whatwg")
+                .unwrap();
+        let snapshot =
+            write::insert_snapshot(&conn, spec_id, "hash:sha-html", "2026-01-01T00:00:00Z")
+                .unwrap();
+        let section = ParsedSection {
+            anchor: "activate-history-entry".to_string(),
+            title: Some("activate history entry".to_string()),
+            content_text: Some(
+                "3. [Assert](https://infra.spec.whatwg.org/#assert): *newDocument*'s \
+                 [is initial `about:blank`](https://html.spec.whatwg.org#is-initial-about:blank) \
+                 is false."
+                    .to_string(),
+            ),
+            section_type: SectionType::Algorithm,
+            parent_anchor: None,
+            prev_anchor: None,
+            next_anchor: None,
+            depth: None,
+            number: None,
+        };
+        write::insert_sections_bulk(&conn, snapshot, &[section]).unwrap();
+
+        let query = sanitize_for_fts("initial about:blank").unwrap();
+        let results = search_sections_fts(&conn, &query, None, 10).unwrap();
+        let markdown = format::search(&model::SearchResult {
+            query: "initial about:blank".to_string(),
+            results,
+        });
+
+        assert!(
+            markdown.contains(
+                "*newDocument*'s [is <mark>initial</mark> <mark>`about:blank`</mark>]\
+                 (https://html.spec.whatwg.org#is-initial-about:blank) is false."
+            ),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn confine_snippet_marks_drops_marks_in_a_truncated_leading_link_target() {
+        assert_eq!(
+            confine_snippet_marks("...org#is-<mark>initial</mark>-about) is <mark>false</mark>"),
+            "...org#is-initial-about) is <mark>false</mark>"
+        );
+    }
+
+    #[test]
+    fn confine_snippet_marks_reopens_a_phrase_after_a_link_target() {
+        assert_eq!(
+            confine_snippet_marks("[<mark>tree](https://x#tree) order</mark> ends"),
+            "[<mark>tree</mark>](https://x#tree)<mark> order</mark> ends"
+        );
+    }
+
+    #[test]
+    fn confine_snippet_marks_keeps_nested_parentheses_in_link_targets() {
+        assert_eq!(
+            confine_snippet_marks("[a](https://x#f(<mark>b</mark>)) <mark>b</mark>"),
+            "[a](https://x#f(b)) <mark>b</mark>"
+        );
+    }
+
+    #[test]
+    fn confine_snippet_marks_leaves_an_unclosed_code_span_highlighted() {
+        assert_eq!(
+            confine_snippet_marks("see `<mark>about</mark>:blank..."),
+            "see `<mark>about</mark>:blank..."
         );
     }
 
