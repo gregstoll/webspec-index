@@ -21,6 +21,7 @@ pub mod render;
 pub(crate) mod rules;
 #[cfg(feature = "native")]
 pub mod service;
+pub(crate) mod signature;
 pub mod slice;
 pub mod testing;
 pub(crate) mod typeexpr;
