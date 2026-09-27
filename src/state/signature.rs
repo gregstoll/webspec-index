@@ -35,9 +35,10 @@ const TYPE_WORDS: [&str; 13] = [
     "tuple",
     "struct",
 ];
-const TERMINATORS: [&str; 7] = [
+const TERMINATORS: [&str; 8] = [
     ":",
     ", run these steps:",
+    ", run these steps.",
     ", run the following steps:",
     ", perform the following steps:",
     ", perform the following steps.",
@@ -98,6 +99,9 @@ pub(crate) fn to_signature(intro: &Intro, names: &NameResolver) -> Option<Signat
         let var_end = enc.to_enc(var.span.end);
         if var_start < cursor {
             continue;
+        }
+        if enc.text[cursor..var_start].contains(". ") {
+            break;
         }
         let mut words = words(&enc.text, cursor, var_start);
         if enc.text[cursor..var_start]
@@ -491,6 +495,15 @@ fn terminator(
     if TERMINATORS.contains(&rest) {
         return Ok(None);
     }
+    // A terminating sentence followed by notes on the parameters.
+    if TERMINATORS.iter().any(|t| {
+        t.ends_with('.')
+            && rest
+                .strip_prefix(t)
+                .is_some_and(|notes| notes.starts_with(' '))
+    }) {
+        return Ok(None);
+    }
     let stated = rest
         .strip_prefix(". They return ")
         .and_then(|r| r.strip_suffix('.'))
@@ -548,7 +561,8 @@ mod tests {
     use crate::state::intro::{algorithm_intros, IdIndex};
     use crate::state::ir::Expr;
     use crate::state::model::{
-        Literal, Passing, ReturnBasis, SignatureForm, SignatureIssue, TemplatePiece as P, TypeBasis,
+        Literal, Passing, Primitive, ReturnBasis, SignatureForm, SignatureIssue,
+        TemplatePiece as P, TypeBasis,
     };
     use crate::state::testing::*;
 
@@ -627,6 +641,31 @@ mod tests {
         );
         assert_eq!(fire.params[2].ty, TypeExpr::Unknown);
         assert!(fire.params[2].optional && fire.params[3].optional);
+    }
+
+    #[test]
+    fn variables_after_the_intro_sentence_are_not_parameters() {
+        let html = r##"<p>To <dfn id="fetch">fetch a classic script</dfn> given a <a href="https://url.spec.whatwg.org/#concept-url">URL</a> <var>url</var>, and an algorithm <var>onComplete</var>, run these steps. <var>onComplete</var> must be an algorithm accepting null.</p><ol><li><p>Return.</p></li></ol>
+<p>To <dfn id="step">apply the step</dfn> given a non-negative integer <var>step</var>:</p><ol><li><p>Return.</p></li></ol>"##;
+        let all = sigs(html, "HTML");
+        let s = find(&all, "fetch");
+        let names: Vec<&str> = s.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["url", "onComplete"]);
+        assert_eq!(
+            s.template.as_ref().unwrap().pieces,
+            vec![P::Callee, lit("given"), P::Slot(0), P::ListSep, P::Slot(1)]
+        );
+        assert!(!s
+            .issues
+            .iter()
+            .any(|i| matches!(i, SignatureIssue::DuplicateParam(_))));
+        assert!(!s
+            .issues
+            .iter()
+            .any(|i| matches!(i, SignatureIssue::UnparsedIntroTail(_))));
+        let step = find(&all, "step");
+        assert_eq!(step.params[0].ty, TypeExpr::Primitive(Primitive::Integer));
+        assert_eq!(step.params[0].type_basis, TypeBasis::Explicit);
     }
 
     #[test]

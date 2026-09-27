@@ -330,6 +330,9 @@ fn intro_alt(
     if let Some(primitive) = primitive_phrase(bare).or_else(|| linked_primitive(bare, links)) {
         return explicit(TypeExpr::Primitive(primitive));
     }
+    if bare == "non-negative integer" {
+        return explicit(TypeExpr::Primitive(Primitive::Integer));
+    }
     if bare == "code point" || linked_text(bare, links).is_some_and(|t| t == "code point") {
         return explicit(TypeExpr::Opaque {
             text: "code point".into(),
@@ -346,7 +349,7 @@ fn intro_alt(
     }
     if let Some(caps) = regex(
         &NOMINAL,
-        r"^(?:(?:two|three|four) )?(⟦L\d+⟧)(?: ⟦L\d+⟧)?(?: (?:object|element|node|interface)s?)?$",
+        r"^(?:(?:two|three|four) )?(⟦L\d+⟧)(?: ⟦L\d+⟧)?(?: (?:object|element|node|interface|dictionary)s?)?$",
     )
     .captures(bare)
     {
@@ -1066,5 +1069,42 @@ mod tests {
         assert_eq!(parse("string,", &[], false), None);
         assert_eq!(parse("string or", &[], false), None);
         assert_eq!(parse("", &[], true), None);
+    }
+
+    #[test]
+    fn non_negative_integers_and_linked_dictionaries() {
+        use crate::state::testing::{extract_html, ty, AUTODIR_HTML};
+        let document = scraper::Html::parse_document(AUTODIR_HTML);
+        let state = extract_html(AUTODIR_HTML, "HTML");
+        let names = crate::state::names::NameResolver::new(
+            "HTML",
+            &state.model,
+            &crate::state::declare::concept_dfns(&document),
+        );
+        let options = (
+            "`ElementCreationOptions`".to_string(),
+            TypeRef::Known(TypeKey::Idl("ElementCreationOptions".into())),
+        );
+        let parse = |core: &str, links: &[(String, TypeRef)], article: bool| {
+            parse_intro_type(core, links, &names, article).map(|(t, b)| (ty(&t), b))
+        };
+        let explicit = |s: &str| Some((s.to_string(), TypeBasis::Explicit));
+        assert_eq!(
+            parse("non-negative integer", &[], true),
+            explicit("integer")
+        );
+        assert_eq!(
+            parse("non-negative integer", &[], false),
+            explicit("integer")
+        );
+        assert_eq!(
+            parse("string or ⟦L0⟧ dictionary", &[options], false),
+            explicit("string | idl:ElementCreationOptions")
+        );
+        assert_eq!(
+            parse("non-negative number", &[], true),
+            explicit("opaque(non-negative number)"),
+            "only the integer qualifier is measured"
+        );
     }
 }
