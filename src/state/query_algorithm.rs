@@ -79,7 +79,8 @@ pub(crate) fn algorithm_view(
     if summary.is_none() && signature.is_none() {
         return Ok(None);
     }
-    let name = db::section_title(conn, &spec_ids, anchor)?.unwrap_or_else(|| anchor.to_string());
+    let name = db::section_title(conn, &spec_ids, anchor)?
+        .map_or_else(|| anchor.to_string(), |title| one_line(&title));
     let base_url = snapshots
         .iter()
         .find(|s| s.spec == spec)
@@ -131,8 +132,8 @@ pub(crate) fn algorithm_view(
             }
             _ => None,
         };
-        let callee_name = title.as_deref().unwrap_or(&call.call.callee.visible_text);
-        views.push(call_view(call, &binding, callee_signature, callee_name));
+        let callee_name = one_line(title.as_deref().unwrap_or(&call.call.callee.visible_text));
+        views.push(call_view(call, &binding, callee_signature, &callee_name));
     }
     let callers = if options.callers {
         Some(caller_list(
@@ -221,6 +222,11 @@ fn caller_list(
         groups,
         more,
     })
+}
+
+/// `text` with every whitespace run, line breaks included, as one space.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn ids_of(snapshots: &[StateSnapshot], spec: &str) -> Vec<i64> {
@@ -317,14 +323,15 @@ pub(crate) fn call_view(
                 .span
                 .and_then(|span| stored.source.text.get(span.start..span.end))
                 .map_or_else(|| render::expr_text(expr), str::to_string),
-            ArgValue::Body(body) => arg
+            // A body argument names the nested steps' source, not text.
+            ArgValue::Body(_) => arg
                 .span
                 .and_then(|span| stored.source.text.get(span.start..span.end))
-                .map_or_else(|| body.clone(), str::to_string),
+                .map_or_else(|| "(substeps)".to_string(), str::to_string),
         };
         args.push(ArgView {
             param: param(arg.param).map_or_else(|| arg.param.to_string(), |p| p.name.clone()),
-            value,
+            value: one_line(&value),
             via: arg.via.clone(),
         });
     }
@@ -499,6 +506,36 @@ mod tests {
         assert!(view(&conn, "HTML#navigate", false, false, false, None)
             .callers
             .is_none());
+    }
+
+    #[test]
+    fn body_argument_and_wrapped_callee_title() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="q">queue a
+    global task</dfn> on a <a href="#task-source">task source</a> <var>source</var>, with a <a href="#global-object">global object</a> <var>global</var> and a series of steps <var>steps</var>:</p><ol><li><p>Return.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="c">c</dfn> given a <a href="#global-object">global object</a> <var>global</var>:</p><ol>
+<li><p><a href="#q">Queue a global task</a> on <var>source</var> given <var>global</var> to run the following steps:</p><ol><li><p>Return.</p></li></ol></li>
+</ol></div>"##;
+        let conn = db_with(&[("HTML", html)]);
+        let c = view(&conn, "HTML#c", true, false, false, None)
+            .calls
+            .unwrap()
+            .remove(0);
+        assert_eq!(c.callee_name, "queue a global task");
+        assert_eq!(
+            c.args
+                .iter()
+                .map(|a| (a.param.as_str(), a.value.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("source", "*source*"),
+                ("global", "*global*"),
+                ("steps", "(substeps)")
+            ]
+        );
+        assert_eq!(
+            view(&conn, "HTML#q", false, false, false, None).name,
+            "queue a global task"
+        );
     }
 
     #[test]
