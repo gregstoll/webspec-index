@@ -156,6 +156,7 @@ pub fn extract_state(inputs: &StateInputs) -> StateSpec {
         coverage,
         issues: declared.issues,
         declared_sites,
+        ..Default::default()
     }
 }
 
@@ -263,6 +264,7 @@ fn path_shape(path: &Path) -> String {
 
 /// Statement-form key: `let`, `set:<form>:<shape>`, `mutate:<op>:<shape>`,
 /// `init:<form>`, `opaque:<reason>:<verb or none>`.
+/// New control-flow kinds return their serde tag.
 fn statement_key(kind: &StatementKind) -> String {
     match kind {
         StatementKind::Let { .. } => "let".to_string(),
@@ -281,6 +283,21 @@ fn statement_key(kind: &StatementKind) -> String {
                 verb.as_deref().unwrap_or("none")
             )
         }
+        StatementKind::Call { .. } => "call".to_string(),
+        StatementKind::If { .. } => "if".to_string(),
+        StatementKind::Otherwise { .. } => "otherwise".to_string(),
+        StatementKind::ForEach { .. } => "for_each".to_string(),
+        StatementKind::While { .. } => "while".to_string(),
+        StatementKind::Return { .. } => "return".to_string(),
+        StatementKind::Throw { .. } => "throw".to_string(),
+        StatementKind::Abort { .. } => "abort".to_string(),
+        StatementKind::Continue => "continue".to_string(),
+        StatementKind::Break => "break".to_string(),
+        StatementKind::ContinueRemaining { .. } => "continue_remaining".to_string(),
+        StatementKind::Wait { .. } => "wait".to_string(),
+        StatementKind::InParallel { .. } => "in_parallel".to_string(),
+        StatementKind::RunSteps { .. } => "run_steps".to_string(),
+        StatementKind::Assert { .. } => "assert".to_string(),
     }
 }
 
@@ -313,6 +330,7 @@ fn step_path(context: &SourceContext) -> Option<&str> {
             step_path.as_deref()
         }
         SourceContext::BranchLabel { step_path, .. } => Some(step_path),
+        SourceContext::Intro { .. } => None,
     }
 }
 
@@ -320,7 +338,7 @@ fn step_id(context: &SourceContext) -> Option<&str> {
     match context {
         SourceContext::Algorithm { step_id, .. } => step_id.as_deref(),
         SourceContext::BranchLabel { step_id, .. } => Some(step_id),
-        SourceContext::Prose { .. } => None,
+        SourceContext::Prose { .. } | SourceContext::Intro { .. } => None,
     }
 }
 
@@ -630,6 +648,7 @@ pub(crate) fn site(
         SourceContext::Algorithm { .. } => ("algorithm", None),
         SourceContext::BranchLabel { .. } => ("branch_label", None),
         SourceContext::Prose { role, .. } => ("prose", Some(role_name(*role).to_string())),
+        SourceContext::Intro { .. } => ("intro", None),
     };
     let (segment_id, body_id) = match &source.context {
         SourceContext::Algorithm {
@@ -638,7 +657,7 @@ pub(crate) fn site(
             ..
         } => (Some(segment_id.clone()), Some(body_id.clone())),
         SourceContext::BranchLabel { segment_id, .. } => (Some(segment_id.clone()), None),
-        SourceContext::Prose { .. } => (None, None),
+        SourceContext::Prose { .. } | SourceContext::Intro { .. } => (None, None),
     };
     let (span_start, span_end) = match statement_span {
         Some(span) => (

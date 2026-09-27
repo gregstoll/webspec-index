@@ -339,6 +339,25 @@ fn build_one<'a, 's>(
                     in_span(&source.tokens, &source.links, &placed.statement.span).collect();
                 edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
             }
+            StatementKind::Call { .. }
+            | StatementKind::If { .. }
+            | StatementKind::Otherwise { .. }
+            | StatementKind::ForEach { .. }
+            | StatementKind::While { .. }
+            | StatementKind::Return { .. }
+            | StatementKind::Throw { .. }
+            | StatementKind::Abort { .. }
+            | StatementKind::Continue
+            | StatementKind::Break
+            | StatementKind::ContinueRemaining { .. }
+            | StatementKind::Wait { .. }
+            | StatementKind::InParallel { .. }
+            | StatementKind::RunSteps { .. }
+            | StatementKind::Assert { .. } => {
+                let names =
+                    in_span(&source.tokens, &source.links, &placed.statement.span).collect();
+                edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
+            }
         }
     }
 
@@ -384,6 +403,21 @@ fn expr_vars<'s>(expr: &'s Expr, lookups: &Lookups<'s>, out: &mut Vec<&'s str>) 
         }
         Expr::Opaque { text } => out.extend(scan_starred(text)),
         Expr::This | Expr::Literal(_) | Expr::New { init: None, .. } => {}
+        Expr::Call(_) | Expr::AlgorithmRef { .. } => {}
+        Expr::List(items) => {
+            for item in items {
+                expr_vars(item, lookups, out);
+            }
+        }
+        Expr::EnumValue { .. } => {}
+        Expr::Conditional {
+            condition: _,
+            then,
+            otherwise,
+        } => {
+            expr_vars(then, lookups, out);
+            expr_vars(otherwise, lookups, out);
+        }
     }
 }
 
@@ -447,11 +481,14 @@ fn subscript_text(expr: &Expr, source: &StatementSource) -> String {
             Literal::Undefined => "undefined".to_owned(),
             Literal::Number(n) => n.clone(),
             Literal::String(s) => format!("\"{s}\""),
+            Literal::Failure => "failure".to_owned(),
         },
         Expr::Opaque { text } => text.clone(),
         Expr::Path(path) => render_path(path, source),
         Expr::This => "this".to_owned(),
         Expr::New { .. } => "a new value".to_owned(),
+        Expr::Call(_) | Expr::AlgorithmRef { .. } | Expr::EnumValue { .. } => String::new(),
+        Expr::List(_) | Expr::Conditional { .. } => String::new(),
     }
 }
 

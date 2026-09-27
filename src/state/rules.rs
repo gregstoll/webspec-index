@@ -193,6 +193,7 @@ fn apply_mutate(
                     rule_id: rule_id.clone(),
                 },
             },
+            parent: None,
         });
     }
     let operand_links = source

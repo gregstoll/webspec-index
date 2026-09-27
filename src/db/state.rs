@@ -1266,6 +1266,7 @@ mod tests {
             coverage: CoverageCounters::default(),
             issues: vec![],
             declared_sites: vec![],
+            ..Default::default()
         };
         store_state(&conn, snapshot, &state).unwrap();
         let owner_basis: Option<String> = conn

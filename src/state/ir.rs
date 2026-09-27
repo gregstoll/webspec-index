@@ -49,6 +49,11 @@ pub enum SourceContext {
         step_path: Option<String>,
         role: ProseRole,
     },
+    /// The algorithm introduction paragraph (§8 intro source).
+    Intro {
+        algorithm: AnchorTarget,
+        node_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +77,8 @@ pub struct Statement {
     pub source_id: String,
     pub span: TextSpan,
     pub kind: StatementKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<StatementParent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +112,58 @@ pub enum StatementKind {
         reason: OpaqueReason,
         verb: Option<String>,
         target_text: Option<String>,
+    },
+    /// A call statement; `call` is the `Call.id`.
+    Call {
+        call: String,
+    },
+    If {
+        condition: Predicate,
+        then: BodyLoc,
+    },
+    Otherwise {
+        of: Option<String>,
+        condition: Option<Predicate>,
+        body: BodyLoc,
+    },
+    ForEach {
+        vars: Vec<String>,
+        collection: Expr,
+        filter: Option<Predicate>,
+        order: Option<String>,
+        body: BodyLoc,
+    },
+    While {
+        condition: Option<Predicate>,
+        form: LoopForm,
+        body: BodyLoc,
+    },
+    Return {
+        value: Option<Expr>,
+    },
+    Throw {
+        exception: ExceptionRef,
+    },
+    Abort {
+        text: String,
+    },
+    Continue,
+    Break,
+    ContinueRemaining {
+        continuation_site: Option<String>,
+    },
+    Wait {
+        condition: Option<Predicate>,
+        text: String,
+    },
+    InParallel {
+        body: BodyLoc,
+    },
+    RunSteps {
+        body: BodyLoc,
+    },
+    Assert {
+        predicate: Predicate,
     },
 }
 
@@ -173,6 +232,25 @@ pub enum Expr {
     Opaque {
         text: String,
     },
+    /// A call result; value is the `Call.id`.
+    Call(String),
+    /// A cross-spec algorithm reference in value position (not a call).
+    AlgorithmRef {
+        link_id: String,
+        target: Option<AnchorTarget>,
+    },
+    /// A list literal `« e1, e2, … »`.
+    List(Vec<Expr>),
+    /// An enum string value, e.g. `"auto"`.
+    EnumValue {
+        text: String,
+        target: Option<AnchorTarget>,
+    },
+    Conditional {
+        condition: Box<Predicate>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +299,254 @@ pub enum OpaqueReason {
     ValueIsInvocation,
     UnsupportedForm,
     Other,
+}
+
+// ---------------------------------------------------------------------------
+// New statement-level types (§F2)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatementParent {
+    pub statement_id: String,
+    pub role: BlockRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockRole {
+    Then,
+    Otherwise,
+    Body,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyLoc {
+    InlineRest,
+    ChildSteps { step_id: String },
+    Body { body_id: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopForm {
+    While,
+    Repeat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExceptionRef {
+    pub name: Option<String>,
+    pub link: Option<AnchorTarget>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Predicate {
+    Is {
+        operand: Expr,
+        test: Test,
+        negated: bool,
+    },
+    Compare {
+        lhs: Expr,
+        op: CmpOp,
+        rhs: Expr,
+        negated: bool,
+    },
+    OneOf {
+        operand: Expr,
+        values: Vec<Expr>,
+        negated: bool,
+    },
+    Contains {
+        container: Expr,
+        item: Expr,
+        negated: bool,
+    },
+    Exists {
+        operand: Expr,
+        negated: bool,
+    },
+    HasAttribute {
+        element: Expr,
+        name: String,
+        negated: bool,
+    },
+    Holds {
+        subjects: Vec<Expr>,
+        link_id: String,
+        target: Option<AnchorTarget>,
+        call: Option<String>,
+    },
+    RunningOn {
+        context: RunContext,
+    },
+    And(Vec<Predicate>),
+    Or(Vec<Predicate>),
+    Implies(Box<Predicate>, Box<Predicate>),
+    Opaque {
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Test {
+    Null,
+    True,
+    False,
+    Empty,
+    Set,
+    Type(crate::state::model::TypeExpr),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CmpOp {
+    Eq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunContext {
+    InParallel,
+    Queue(Expr),
+    EventLoopTask(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Call {
+    pub id: String,
+    pub source_id: String,
+    pub statement_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_call: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<String>,
+    pub callee: Callee,
+    pub form: CallForm,
+    pub span: TextSpan,
+    pub region: TextSpan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named: Vec<NamedArg>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body_args: Vec<String>,
+    pub hint: ExecutionHint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Callee {
+    pub link_id: String,
+    pub target: Option<AnchorTarget>,
+    pub visible_text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallForm {
+    Imperative,
+    ResultOf,
+    Gerund,
+    Possessive,
+    Predicate,
+    SetToBe,
+    Ecmarkup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedArg {
+    pub name: ArgName,
+    pub value: Expr,
+    pub span: TextSpan,
+    pub form: NamedForm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArgName {
+    ParamLink {
+        link_id: String,
+        target: Option<AnchorTarget>,
+    },
+    Var(String),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamedForm {
+    SetTo,
+    FlagSet,
+    AttributeInit { member: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionHint {
+    Inline,
+    InParallel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceLinkRoles {
+    pub source_id: String,
+    /// One role per link, in link order.
+    pub roles: Vec<LinkRole>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkRole {
+    Callee { call: String },
+    AlgorithmValue,
+    ParamName { call: String },
+    Field,
+    Type,
+    Predicate { call: Option<String> },
+    InfraOp { statement: String },
+    Keyword,
+    Value,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarOrigins {
+    pub subject: AnchorTarget,
+    pub vars: Vec<VarOrigin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarOrigin {
+    pub name: String,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Param { index: u32 },
+    Let { statement_id: String },
+    LoopVar { statement_id: String },
+    BodyParam { body_id: String },
+    Undeclared,
+}
+
+/// `call-` + sha256(source_id \0 link_id). A link is the callee of at most one call.
+#[allow(dead_code)]
+pub(crate) fn call_id(source_id: &str, link_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(link_id.as_bytes());
+    format!("call-{:x}", hasher.finalize())
 }
 
 // ---------------------------------------------------------------------------
@@ -678,6 +1004,7 @@ pub(crate) fn parse_branch_label(
             }],
             form: InitForm::DlEntries,
         },
+        parent: None,
     });
     out.link_roles = (0..source.links.len())
         .map(|index| {
@@ -1205,6 +1532,7 @@ impl<'a> Parser<'a> {
             source_id: self.source.id.clone(),
             span,
             kind,
+            parent: None,
         });
         id
     }
@@ -2676,5 +3004,70 @@ mod tests {
             }
         ));
         assert_eq!(role_of(&s, &p, "b"), Some(OccurrenceClass::Write));
+    }
+
+    #[test]
+    fn new_statement_kinds_and_parent_round_trip() {
+        let statement = Statement {
+            id: "stmt-1".into(),
+            source_id: "src-1".into(),
+            span: TextSpan { start: 0, end: 7 },
+            kind: StatementKind::Return { value: None },
+            parent: Some(StatementParent {
+                statement_id: "stmt-0".into(),
+                role: BlockRole::Then,
+            }),
+        };
+        let json = serde_json::to_value(&statement).unwrap();
+        assert_eq!(json["kind"], serde_json::json!({"return": {"value": null}}));
+        assert_eq!(json["parent"]["role"], "then");
+        assert_eq!(
+            serde_json::from_value::<Statement>(json).unwrap(),
+            statement
+        );
+        let old = serde_json::json!({"id": "s", "source_id": "x", "span": {"start": 0, "end": 1}, "kind": {"opaque": {"reason": "other", "verb": null, "target_text": null}}});
+        assert_eq!(
+            serde_json::from_value::<Statement>(old).unwrap().parent,
+            None
+        );
+    }
+
+    #[test]
+    fn predicate_and_call_serialization_shapes() {
+        let p = Predicate::Is {
+            operand: Expr::Var("x".into()),
+            test: Test::Null,
+            negated: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&p).unwrap(),
+            serde_json::json!({"is": {"operand": {"var": "x"}, "test": "null", "negated": true}})
+        );
+        assert_eq!(
+            serde_json::to_value(RunContext::InParallel).unwrap(),
+            serde_json::json!("in_parallel")
+        );
+        assert_eq!(
+            serde_json::to_value(CallForm::SetToBe).unwrap(),
+            serde_json::json!("set_to_be")
+        );
+        assert_eq!(
+            serde_json::to_value(LinkRole::Callee {
+                call: "call-1".into()
+            })
+            .unwrap(),
+            serde_json::json!({"callee": {"call": "call-1"}})
+        );
+        assert_eq!(
+            serde_json::to_value(Origin::Param { index: 0 }).unwrap(),
+            serde_json::json!({"param": {"index": 0}})
+        );
+    }
+
+    #[test]
+    fn call_ids_are_stable_and_distinct() {
+        assert_eq!(call_id("src-a", "link-1"), call_id("src-a", "link-1"));
+        assert_ne!(call_id("src-a", "link-1"), call_id("src-a", "link-2"));
+        assert!(call_id("src-a", "link-1").starts_with("call-"));
     }
 }

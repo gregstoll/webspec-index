@@ -196,6 +196,10 @@ pub enum TypeExpr {
     Opaque {
         text: String,
     },
+    /// An IDL type reference (e.g. `DOMString`) without a resolved anchor.
+    Idl {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -246,6 +250,7 @@ pub enum Literal {
     Undefined,
     Number(String),
     String(String),
+    Failure,
 }
 
 /// HTML reflection: an IDL attribute whose getter and setter read and write a
@@ -277,12 +282,143 @@ pub struct SetMember {
     pub declaration: DeclarationSite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectModel {
     pub types: Vec<TypeDef>,
     pub fields: Vec<FieldDef>,
     pub members: Vec<SetMember>,
     pub reflections: Vec<Reflection>,
+}
+
+// ---------------------------------------------------------------------------
+// Signature types (§8)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Signature {
+    pub algorithm: AnchorTarget,
+    pub source_id: String,
+    pub form: SignatureForm,
+    pub this: Option<TypeExpr>,
+    pub params: Vec<Param>,
+    pub returns: Option<ReturnType>,
+    pub template: Option<Template>,
+    pub issues: Vec<SignatureIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureForm {
+    To,
+    WhenStepsSay,
+    GivenList,
+    IdlMethod { interface: String, member: String },
+    IdlGetter { interface: String, member: String },
+    IdlSetter { interface: String, member: String },
+    IdlConstructor { interface: String },
+    Accessor,
+    Predicate,
+    Declared,
+    Ecmarkup,
+}
+
+impl SignatureForm {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::To => "to",
+            Self::WhenStepsSay => "when_steps_say",
+            Self::GivenList => "given_list",
+            Self::IdlMethod { .. } => "idl_method",
+            Self::IdlGetter { .. } => "idl_getter",
+            Self::IdlSetter { .. } => "idl_setter",
+            Self::IdlConstructor { .. } => "idl_constructor",
+            Self::Accessor => "accessor",
+            Self::Predicate => "predicate",
+            Self::Declared => "declared",
+            Self::Ecmarkup => "ecmarkup",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Param {
+    pub name: String,
+    pub anchor: Option<AnchorTarget>,
+    pub ty: TypeExpr,
+    pub type_text: String,
+    pub type_basis: TypeBasis,
+    pub optional: bool,
+    pub default: Option<crate::state::ir::Expr>,
+    pub passing: Passing,
+    pub span: crate::parse::steps::TextSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeBasis {
+    Explicit,
+    NameResolved,
+    DfnFor,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Passing {
+    Positional { index: u32 },
+    Named,
+    Receiver,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Template {
+    pub pieces: Vec<TemplatePiece>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplatePiece {
+    Head(String),
+    Callee,
+    Literal(String),
+    Slot(u32),
+    ListSep,
+    NamedGroup(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturnType {
+    pub ty: TypeExpr,
+    pub basis: ReturnBasis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReturnBasis {
+    Intro,
+    Idl,
+    Ecmarkup,
+    ReturnStatements,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureIssue {
+    UntypedParam(String),
+    OpaqueType(String),
+    UnparsedIntroTail(String),
+    IdlMemberNotFound,
+    DuplicateParam(String),
+}
+
+/// Algorithm-level summary for one anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlgorithmSummary {
+    pub anchor: String,
+    pub statements: BTreeMap<String, u32>,
+    pub opaque: Vec<ReviewItem>,
+    pub var_origins: Vec<crate::state::ir::VarOrigin>,
+    pub calls: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -378,6 +514,7 @@ pub enum StateIssueCode {
     PossibleUnlinkedWrite,
     DeclarationMismatch,
     OutsideStructure,
+    DanglingOtherwise,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -409,6 +546,32 @@ pub struct CoverageCounters {
     pub prose_callouts_excluded: u32,
     pub prose_mentions: u32,
     pub unclassified_review: Vec<ReviewItem>,
+    /// Number of algorithms with any signature.
+    pub algorithms: u32,
+    /// `SignatureForm::as_str` → count; `"none"` = algorithm without signature.
+    pub intro_forms: BTreeMap<String, u32>,
+    pub template_signatures: u32,
+    /// `"explicit" | "name_resolved" | "dfn_for" | "unknown" | "opaque"` → count (To-like only).
+    pub to_params: BTreeMap<String, u32>,
+    pub idl_signatures: u32,
+    /// IDL signatures without `IdlMemberNotFound`.
+    pub idl_from_idl: u32,
+    pub steps: u32,
+    pub steps_recognized: u32,
+    /// Statement kind tag of the head step, or `"unrecognized"`.
+    pub step_heads: BTreeMap<String, u32>,
+    pub if_total: u32,
+    pub if_parsed: u32,
+    pub assert_total: u32,
+    pub assert_parsed: u32,
+    pub foreach_total: u32,
+    pub foreach_bound: u32,
+    /// `"let:path"`, `"return:call"`, `"return:none"`, … → count.
+    pub expr_forms: BTreeMap<String, u32>,
+    pub calls_by_form: BTreeMap<String, u32>,
+    pub undeclared_vars: u32,
+    pub undeclared_review: Vec<ReviewItem>,
+    pub assert_review: Vec<ReviewItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,7 +582,7 @@ pub struct ReviewItem {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateSpec {
     pub representation_version: String,
     pub spec: String,
@@ -435,6 +598,16 @@ pub struct StateSpec {
     /// `Declared` sites of `state.write`/`state.init` rules that matched no link.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_sites: Vec<Site>,
+    #[serde(default)]
+    pub signatures: Vec<Signature>,
+    #[serde(default)]
+    pub calls: Vec<crate::state::ir::Call>,
+    #[serde(default)]
+    pub var_origins: Vec<crate::state::ir::VarOrigins>,
+    #[serde(default)]
+    pub link_roles: Vec<crate::state::ir::SourceLinkRoles>,
+    #[serde(default)]
+    pub summaries: Vec<AlgorithmSummary>,
 }
 
 #[cfg(test)]
@@ -475,5 +648,111 @@ mod tests {
             serde_json::to_value(TypeExpr::Primitive(Primitive::Boolean)).unwrap()["primitive"],
             "boolean"
         );
+    }
+
+    #[test]
+    fn signature_forms_have_stable_tags() {
+        let forms = [
+            (SignatureForm::To, "to"),
+            (SignatureForm::WhenStepsSay, "when_steps_say"),
+            (SignatureForm::GivenList, "given_list"),
+            (
+                SignatureForm::IdlMethod {
+                    interface: "Event".into(),
+                    member: "initEvent".into(),
+                },
+                "idl_method",
+            ),
+            (
+                SignatureForm::IdlGetter {
+                    interface: "A".into(),
+                    member: "b".into(),
+                },
+                "idl_getter",
+            ),
+            (
+                SignatureForm::IdlSetter {
+                    interface: "A".into(),
+                    member: "b".into(),
+                },
+                "idl_setter",
+            ),
+            (
+                SignatureForm::IdlConstructor {
+                    interface: "A".into(),
+                },
+                "idl_constructor",
+            ),
+            (SignatureForm::Accessor, "accessor"),
+            (SignatureForm::Predicate, "predicate"),
+            (SignatureForm::Declared, "declared"),
+            (SignatureForm::Ecmarkup, "ecmarkup"),
+        ];
+        for (form, tag) in forms {
+            assert_eq!(form.as_str(), tag);
+        }
+    }
+
+    #[test]
+    fn template_and_type_serialization_shapes() {
+        let pieces = vec![
+            TemplatePiece::Callee,
+            TemplatePiece::Slot(0),
+            TemplatePiece::Literal("to".into()),
+            TemplatePiece::NamedGroup("with".into()),
+        ];
+        assert_eq!(
+            serde_json::to_value(&pieces).unwrap(),
+            serde_json::json!(["callee", {"slot": 0}, {"literal": "to"}, {"named_group": "with"}])
+        );
+        assert_eq!(
+            serde_json::to_value(TypeExpr::Idl {
+                text: "DOMString".into()
+            })
+            .unwrap(),
+            serde_json::json!({"idl": {"text": "DOMString"}})
+        );
+        assert_eq!(
+            serde_json::to_value(Literal::Failure).unwrap(),
+            serde_json::json!("failure")
+        );
+        assert_eq!(
+            serde_json::to_value(Passing::Positional { index: 2 }).unwrap(),
+            serde_json::json!({"positional": {"index": 2}})
+        );
+    }
+
+    #[test]
+    fn stored_payload_without_the_new_fields_still_deserializes() {
+        let spec = StateSpec {
+            representation_version: STATE_VERSION.into(),
+            spec: "HTML".into(),
+            snapshot_sha: "hash:x".into(),
+            model: ObjectModel {
+                types: vec![],
+                fields: vec![],
+                members: vec![],
+                reflections: vec![],
+            },
+            sources: vec![],
+            statements: vec![],
+            occurrences: vec![],
+            prose_mentions: Default::default(),
+            coverage: CoverageCounters::default(),
+            issues: vec![],
+            ..Default::default()
+        };
+        let mut json = serde_json::to_value(&spec).unwrap();
+        for key in [
+            "signatures",
+            "calls",
+            "var_origins",
+            "link_roles",
+            "summaries",
+        ] {
+            json.as_object_mut().unwrap().remove(key);
+        }
+        let back: StateSpec = serde_json::from_value(json).unwrap();
+        assert!(back.signatures.is_empty() && back.calls.is_empty() && back.summaries.is_empty());
     }
 }

@@ -550,6 +550,7 @@ fn type_expr(ty: &TypeExpr, full: bool) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         TypeExpr::Opaque { text } => text.clone(),
+        TypeExpr::Idl { text } => text.clone(),
     }
 }
 
