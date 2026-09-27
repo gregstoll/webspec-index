@@ -10,7 +10,7 @@ use crate::db::state::{self as db, StateSnapshot, StoredCall};
 use crate::parse::steps::AnchorTarget;
 use crate::state::bind::{bind, ArgValue, Binding, BindingIssue, BoundVia, Confidence};
 use crate::state::ir::CallForm;
-use crate::state::model::{Passing, ReviewItem, Signature, TemplatePiece};
+use crate::state::model::{Passing, ReviewItem, Signature, StateIssueCode, TemplatePiece};
 use crate::state::query::{anchor_url, StateError, StateQueryOptions, StateStatus, StatusCounts};
 use crate::state::render;
 
@@ -108,13 +108,21 @@ pub(crate) fn algorithm_view(
     let signatures = db::signatures_for_targets(conn, &all_ids, &targets)?;
     let mut titles: HashMap<AnchorTarget, Option<String>> = HashMap::new();
     let mut unbound_calls = 0;
+    let mut issues = BTreeSet::new();
     let mut views = Vec::new();
     for call in &stored {
         let target = call.call.callee.target.as_ref();
         let callee_signature = target.and_then(|t| signatures.get(t));
         let binding = match callee_signature {
             Some(sig) => bind(&call.call, &call.source, sig),
-            None => unsigned_binding(call),
+            None => {
+                let mut binding = unsigned_binding(call);
+                if target.is_some_and(|t| !snapshots.iter().any(|s| s.spec == t.spec)) {
+                    binding.issues.push(BindingIssue::MissingSpec);
+                    issues.insert(StateIssueCode::MissingSpec);
+                }
+                binding
+            }
         };
         if binding.confidence == Confidence::Unbound {
             unbound_calls += 1;
@@ -163,7 +171,7 @@ pub(crate) fn algorithm_view(
         unbound_calls,
         status: StateStatus::new(
             opaque_count == 0 && unbound_calls == 0,
-            BTreeSet::new(),
+            issues,
             StatusCounts::default(),
         ),
     }))
@@ -506,6 +514,33 @@ mod tests {
         assert!(view(&conn, "HTML#navigate", false, false, false, None)
             .callers
             .is_none());
+    }
+
+    #[test]
+    fn call_into_unindexed_spec_is_unbound_not_fatal() {
+        let html = r##"<div data-algorithm=""><p>To <dfn id="x">x</dfn> given a <var>n</var> and a <var>p</var>:</p><ol><li><p><a href="https://dom.spec.whatwg.org/#concept-node-insert">Insert</a> <var>n</var> into <var>p</var> before null.</p></li></ol></div>"##;
+        let conn = db_with(&[("HTML", html)]);
+        let v = view(&conn, "HTML#x", true, false, false, None);
+        let c = &v.calls.as_ref().unwrap()[0];
+        assert_eq!(c.confidence, Confidence::Unbound);
+        assert_eq!(
+            c.issues,
+            vec![BindingIssue::NoSignature, BindingIssue::MissingSpec]
+        );
+        assert!(v
+            .status
+            .issues
+            .contains(&crate::state::model::StateIssueCode::MissingSpec));
+        let conn = db_with(&[("HTML", html), ("DOM", crate::state::testing::INSERT_DOM)]);
+        let c = view(&conn, "HTML#x", true, false, false, None)
+            .calls
+            .unwrap()
+            .remove(0);
+        assert_eq!(c.confidence, Confidence::Exact);
+        assert_eq!(
+            c.args.iter().map(|a| a.value.as_str()).collect::<Vec<_>>(),
+            ["*n*", "*p*", "null"]
+        );
     }
 
     #[test]

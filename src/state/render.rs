@@ -1253,7 +1253,7 @@ Coverage: may · complete\n");
         );
         assert!(
             md.contains(
-                "- :1 Remove (DOM#concept-node-remove) — unbound\n  issues: no_signature\n"
+                "- :1 Remove (DOM#concept-node-remove) — unbound\n  issues: no_signature, missing_spec\n"
             ),
             "{md}"
         );
