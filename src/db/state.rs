@@ -1,12 +1,19 @@
 //! Per-snapshot state model rows (spec §9.2).
+use std::collections::BTreeMap;
+
+use crate::parse::steps::AnchorTarget;
+use crate::state::bind::call_record;
+use crate::state::ir::{Call, CallForm, SourceContext, StatementSource};
+use crate::state::model::{AlgorithmSummary, Signature};
 use crate::state::slice::SliceIndex;
+use crate::state::vars::IrIndex;
 use crate::state::{derive_occurrence_counts, derive_sites, Owner, StateSpec};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Every per-snapshot state table (spec §9.2). The purge, child-delete and
 /// export-prune lists iterate this; none of these tables reference each other.
-pub const STATE_TABLES: [&str; 10] = [
+pub const STATE_TABLES: [&str; 13] = [
     "state_models",
     "state_types",
     "state_type_edges",
@@ -17,6 +24,9 @@ pub const STATE_TABLES: [&str; 10] = [
     "state_occurrence_counts",
     "state_coverage",
     "state_slices",
+    "state_signatures",
+    "state_calls",
+    "state_algorithms",
 ];
 
 /// Create state tables and indexes if they do not yet exist (spec §9.2, §16.1).
@@ -117,29 +127,57 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_state_sites_opaque ON state_sites(snapshot_id) WHERE class = 'opaque_write';
         CREATE TABLE IF NOT EXISTS state_coverage (
             snapshot_id INTEGER PRIMARY KEY REFERENCES snapshots(id),
-            coverage_json TEXT NOT NULL
+            coverage_json TEXT NOT NULL,
+            representation_version TEXT
         );
-        CREATE TABLE IF NOT EXISTS state_slices (snapshot_id INTEGER NOT NULL REFERENCES snapshots(id), anchor TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (snapshot_id, anchor));",
+        CREATE TABLE IF NOT EXISTS state_slices (snapshot_id INTEGER NOT NULL REFERENCES snapshots(id), anchor TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (snapshot_id, anchor));
+        CREATE TABLE IF NOT EXISTS state_signatures (
+            snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+            anchor TEXT NOT NULL,
+            form TEXT NOT NULL,
+            signature_json TEXT NOT NULL,
+            PRIMARY KEY (snapshot_id, anchor)
+        );
+        CREATE TABLE IF NOT EXISTS state_calls (
+            snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+            call_id TEXT NOT NULL,
+            subject_anchor TEXT NOT NULL,
+            step_path TEXT,
+            segment_id TEXT,
+            link_id TEXT NOT NULL,
+            target_spec TEXT,
+            target_anchor TEXT,
+            form TEXT NOT NULL,
+            call_json TEXT NOT NULL,
+            PRIMARY KEY (snapshot_id, call_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_state_calls_target ON state_calls(target_spec, target_anchor);
+        CREATE INDEX IF NOT EXISTS idx_state_calls_site ON state_calls(segment_id, link_id);
+        CREATE INDEX IF NOT EXISTS idx_state_calls_subject ON state_calls(snapshot_id, subject_anchor);
+        CREATE TABLE IF NOT EXISTS state_algorithms (
+            snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+            anchor TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            PRIMARY KEY (snapshot_id, anchor)
+        );",
     )?;
 
-    // §16.1: add amendment columns to state_sites in case the table was
-    // created by an earlier build without them (no-op on a fresh database).
-    for (col, ty) in [
-        ("segment_id", "TEXT"),
-        ("body_id", "TEXT"),
-        ("span_start", "INTEGER"),
-        ("span_end", "INTEGER"),
+    // §16.1: add amendment columns in case the table was created by an
+    // earlier build without them (no-op on a fresh database).
+    for (table, col, ty) in [
+        ("state_sites", "segment_id", "TEXT"),
+        ("state_sites", "body_id", "TEXT"),
+        ("state_sites", "span_start", "INTEGER"),
+        ("state_sites", "span_end", "INTEGER"),
+        ("state_coverage", "representation_version", "TEXT"),
     ] {
         let exists: bool = conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('state_sites') WHERE name=?1",
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"),
             [col],
             |r| r.get::<_, i64>(0),
         )? > 0;
         if !exists {
-            conn.execute(
-                &format!("ALTER TABLE state_sites ADD COLUMN {col} {ty}"),
-                [],
-            )?;
+            conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"), [])?;
         }
     }
 
@@ -394,13 +432,100 @@ pub fn store_state(conn: &Connection, snapshot_id: i64, state: &StateSpec) -> Re
     // state_occurrence_counts — from derive_occurrence_counts (A12).
     insert_occurrence_counts(conn, snapshot_id, state)?;
 
-    // state_coverage
     conn.execute(
-        "INSERT OR REPLACE INTO state_coverage(snapshot_id, coverage_json) VALUES (?1, ?2)",
-        params![snapshot_id, serde_json::to_string(&state.coverage)?],
+        "INSERT OR REPLACE INTO state_coverage(snapshot_id, coverage_json, representation_version) \
+         VALUES (?1, ?2, ?3)",
+        params![
+            snapshot_id,
+            serde_json::to_string(&state.coverage)?,
+            &state.representation_version
+        ],
     )?;
 
+    insert_statement_ir(conn, snapshot_id, state)?;
+
     Ok(())
+}
+
+/// `state_signatures`, `state_calls` and `state_algorithms` rows (spec §9.2).
+fn insert_statement_ir(conn: &Connection, snapshot_id: i64, state: &StateSpec) -> Result<()> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO state_signatures(snapshot_id, anchor, form, signature_json) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for signature in &state.signatures {
+        stmt.execute(params![
+            snapshot_id,
+            &signature.algorithm.anchor,
+            signature.form.as_str(),
+            serde_json::to_string(signature)?
+        ])?;
+    }
+
+    let index = IrIndex::new(state);
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO state_calls \
+         (snapshot_id, call_id, subject_anchor, step_path, segment_id, link_id, \
+          target_spec, target_anchor, form, call_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )?;
+    for call in &state.calls {
+        let Some(source) = index.sources.get(call.source_id.as_str()) else {
+            continue;
+        };
+        let (step_path, segment_id) = match &source.context {
+            SourceContext::Algorithm {
+                step_path,
+                segment_id,
+                ..
+            } => (step_path.as_deref(), Some(segment_id.as_str())),
+            SourceContext::BranchLabel {
+                step_path,
+                segment_id,
+                ..
+            } => (Some(step_path.as_str()), Some(segment_id.as_str())),
+            SourceContext::Prose { step_path, .. } => (step_path.as_deref(), None),
+            SourceContext::Intro { .. } => (None, None),
+        };
+        let target = call.callee.target.as_ref();
+        stmt.execute(params![
+            snapshot_id,
+            &call.id,
+            &source.subject.anchor,
+            step_path,
+            segment_id,
+            &call.callee.link_id,
+            target.map(|t| t.spec.as_str()),
+            target.map(|t| t.anchor.as_str()),
+            call_form_str(call.form),
+            serde_json::to_string(&call_record(call, source))?
+        ])?;
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO state_algorithms(snapshot_id, anchor, summary_json) \
+         VALUES (?1, ?2, ?3)",
+    )?;
+    for summary in &state.summaries {
+        stmt.execute(params![
+            snapshot_id,
+            &summary.anchor,
+            serde_json::to_string(summary)?
+        ])?;
+    }
+    Ok(())
+}
+
+fn call_form_str(form: CallForm) -> &'static str {
+    match form {
+        CallForm::Imperative => "imperative",
+        CallForm::ResultOf => "result_of",
+        CallForm::Gerund => "gerund",
+        CallForm::Possessive => "possessive",
+        CallForm::Predicate => "predicate",
+        CallForm::SetToBe => "set_to_be",
+        CallForm::Ecmarkup => "ecmarkup",
+    }
 }
 
 /// Insert state_sites rows.
@@ -994,6 +1119,182 @@ pub fn section_title(conn: &Connection, snapshots: &[i64], anchor: &str) -> Resu
         .optional()?)
 }
 
+/// A `state_calls` row: its [`crate::state::bind::CallRecord`] flattened, with
+/// the name of the spec whose snapshot stored it.
+#[derive(Debug, Clone)]
+pub struct StoredCall {
+    pub snapshot_id: i64,
+    pub spec: String,
+    pub subject: String,
+    pub step_path: Option<String>,
+    pub call: Call,
+    pub source: StatementSource,
+    pub offset: usize,
+}
+
+const CALL_SELECT: &str =
+    "SELECT c.snapshot_id, sp.name, c.subject_anchor, c.step_path, c.call_json \
+    FROM state_calls c JOIN snapshots s ON s.id = c.snapshot_id JOIN specs sp ON sp.id = s.spec_id";
+
+fn stored_calls(
+    stmt: &mut rusqlite::Statement<'_>,
+    params: impl rusqlite::Params,
+) -> Result<Vec<StoredCall>> {
+    let rows = stmt.query_map(params, |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (snapshot_id, spec, subject, step_path, json) = row?;
+        let record: crate::state::bind::CallRecord = serde_json::from_str(&json)?;
+        out.push(StoredCall {
+            snapshot_id,
+            spec,
+            subject,
+            step_path,
+            call: record.call,
+            source: record.source,
+            offset: record.offset,
+        });
+    }
+    Ok(out)
+}
+
+/// The calls in the algorithm `spec#anchor`, in document order.
+pub fn calls_by_subject(
+    conn: &Connection,
+    snapshots: &[i64],
+    spec: &str,
+    anchor: &str,
+) -> Result<Vec<StoredCall>> {
+    let sql = format!(
+        "{CALL_SELECT} WHERE c.snapshot_id IN ({}) AND c.subject_anchor = ?1 AND sp.name = ?2 \
+         ORDER BY c.snapshot_id, c.rowid",
+        id_list(snapshots)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    stored_calls(&mut stmt, [anchor, spec])
+}
+
+/// The calls whose callee is `spec#anchor`, ordered by caller spec, subject,
+/// then step path.
+pub fn calls_by_target(
+    conn: &Connection,
+    snapshots: &[i64],
+    spec: &str,
+    anchor: &str,
+) -> Result<Vec<StoredCall>> {
+    let sql = format!(
+        "{CALL_SELECT} WHERE c.target_spec = ?1 AND c.target_anchor = ?2 \
+         AND +c.snapshot_id IN ({}) \
+         ORDER BY sp.name, c.subject_anchor, c.step_path, c.snapshot_id, c.rowid",
+        id_list(snapshots)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    stored_calls(&mut stmt, [spec, anchor])
+}
+
+/// Every call of `snapshot`, in document order.
+pub fn calls_of_snapshot(conn: &Connection, snapshot: i64) -> Result<Vec<StoredCall>> {
+    let mut stmt = conn.prepare(&format!(
+        "{CALL_SELECT} WHERE c.snapshot_id = ?1 ORDER BY c.rowid"
+    ))?;
+    stored_calls(&mut stmt, [snapshot])
+}
+
+/// The signature of the algorithm `spec#anchor`.
+pub fn signature_for(
+    conn: &Connection,
+    snapshots: &[i64],
+    spec: &str,
+    anchor: &str,
+) -> Result<Option<Signature>> {
+    let sql = format!(
+        "SELECT g.signature_json FROM state_signatures g JOIN snapshots s ON s.id = g.snapshot_id \
+         JOIN specs sp ON sp.id = s.spec_id WHERE g.snapshot_id IN ({}) AND g.anchor = ?1 \
+         AND sp.name = ?2 ORDER BY g.snapshot_id LIMIT 1",
+        id_list(snapshots)
+    );
+    let json: Option<String> = conn
+        .query_row(&sql, [anchor, spec], |row| row.get(0))
+        .optional()?;
+    Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
+}
+
+/// The signatures of those `targets` that have one, keyed by target.
+pub fn signatures_for_targets(
+    conn: &Connection,
+    snapshots: &[i64],
+    targets: &[AnchorTarget],
+) -> Result<BTreeMap<AnchorTarget, Signature>> {
+    let mut out = BTreeMap::new();
+    for chunk in targets.chunks(400) {
+        let sql = format!(
+            "SELECT sp.name, g.anchor, g.signature_json FROM state_signatures g \
+             JOIN snapshots s ON s.id = g.snapshot_id JOIN specs sp ON sp.id = s.spec_id \
+             WHERE (sp.name, g.anchor) IN (VALUES {}) AND g.snapshot_id IN ({}) \
+             ORDER BY g.snapshot_id DESC",
+            target_values(chunk.len()),
+            id_list(snapshots)
+        );
+        let params: Vec<&str> = chunk
+            .iter()
+            .flat_map(|t| [t.spec.as_str(), t.anchor.as_str()])
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (spec, anchor, json) = row?;
+            out.insert(AnchorTarget { spec, anchor }, serde_json::from_str(&json)?);
+        }
+    }
+    Ok(out)
+}
+
+/// The summary of the algorithm `spec#anchor`.
+pub fn algorithm_summary(
+    conn: &Connection,
+    snapshots: &[i64],
+    spec: &str,
+    anchor: &str,
+) -> Result<Option<AlgorithmSummary>> {
+    let sql = format!(
+        "SELECT a.summary_json FROM state_algorithms a JOIN snapshots s ON s.id = a.snapshot_id \
+         JOIN specs sp ON sp.id = s.spec_id WHERE a.snapshot_id IN ({}) AND a.anchor = ?1 \
+         AND sp.name = ?2 ORDER BY a.snapshot_id LIMIT 1",
+        id_list(snapshots)
+    );
+    let json: Option<String> = conn
+        .query_row(&sql, [anchor, spec], |row| row.get(0))
+        .optional()?;
+    Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
+}
+
+/// The `representation_version` `snapshot`'s state rows were written under;
+/// `None` for rows written before the column existed.
+pub fn state_version_of(conn: &Connection, snapshot: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT representation_version FROM state_coverage WHERE snapshot_id = ?1",
+            [snapshot],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1206,6 +1507,174 @@ mod tests {
             end <= text.len() && !text[start..end].trim().is_empty(),
             "text[span_start..span_end] must be non-empty for segment {segment_id}"
         );
+    }
+
+    #[test]
+    fn signatures_calls_and_summaries_round_trip() {
+        use crate::state::testing::{index_offline, NAV_HTML};
+        let conn = crate::db::open_in_memory().unwrap();
+        let snapshot =
+            index_offline(&conn, "HTML", "https://html.spec.whatwg.org/", NAV_HTML).unwrap();
+        for table in ["state_signatures", "state_calls", "state_algorithms"] {
+            assert!(STATE_TABLES.contains(&table));
+            let n: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE snapshot_id=?1"),
+                    [snapshot],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(n > 0, "{table} is empty");
+        }
+        let sig = signature_for(&conn, &[snapshot], "HTML", "navigate")
+            .unwrap()
+            .unwrap();
+        assert_eq!(sig.params.len(), 6);
+        let callers = calls_by_target(&conn, &[snapshot], "HTML", "navigate").unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(
+            (callers[0].subject.as_str(), callers[0].step_path.as_deref()),
+            ("location-object-navigate", Some("4"))
+        );
+        let stored = &callers[0];
+        let binding = crate::state::bind::bind(&stored.call, &stored.source, &sig);
+        assert_eq!(binding.confidence, crate::state::bind::Confidence::Exact);
+        assert!(stored
+            .source
+            .links
+            .iter()
+            .any(|l| l.id == stored.call.callee.link_id));
+        let summary = algorithm_summary(&conn, &[snapshot], "HTML", "navigate")
+            .unwrap()
+            .unwrap();
+        assert!(summary.statements.contains_key("if"));
+        assert_eq!(
+            calls_by_subject(&conn, &[snapshot], "HTML", "location-object-navigate")
+                .unwrap()
+                .len(),
+            1
+        );
+        let version = state_version_of(&conn, snapshot).unwrap().unwrap();
+        assert_eq!(version.split('+').next(), Some(crate::state::STATE_VERSION));
+    }
+
+    #[test]
+    fn stored_calls_carry_spec_offset_and_match_the_extracted_calls() {
+        use crate::state::testing::{index_offline, NAV_HTML};
+        let conn = crate::db::open_in_memory().unwrap();
+        let snapshot =
+            index_offline(&conn, "HTML", "https://html.spec.whatwg.org/", NAV_HTML).unwrap();
+        let state = load_state_model(&conn, snapshot).unwrap().unwrap();
+        let all = calls_of_snapshot(&conn, snapshot).unwrap();
+        assert_eq!(all.len(), state.calls.len());
+        let index = crate::state::vars::IrIndex::new(&state);
+        for (stored, call) in all.iter().zip(&state.calls) {
+            assert_eq!(stored.snapshot_id, snapshot);
+            assert_eq!(stored.spec, "HTML");
+            assert_eq!(stored.call.id, call.id, "document order");
+            let record =
+                crate::state::bind::call_record(call, index.sources[call.source_id.as_str()]);
+            assert_eq!(
+                (&stored.call, &stored.source, stored.offset),
+                (&record.call, &record.source, record.offset)
+            );
+        }
+        let navigate = crate::parse::steps::AnchorTarget {
+            spec: "HTML".into(),
+            anchor: "navigate".into(),
+        };
+        let missing = crate::parse::steps::AnchorTarget {
+            spec: "HTML".into(),
+            anchor: "no-such-algorithm".into(),
+        };
+        let sigs =
+            signatures_for_targets(&conn, &[snapshot], &[navigate.clone(), missing]).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[&navigate].algorithm, navigate);
+        assert!(signature_for(&conn, &[snapshot], "DOM", "navigate")
+            .unwrap()
+            .is_none());
+        assert!(calls_by_target(&conn, &[snapshot + 1], "HTML", "navigate")
+            .unwrap()
+            .is_empty());
+        assert!(
+            algorithm_summary(&conn, &[snapshot], "HTML", "no-such-algorithm")
+                .unwrap()
+                .is_none()
+        );
+        store_state(&conn, snapshot, &state).unwrap();
+        assert_eq!(
+            calls_of_snapshot(&conn, snapshot).unwrap().len(),
+            state.calls.len(),
+            "store replaces, never duplicates"
+        );
+    }
+
+    #[test]
+    fn stored_call_links_keep_their_generator_id() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let html = r##"<div data-algorithm=""><p>To <dfn id="go">go</dfn> given <var>foo</var>:</p><ol><li><p>Return <var>foo</var>.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="run">run</dfn>:</p><ol><li><p><a href="#go" id="run:go">Go</a> given 1.</p></li></ol></div>"##;
+        let snapshot = crate::state::testing::index_offline(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            html,
+        )
+        .unwrap();
+        let callers = calls_by_target(&conn, &[snapshot], "HTML", "go").unwrap();
+        assert_eq!(callers.len(), 1);
+        let stored = &callers[0];
+        let callee = stored
+            .source
+            .links
+            .iter()
+            .find(|l| l.id == stored.call.callee.link_id)
+            .unwrap();
+        assert_eq!(callee.generator_id.as_deref(), Some("run:go"));
+        assert!(callee.href.is_empty());
+    }
+
+    #[test]
+    fn new_tables_are_deleted_and_purged_with_their_snapshot() {
+        use crate::state::testing::{index_offline, NAV_HTML};
+        let conn = crate::db::open_in_memory().unwrap();
+        index_offline(&conn, "HTML", "https://html.spec.whatwg.org/", NAV_HTML).unwrap();
+        let spec_id = crate::db::write::insert_or_get_spec(
+            &conn,
+            "HTML",
+            "https://html.spec.whatwg.org/",
+            "whatwg",
+        )
+        .unwrap();
+        crate::db::write::delete_spec_data(&conn, spec_id).unwrap();
+        for table in ["state_signatures", "state_calls", "state_algorithms"] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table} survived delete");
+        }
+        index_offline(&conn, "HTML", "https://html.spec.whatwg.org/", NAV_HTML).unwrap();
+        crate::db::schema::purge_if_version_changed(&conn, "a-different-version").unwrap();
+        for table in ["state_signatures", "state_calls", "state_algorithms"] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table} survived purge");
+        }
+    }
+
+    #[test]
+    fn coverage_rows_written_before_the_version_column_read_none() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE state_coverage (snapshot_id INTEGER PRIMARY KEY, coverage_json TEXT NOT NULL);
+             INSERT INTO state_coverage VALUES (7, '{}');",
+        )
+        .unwrap();
+        crate::db::schema::initialize_schema(&conn).unwrap();
+        crate::db::schema::run_migrations(&conn).unwrap();
+        assert_eq!(state_version_of(&conn, 7).unwrap(), None);
     }
 
     #[test]
