@@ -6,8 +6,9 @@
 use crate::parse::steps::AnchorTarget;
 use crate::state::block::{sentences, BlockToken, Pattern};
 use crate::state::model::{
-    InfraKind, InitialValue, Literal, Primitive, TypeExpr, TypeKey, TypeRef,
+    InfraKind, InitialValue, Literal, Primitive, TypeBasis, TypeExpr, TypeKey, TypeRef,
 };
+use crate::state::names::NameResolver;
 use regex::Regex;
 use std::ops::Range;
 use std::sync::OnceLock;
@@ -98,6 +99,12 @@ pub(crate) fn parse_type_phrase(phrase: &str, links: &[(String, TypeRef)]) -> Ty
 /// Split `s` on ` or ` outside `⟦...⟧` placeholders.
 /// Returns individual alternative strings (owned, to avoid lifetime issues).
 fn split_on_or(s: &str) -> Vec<String> {
+    split_alternatives(s, &[" or "])
+}
+
+/// Split `s` on any of `separators` (tried in order, so a longer separator sharing a prefix
+/// with a shorter one comes first) outside `⟦...⟧` placeholders and `"..."` quotes.
+fn split_alternatives(s: &str, separators: &[&str]) -> Vec<String> {
     // A quoted enumeration like ("a" or "b") must not be split.
     if s.starts_with('(') && s.ends_with(')') {
         return vec![s.to_string()];
@@ -105,7 +112,7 @@ fn split_on_or(s: &str) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut start = 0;
     let mut i = 0;
-    while i < s.len() {
+    'scan: while i < s.len() {
         let rest = &s[i..];
         // Skip over placeholder ⟦...⟧.
         if rest.starts_with('⟦') {
@@ -114,12 +121,21 @@ fn split_on_or(s: &str) -> Vec<String> {
                 continue;
             }
         }
-        // ASCII separator " or " — safe to slice by byte index.
-        if rest.starts_with(" or ") {
-            parts.push(s[start..i].trim().to_string());
-            i += " or ".len();
-            start = i;
-            continue;
+        // Skip over a quoted literal.
+        if let Some(quoted) = rest.strip_prefix('"') {
+            if let Some(end) = quoted.find('"') {
+                i += end + 2;
+                continue;
+            }
+        }
+        // ASCII separators — safe to slice by byte index.
+        for separator in separators {
+            if rest.starts_with(separator) {
+                parts.push(s[start..i].trim().to_string());
+                i += separator.len();
+                start = i;
+                continue 'scan;
+            }
         }
         i += rest.chars().next().map_or(1, char::len_utf8);
     }
@@ -238,6 +254,174 @@ fn try_infra_link_phrase(bare: &str, links: &[(String, TypeRef)]) -> Option<Type
         kind,
         args: vec![arg],
     })
+}
+
+// ── parse_intro_type ──────────────────────────────────────────────────────────
+
+/// Parse an encoded intro type phrase (§8.1.4): alternatives separated by `,`, `, or`,
+/// ` or ` or `-or-`, each `null`, a primitive, an Infra type, a (counted) link, a quoted
+/// literal or, only when `article` (the caller stripped an article word), an unlinked name of
+/// one or two words. `None` when any alternative is none of these.
+#[allow(dead_code)]
+pub(crate) fn parse_intro_type(
+    core: &str,
+    links: &[(String, TypeRef)],
+    names: &NameResolver,
+    article: bool,
+) -> Option<(TypeExpr, TypeBasis)> {
+    let core = core.trim();
+    if core.is_empty() || core.ends_with([',', '-']) {
+        return None;
+    }
+    let mut name_resolved = false;
+    let mut alts = Vec::new();
+    for alt in split_alternatives(core, &[", or ", ",", " or ", "-or-"]) {
+        if alt.is_empty() {
+            return None;
+        }
+        let (expr, by_name) = intro_alt(&alt, links, names, article)?;
+        name_resolved |= by_name;
+        alts.push(expr);
+    }
+    let basis = if name_resolved {
+        TypeBasis::NameResolved
+    } else {
+        TypeBasis::Explicit
+    };
+    let expr = if alts.len() == 1 {
+        alts.pop().unwrap()
+    } else if alts.iter().all(|a| matches!(a, TypeExpr::Enumerated(_))) {
+        TypeExpr::Enumerated(
+            alts.into_iter()
+                .flat_map(|a| match a {
+                    TypeExpr::Enumerated(values) => values,
+                    _ => Vec::new(),
+                })
+                .collect(),
+        )
+    } else {
+        TypeExpr::Union(alts)
+    };
+    Some((expr, basis))
+}
+
+/// One alternative of an intro type phrase, and whether it was resolved by name.
+fn intro_alt(
+    alt: &str,
+    links: &[(String, TypeRef)],
+    names: &NameResolver,
+    article: bool,
+) -> Option<(TypeExpr, bool)> {
+    static IMPLEMENTING: OnceLock<Regex> = OnceLock::new();
+    static QUOTED: OnceLock<Regex> = OnceLock::new();
+    static NOMINAL: OnceLock<Regex> = OnceLock::new();
+    static NAME: OnceLock<Regex> = OnceLock::new();
+    let bare = strip_article(alt).trim();
+    let explicit = |expr| Some((expr, false));
+
+    if let Some(caps) = regex(&IMPLEMENTING, r"^object implementing ⟦L(\d+)⟧$").captures(bare) {
+        let (text, _) = links.get(caps[1].parse::<usize>().ok()?)?;
+        return explicit(TypeExpr::Opaque {
+            text: format!("object implementing {}", text.replace('`', "")),
+        });
+    }
+    if bare == "null" {
+        return explicit(TypeExpr::Null);
+    }
+    if let Some(primitive) = primitive_phrase(bare).or_else(|| linked_primitive(bare, links)) {
+        return explicit(TypeExpr::Primitive(primitive));
+    }
+    if bare == "code point" || linked_text(bare, links).is_some_and(|t| t == "code point") {
+        return explicit(TypeExpr::Opaque {
+            text: "code point".into(),
+        });
+    }
+    if let Some(caps) = regex(&QUOTED, r#"^"([^"]+)"$"#).captures(bare) {
+        return explicit(TypeExpr::Enumerated(vec![caps[1].to_string()]));
+    }
+    if let Some(enumerated) = try_enumerated(bare) {
+        return explicit(enumerated);
+    }
+    if let Some(infra) = intro_infra(bare, links, names, article) {
+        return Some(infra);
+    }
+    if let Some(caps) = regex(
+        &NOMINAL,
+        r"^(?:(?:two|three|four) )?(⟦L\d+⟧)(?: (?:object|element|node|interface)s?)?$",
+    )
+    .captures(bare)
+    {
+        return explicit(try_nominal_placeholder(&caps[1], links)?);
+    }
+    if article && regex(&NAME, r"^[A-Za-z][A-Za-z-]*(?: [A-Za-z][A-Za-z-]*)?$").is_match(bare) {
+        return Some(match names.resolve(bare) {
+            Some(key) => (
+                TypeExpr::Nominal {
+                    ty: TypeRef::Known(key),
+                    text: bare.to_string(),
+                },
+                true,
+            ),
+            None => (
+                TypeExpr::Opaque {
+                    text: bare.to_string(),
+                },
+                false,
+            ),
+        });
+    }
+    None
+}
+
+/// An Infra word or Infra link, optionally followed by ` of TYPE`; an argument that is not an
+/// intro type phrase is kept as opaque text.
+fn intro_infra(
+    s: &str,
+    links: &[(String, TypeRef)],
+    names: &NameResolver,
+    article: bool,
+) -> Option<(TypeExpr, bool)> {
+    let infra_kind = |head: &str| {
+        infra_word_kind(head).or_else(|| {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let caps = regex(&RE, r"^⟦L(\d+)⟧$").captures(head)?;
+            infra_link_kind(&links.get(caps[1].parse::<usize>().ok()?)?.1)
+        })
+    };
+    if let Some(kind) = infra_kind(s) {
+        return Some((TypeExpr::Infra { kind, args: vec![] }, false));
+    }
+    let (head, arg) = s.split_once(" of ")?;
+    let kind = infra_kind(head)?;
+    let (arg, by_name) = parse_intro_type(arg, links, names, article)
+        .map(|(expr, basis)| (expr, basis == TypeBasis::NameResolved))
+        .unwrap_or_else(|| {
+            (
+                TypeExpr::Opaque {
+                    text: arg.trim().to_string(),
+                },
+                false,
+            )
+        });
+    Some((
+        TypeExpr::Infra {
+            kind,
+            args: vec![arg],
+        },
+        by_name,
+    ))
+}
+
+/// The visible text, without backticks, of the lone link `⟦Ln⟧` that `s` consists of.
+fn linked_text(s: &str, links: &[(String, TypeRef)]) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let caps = regex(&RE, r"^⟦L(\d+)⟧$").captures(s)?;
+    let (text, _) = links.get(caps[1].parse::<usize>().ok()?)?;
+    Some(text.replace('`', ""))
+}
+
+fn linked_primitive(s: &str, links: &[(String, TypeRef)]) -> Option<Primitive> {
+    primitive_phrase(&linked_text(s, links)?)
 }
 
 // ── initial_value ─────────────────────────────────────────────────────────────
@@ -703,4 +887,161 @@ pub(crate) fn locate_dfn_in_pat(
     });
 
     Some((dfn_slot, clause, next))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_intro_type, TypeBasis};
+    use crate::parse::steps::AnchorTarget;
+    use crate::state::model::{TypeKey, TypeRef};
+
+    #[test]
+    fn intro_type_phrases() {
+        use crate::state::testing::{extract_html, ty, AUTODIR_HTML};
+        let document = scraper::Html::parse_document(AUTODIR_HTML);
+        let state = extract_html(AUTODIR_HTML, "HTML");
+        let names = crate::state::names::NameResolver::new(
+            "HTML",
+            &state.model,
+            &crate::state::declare::concept_dfns(&document),
+        );
+        let doc = (
+            "`Document`".to_string(),
+            TypeRef::Known(TypeKey::Idl("Document".into())),
+        );
+        let post = (
+            "POST resource".to_string(),
+            TypeRef::Unresolved(AnchorTarget {
+                spec: "HTML".into(),
+                anchor: "post-resource".into(),
+            }),
+        );
+        let parse = |core: &str, links: &[(String, TypeRef)], article: bool| {
+            parse_intro_type(core, links, &names, article).map(|(t, b)| (ty(&t), b))
+        };
+        assert_eq!(
+            parse("⟦L0⟧-or-null", std::slice::from_ref(&doc), true),
+            Some(("idl:Document | null".into(), TypeBasis::Explicit))
+        );
+        assert_eq!(
+            parse("⟦L0⟧, string, or null", &[post], true),
+            Some((
+                "HTML#post-resource | string | null".into(),
+                TypeBasis::Explicit
+            ))
+        );
+        assert_eq!(
+            parse("null or a ⟦L0⟧", &[doc], false),
+            Some(("null | idl:Document".into(), TypeBasis::Explicit))
+        );
+        assert_eq!(
+            parse("element", &[], true),
+            Some(("idl:Element".into(), TypeBasis::NameResolved))
+        );
+        assert_eq!(
+            parse("time", &[], true),
+            Some(("opaque(time)".into(), TypeBasis::Explicit))
+        );
+        assert_eq!(parse("named", &[], false), None);
+        assert_eq!(
+            parse("boolean", &[], false),
+            Some(("boolean".into(), TypeBasis::Explicit))
+        );
+        assert_eq!(
+            parse("string-or-null", &[], false),
+            Some(("string | null".into(), TypeBasis::Explicit))
+        );
+    }
+
+    #[test]
+    fn intro_type_phrase_forms() {
+        use crate::state::testing::{extract_html, ty, AUTODIR_HTML};
+        let document = scraper::Html::parse_document(AUTODIR_HTML);
+        let state = extract_html(AUTODIR_HTML, "HTML");
+        let names = crate::state::names::NameResolver::new(
+            "HTML",
+            &state.model,
+            &crate::state::declare::concept_dfns(&document),
+        );
+        let link = |text: &str, spec: &str, anchor: &str| {
+            (
+                text.to_string(),
+                TypeRef::Unresolved(AnchorTarget {
+                    spec: spec.into(),
+                    anchor: anchor.into(),
+                }),
+            )
+        };
+        let ui = link("CanvasUserInterface", "HTML", "canvasuserinterface");
+        let list = link("list", "INFRA", "list");
+        let infra_string = link("string", "INFRA", "string");
+        let cue = link("text track cue", "HTML", "text-track-cue");
+        let parse = |core: &str, links: &[(String, TypeRef)], article: bool| {
+            parse_intro_type(core, links, &names, article).map(|(t, b)| (ty(&t), b))
+        };
+        let explicit = |s: &str| Some((s.to_string(), TypeBasis::Explicit));
+
+        assert_eq!(
+            parse("object implementing ⟦L0⟧", &[ui], true),
+            explicit("opaque(object implementing CanvasUserInterface)")
+        );
+        assert_eq!(parse("⟦L0⟧", &[infra_string], false), explicit("string"));
+        assert_eq!(
+            parse("code point", &[], false),
+            explicit("opaque(code point)")
+        );
+        assert_eq!(
+            parse("⟦L0⟧ of ⟦L1⟧ objects", &[list.clone(), cue.clone()], false),
+            explicit("list<HTML#text-track-cue>")
+        );
+        assert_eq!(
+            parse(
+                "ordered set of ⟦L0⟧ or null",
+                std::slice::from_ref(&cue),
+                false
+            ),
+            explicit("ordered set<HTML#text-track-cue> | null")
+        );
+        assert_eq!(
+            parse("list of strings", &[], false),
+            explicit("list<opaque(strings)>")
+        );
+        assert_eq!(
+            parse("list of element", &[], true),
+            Some(("list<idl:Element>".into(), TypeBasis::NameResolved))
+        );
+        assert_eq!(
+            parse("list of elements", &[], true),
+            explicit("list<opaque(elements)>"),
+            "the plural is tolerated for concept dfn names only"
+        );
+        assert_eq!(
+            parse("⟦L0⟧ element", std::slice::from_ref(&cue), true),
+            explicit("HTML#text-track-cue")
+        );
+        assert_eq!(
+            parse("two ⟦L0⟧", std::slice::from_ref(&cue), false),
+            explicit("HTML#text-track-cue")
+        );
+        assert_eq!(
+            parse("\"push\", \"replace\", or \"auto\"", &[], false),
+            explicit("\"push\" | \"replace\" | \"auto\"")
+        );
+        assert_eq!(
+            parse("\"a, b\" or null", &[], false),
+            explicit("\"a, b\" | null")
+        );
+        assert_eq!(
+            parse("element or null", &[], true),
+            Some(("idl:Element | null".into(), TypeBasis::NameResolved))
+        );
+        assert_eq!(parse("element or null", &[], false), None);
+        assert_eq!(
+            parse("⟦L0⟧ given by the user", std::slice::from_ref(&cue), true),
+            None
+        );
+        assert_eq!(parse("string,", &[], false), None);
+        assert_eq!(parse("string or", &[], false), None);
+        assert_eq!(parse("", &[], true), None);
+    }
 }
