@@ -573,12 +573,13 @@ enum Command {
         force_update: bool,
     },
 
-    /// Show which steps write a field, or the fields of a type
+    /// Show which steps write a field, the fields of a type, or an algorithm's signature and calls
     #[command(
         long_about = "Show which algorithm steps and normative prose write a field,\n\
-        or list the fields of a type (with inherited fields).\n\n\
+        list the fields of a type (with inherited fields), or show an algorithm's\n\
+        signature, statements, calls (--calls) and callers (--callers).\n\n\
         Selectors:\n  \
-        SPEC#anchor        field, set member or type anchor (a spec URL works too)\n  \
+        SPEC#anchor        field, set member, type or algorithm anchor (a spec URL works too)\n  \
         TYPE               IDL name or concept name, e.g. Document, navigable\n  \
         TYPE.FIELD         field by name through inheritance, e.g. \"Element.node document\"\n  \
         TYPE.GLOB          fields of TYPE by name or anchor, e.g. \"Document.*sandbox*\"\n  \
@@ -596,10 +597,16 @@ enum Command {
             help = "List unclassified occurrences instead of only counting them"
         )]
         unclassified: bool,
+        #[arg(long, help = "Algorithm view: list each call with its bound arguments")]
+        calls: bool,
+        #[arg(long, help = "Algorithm view: list the algorithms that call this one")]
+        callers: bool,
+        #[arg(long, help = "Algorithm view: list the statements the model could not structure")]
+        opaque: bool,
         #[arg(
             long,
             short,
-            help = "Sites per group (field view), fields (lists), or rows per table (type view)"
+            help = "Sites per group (field view), fields (lists), rows per table (type view), or caller algorithms (algorithm view)"
         )]
         limit: Option<u32>,
         #[arg(long, value_name = "PATH", action = clap::ArgAction::Append, help = "Add a semantic rule package directory")]
@@ -874,7 +881,7 @@ lsp [--rules PATH] [--environment NAME] — start LSP server on stdio
 graph <SPEC#anchor|URL> [-d incoming|outgoing|both(default outgoing)] [--max-depth N(2)] [--max-nodes N(150)] [--include PATTERN --exclude PATTERN --same-spec-only] [--graph-format json|markdown|mermaid|dot]
 flow <SPEC#anchor|URL> [--flow-format json|mermaid]
 idl <Q|SPEC#anchor|URL> [-s SPEC] [-l N(20)] [--pr N] [--format json|markdown]
-state <SELECTOR> | --coverage SPEC [--no-inits] [--unclassified] [-l N] [--rules PATH] [--format json|markdown]
+state <SELECTOR> | --coverage SPEC [--no-inits] [--unclassified] [--calls] [--callers] [--opaque] [-l N] [--rules PATH] [--format json|markdown]
 SPEC#anchor examples: HTML#navigate, DOM#concept-tree, CSS-GRID#grid-container
 Full URL also works: https://html.spec.whatwg.org/#navigate
 --pr N: query against a PR preview (WHATWG specs or TC39 proposals); --diff: show diff vs merge base (requires --pr; #anchor optional with --diff)
@@ -1305,6 +1312,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             selector,
             no_inits,
             unclassified,
+            calls,
+            callers,
+            opaque,
             limit,
             rules,
             coverage,
@@ -1327,9 +1337,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     include_inits: !no_inits,
                     unclassified,
                     limit,
-                    calls: false,
-                    callers: false,
-                    opaque: false,
+                    calls,
+                    callers,
+                    opaque,
                 };
                 match webspec_index::state::service::state(&selector, &options, &rules).await? {
                     Ok(result) => {
@@ -1854,6 +1864,38 @@ mod cli_effect_tests {
             "--compact"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn state_algorithm_view_flags_are_accepted() {
+        let cli = Cli::try_parse_from([
+            "webspec-index",
+            "state",
+            "HTML#navigate",
+            "--calls",
+            "--callers",
+            "--opaque",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::State {
+                calls: true,
+                callers: true,
+                opaque: true,
+                ..
+            }
+        ));
+        let cli = Cli::try_parse_from(["webspec-index", "state", "HTML#navigate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::State {
+                calls: false,
+                callers: false,
+                opaque: false,
+                ..
+            }
+        ));
     }
 
     #[test]
