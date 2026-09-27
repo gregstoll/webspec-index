@@ -942,6 +942,31 @@ fn with_link_text(phrase: &str, links: &[(String, TypeRef)]) -> String {
         .into_owned()
 }
 
+/// The part of `clause` that belongs to dfn `⟦D{dfn_slot}⟧`: from the dfn up
+/// to the next dfn, so in "a ⟦D0⟧, initially true, and a ⟦D1⟧, initially
+/// false" each dfn reads its own value. Dfns joined by a bare "and" / "or"
+/// ("⟦D0⟧ and ⟦D1⟧, which are initially null") share what follows them.
+pub(crate) fn own_dfn_span(clause: &str, dfn_slot: usize) -> &str {
+    let Some(start) = clause.find(&format!("⟦D{dfn_slot}⟧")) else {
+        return clause;
+    };
+    let rest = &clause[start..];
+    let mut end = 0;
+    loop {
+        end += rest[end..]
+            .find('⟧')
+            .map_or(0, |close| close + '⟧'.len_utf8());
+        let Some(next) = rest[end..].find("⟦D") else {
+            return rest;
+        };
+        let gap = rest[end..end + next].trim_matches([' ', ',']);
+        if !matches!(gap, "and" | "or") {
+            return &rest[..end + next];
+        }
+        end += next;
+    }
+}
+
 /// Substitute quoted `"⟦Cn⟧"` placeholders with their quoted code text, so an
 /// enumerated alternative like `"<code>traversal</code>"` reads as `"traversal"`.
 fn substitute_quoted_code_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {

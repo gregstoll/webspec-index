@@ -11,7 +11,8 @@ use crate::state::model::{
     OwnerVia, SetMember, StateIssueCode, TypeExpr, TypeKey, TypeKind, TypeRef,
 };
 use crate::state::typeexpr::{
-    declared_type, initial_value, locate_dfn_in_pat, sibling_dd_text, substitute_text_tokens,
+    declared_type, initial_value, locate_dfn_in_pat, own_dfn_span, sibling_dd_text,
+    substitute_text_tokens,
 };
 use crate::state::types::{ConceptDfn, TypeTable};
 use regex::Regex;
@@ -857,7 +858,11 @@ pub(crate) fn declare_fields(
                     dd_text.as_deref(),
                     &resolve_fn,
                 );
-                let clause_text = substitute_text_tokens(&pat.text[clause], &pat, &tokens);
+                let clause_text = substitute_text_tokens(
+                    own_dfn_span(&pat.text[clause], dfn_slot),
+                    &pat,
+                    &tokens,
+                );
                 let next_sent_text = next_sent.map(|s| substitute_text_tokens(&s, &pat, &tokens));
                 let init = initial_value(
                     &clause_text,
@@ -1769,6 +1774,42 @@ mod tests {
             ty(&field(&out, "nrr-reasons").declared_type),
             "opaque(FrozenArray<NotRestoredReasonDetails>) | null"
         );
+    }
+
+    #[test]
+    fn each_dfn_in_a_sentence_takes_its_own_initial_value() {
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="document">Document</dfn> {};</pre>
+<p>A <code><a href="#document">Document</a></code> has a <dfn id="concept-document-salvageable">salvageable</dfn> state, which must initially be true, and a <dfn id="page-showing">page showing</dfn> boolean, which is initially false.</p>"##,
+            "HTML",
+        );
+        let bool_initial = |anchor: &str| match &field(&out, anchor).initial {
+            Some(InitialValue::Literal {
+                value: Literal::Bool(b),
+                ..
+            }) => Some(*b),
+            _ => None,
+        };
+        assert_eq!(bool_initial("concept-document-salvageable"), Some(true));
+        assert_eq!(bool_initial("page-showing"), Some(false));
+
+        let out = run_declare(
+            r##"<p>Each <a href="#the-template-element">template</a> element has an associated ProcessingInstruction-or-null <dfn id="start">insertion start marker</dfn> and <dfn id="end">insertion end marker</dfn>, which are initially null.</p>"##,
+            "HTML",
+        );
+        for anchor in ["start", "end"] {
+            assert!(
+                matches!(
+                    field(&out, anchor).initial,
+                    Some(InitialValue::Literal {
+                        value: Literal::Null,
+                        ..
+                    })
+                ),
+                "{anchor}: {:?}",
+                field(&out, anchor).initial
+            );
+        }
     }
 
     #[test]
