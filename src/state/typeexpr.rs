@@ -725,13 +725,16 @@ fn extract_type_phrase(
     let patterns: &[(&OnceLock<Regex>, &str)] = &[
         (
             &R1,
-            r"^,\s*which\s+is\s+(?:(?:an|a|either)\s+)?(.+?)(?:,\s*initially|[\.;\)]|$)",
+            r"^,\s*which\s+is\s+(?:(?:an|a|either)\s+)?(.+?)(?:,\s*initially|\s+with\s+the\s+following\b|[\.;:\)]|$)",
         ),
-        (&R2, r"^,\s+(?:a|an)\s+(.+?)(?:,\s*initially|[\.;\)]|$)"),
+        (
+            &R2,
+            r"^,\s+(?:a|an)\s+(.+?)(?:,\s*initially|\s+with\s+the\s+following\b|[\.;:\)]|$)",
+        ),
         (&R3, r"^\s*\((?:a|an)\s+(.+?)\)"),
         (
             &R4,
-            r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|[\.;\)]|$)",
+            r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|\s+with\s+the\s+following\b|[\.;:\)]|$)",
         ),
         (&R5, r"^\s*\(null\s+or\s+(?:(?:an|a)\s+)?(.+?)\)"),
     ];
@@ -739,6 +742,10 @@ fn extract_type_phrase(
     for (cell, source) in patterns {
         if let Some(caps) = regex(cell, source).captures(post) {
             let raw_t = caps[1].trim();
+            // "which is used to …" states a purpose, not a type.
+            if raw_t.starts_with("used ") {
+                return None;
+            }
             let phrase_str = if source.starts_with(r"^\s*\(null") {
                 format!("null or {raw_t}")
             } else if source.starts_with(r"^\s*\(") {

@@ -1772,6 +1772,31 @@ mod tests {
     }
 
     #[test]
+    fn purpose_clauses_are_not_types() {
+        use crate::state::testing::ty;
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="document">Document</dfn> {};</pre>
+<p>Each <code><a href="#document">Document</a></code> has an <dfn id="unload-counter">unload counter</dfn>, which is used to ignore certain operations while the below algorithms run. Initially, the counter must be set to zero.</p>"##,
+            "HTML",
+        );
+        assert_eq!(ty(&field(&out, "unload-counter").declared_type), "?");
+    }
+
+    #[test]
+    fn type_phrase_ends_before_a_colon() {
+        use crate::state::testing::ty;
+        let out = run_declare(
+            r##"<pre class="idl">interface <dfn id="window">Window</dfn> {};</pre>
+<p>Each <code><a href="#window">Window</a></code> has a <dfn id="close-watcher-manager">close watcher manager</dfn>, a <a href="https://infra.spec.whatwg.org/#struct">struct</a> with the following <a href="https://infra.spec.whatwg.org/#struct-item">items</a>:</p>"##,
+            "HTML",
+        );
+        assert_eq!(
+            ty(&field(&out, "close-watcher-manager").declared_type),
+            "struct"
+        );
+    }
+
+    #[test]
     fn zero_or_more_is_a_collection_argument_not_an_alternative() {
         use crate::state::testing::ty;
         let out = run_declare(
