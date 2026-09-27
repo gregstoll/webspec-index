@@ -183,7 +183,7 @@ fn passing(sig: &Signature, param: &Param) -> String {
 }
 
 fn step_prefix(step_path: Option<&str>) -> String {
-    step_path.map_or_else(String::new, |step| format!(":{step} "))
+    step_path.map_or_else(|| "(prose) ".to_string(), |step| format!(":{step} "))
 }
 
 fn confidence_label(confidence: Confidence) -> &'static str {
@@ -1200,6 +1200,12 @@ Returns: not stated.\n\n\
 Statements: 5 — if 1, in_parallel 1, let 1, return 1, set 1\n\
 Opaque statements: 0 · unbound calls: 0\n\
 Coverage: may · complete\n");
+    }
+
+    #[test]
+    fn prose_calls_say_so_instead_of_a_step() {
+        assert_eq!(step_prefix(Some("2.1")), ":2.1 ");
+        assert_eq!(step_prefix(None), "(prose) ");
     }
 
     #[test]
