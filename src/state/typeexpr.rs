@@ -464,34 +464,51 @@ pub(crate) fn initial_value(
         }
     }
 
-    // Patterns in clause_text that express an initial value.
-    {
+    // "must initially be V", "initially (i.e. …) be V", "initially set to V",
+    // "initially V", "(default V)". V may hold a parenthesized call such as
+    // `StructuredSerializeForStorage(null)`.
+    let explicit = |text: &str| {
         static RE: OnceLock<Regex> = OnceLock::new();
-        // "which must initially be V", "initially set to V", "initially V", "(default V)".
-        // Order matters: longer/more-specific alternatives first.
-        if let Some(caps) = regex(
+        regex(
             &RE,
-            r"(?:which\s+must\s+initially\s+be|initially\s+set\s+to|initially|\(default)\s+([^,\.;\)⟦]+)",
+            r"(?:initially(?:\s*\([^\)]*\))?\s+(?:be\s+)?(?:set\s+to\s+)?|\(default\s+)((?:[^,\.;\(\)⟦]|\([^\)]*\))+)",
         )
-        .captures(clause_text)
-        {
-            let v = caps[1].trim().trim_end_matches(')');
-            return Some(parse_value(v));
-        }
+        .captures(text)
+        .map(|caps| parse_value(&caps[1]))
+    };
+    if let Some(value) = explicit(clause_text) {
+        return Some(value);
     }
 
-    // Next sentence starting with "It is …" (only when caller has already verified
-    // the block has exactly one dfn).
+    // The next sentence, when it starts with "It is" (only when the caller has
+    // already verified the block has exactly one dfn): "It is initially V",
+    // "It is a module map, initially V", "It is V initially", "It is V unless
+    // otherwise stated", "It is set when …". Other "It is …" sentences
+    // describe the field.
     if let Some(sent) = next_sentence {
+        if let Some(value) = explicit(sent) {
+            return Some(value);
+        }
+        let sent = sent.trim();
+        static SET: OnceLock<Regex> = OnceLock::new();
+        if let Some(caps) = regex(
+            &SET,
+            r"^It\s+is\s+(set\s+(?:upon\s+creation|during\s+creation|when\s+[^,\.;⟦]+))",
+        )
+        .captures(sent)
+        {
+            return Some(InitialValue::Opaque {
+                text: caps[1].to_string(),
+            });
+        }
         static RE: OnceLock<Regex> = OnceLock::new();
         if let Some(caps) = regex(
             &RE,
-            r"^It\s+is\s+(?:initially\s+)?([^,\.;\)⟦]+?)(?:\s+unless\s+otherwise\s+stated)?[,\.]",
+            r"^It\s+is\s+([^,\.;\)⟦]+?)\s+(?:initially|unless\s+otherwise\s+stated)[,\.]",
         )
-        .captures(sent.trim())
+        .captures(sent)
         {
-            let v = caps[1].trim();
-            return Some(parse_value(v));
+            return Some(parse_value(&caps[1]));
         }
     }
 
@@ -533,8 +550,8 @@ fn parse_value(v: &str) -> InitialValue {
             let ty = parse_type_phrase(rest, &[]);
             InitialValue::New { ty, text }
         }
-        _ if is_number(v) => InitialValue::Literal {
-            value: Literal::Number(v.to_string()),
+        _ if is_number(&v.replace('−', "-")) => InitialValue::Literal {
+            value: Literal::Number(v.replace('−', "-")),
             text,
         },
         _ if v.starts_with('"') && v.ends_with('"') && v.len() >= 2 => InitialValue::Literal {
@@ -961,7 +978,79 @@ pub(crate) fn locate_dfn_in_pat(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_intro_type, TypeBasis};
+    use super::{initial_value, parse_intro_type, TypeBasis};
+    use crate::state::model::InitialValue;
+
+    fn initial_text(clause: &str, next: Option<&str>) -> Option<String> {
+        initial_value(clause, next, None).map(|v| match v {
+            InitialValue::Literal { text, .. }
+            | InitialValue::Empty { text }
+            | InitialValue::Unset { text }
+            | InitialValue::New { text, .. }
+            | InitialValue::Opaque { text } => text,
+        })
+    }
+
+    #[test]
+    fn initial_value_phrasings() {
+        let clause = |s: &str| initial_text(s, None);
+        let next = |s: &str| initial_text("Shadow roots have an associated ⟦D0⟧.", Some(s));
+        assert_eq!(
+            clause(
+                "⟦D0⟧, which is serialized state, initially StructuredSerializeForStorage(null)."
+            ),
+            Some("StructuredSerializeForStorage(null)".into())
+        );
+        assert_eq!(
+            clause("Media elements have a ⟦D0⟧, which must initially (i.e. in the absence of media data) be zero seconds."),
+            Some("zero seconds".into())
+        );
+        assert_eq!(
+            clause("Media elements have a ⟦D0⟧, which must initially be set to zero seconds."),
+            Some("zero seconds".into())
+        );
+        assert_eq!(clause("⟦L0⟧ (default No CORS)"), Some("No CORS".into()));
+        assert!(matches!(
+            initial_value("Each ⟦L0⟧ has an ⟦D1⟧, an integer, initially −1.", None, None),
+            Some(InitialValue::Literal { value: crate::state::model::Literal::Number(n), .. }) if n == "-1"
+        ));
+        assert!(matches!(
+            initial_value("x", Some("It is initially set to false."), None),
+            Some(InitialValue::Literal {
+                value: crate::state::model::Literal::Bool(false),
+                ..
+            })
+        ));
+        assert_eq!(
+            next("It is the empty string initially."),
+            Some("the empty string".into())
+        );
+        assert_eq!(next("It is null initially."), Some("null".into()));
+        assert_eq!(
+            next("It is a module map, initially empty."),
+            Some("empty".into())
+        );
+        assert_eq!(
+            next("It is null unless otherwise stated."),
+            Some("null".into())
+        );
+        assert_eq!(
+            next("It is set during creation."),
+            Some("set during creation".into())
+        );
+        assert_eq!(
+            next("It is set when the Window object is created, and only ever changed during navigation."),
+            Some("set when the Window object is created".into())
+        );
+        assert_eq!(
+            next("It is used to persist names of controls even when they change names."),
+            None
+        );
+        assert_eq!(
+            next("It is information with which the user agent can restore a user's input for the element."),
+            None
+        );
+    }
     use crate::parse::steps::AnchorTarget;
     use crate::state::model::{TypeKey, TypeRef};
 
