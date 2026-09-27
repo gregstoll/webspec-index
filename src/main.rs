@@ -1327,6 +1327,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     include_inits: !no_inits,
                     unclassified,
                     limit,
+                    calls: false,
+                    callers: false,
+                    opaque: false,
                 };
                 match webspec_index::state::service::state(&selector, &options, &rules).await? {
                     Ok(result) => {

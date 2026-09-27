@@ -58,6 +58,7 @@ pub fn check(conn: &rusqlite::Connection) -> Vec<String> {
         include_inits: true,
         unclassified: true,
         limit: Some(1000),
+        ..StateQueryOptions::default()
     };
     let mut failures = Vec::new();
     for e in &expectations.fields {

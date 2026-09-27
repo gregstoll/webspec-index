@@ -22,6 +22,7 @@ pub(crate) mod names;
 pub(crate) mod predicate;
 pub(crate) mod prose;
 pub mod query;
+pub mod query_algorithm;
 pub(crate) mod reflect;
 pub mod render;
 pub mod roles;

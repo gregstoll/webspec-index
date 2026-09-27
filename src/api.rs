@@ -188,6 +188,7 @@ pub enum Response {
     StateType(state::query::StateTypeResult),
     StateMember(state::query::StateMemberResult),
     StateFields(state::query::StateFieldListResult),
+    StateAlgorithm(state::query_algorithm::StateAlgorithmResult),
     StateCoverage(state::query::StateCoverageResult),
 }
 
@@ -701,10 +702,14 @@ pub fn handle(conn: &Connection, request: Request) -> Result<Response, ApiError>
                 include_inits,
                 unclassified,
                 limit,
+                calls: false,
+                callers: false,
+                opaque: false,
             };
             let response =
                 state::query::query(conn, &selector, &options).map_err(ApiError::from)?;
             Ok(match response {
+                state::query::StateResponse::Algorithm(r) => Response::StateAlgorithm(r),
                 state::query::StateResponse::Field(r) => Response::StateField(r),
                 state::query::StateResponse::Type(r) => Response::StateType(r),
                 state::query::StateResponse::Member(r) => Response::StateMember(r),

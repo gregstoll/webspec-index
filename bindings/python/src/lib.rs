@@ -122,6 +122,9 @@ fn state<'py>(
         include_inits,
         unclassified,
         limit,
+        calls: false,
+        callers: false,
+        opaque: false,
     };
     match run(webspec_index::state::service::state(
         selector,

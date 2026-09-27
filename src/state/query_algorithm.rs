@@ -1,0 +1,446 @@
+//! The algorithm view of `state SPEC#anchor` (§16.6): an algorithm's
+//! signature, statement counts and calls, each call bound to its callee's
+//! signature at query time.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+
+use crate::db::state::{self as db, StateSnapshot, StoredCall};
+use crate::parse::steps::AnchorTarget;
+use crate::state::bind::{bind, ArgValue, Binding, BindingIssue, BoundVia, Confidence};
+use crate::state::ir::CallForm;
+use crate::state::model::{Passing, ReviewItem, Signature, TemplatePiece};
+use crate::state::query::{anchor_url, StateError, StateQueryOptions, StateStatus, StatusCounts};
+use crate::state::render;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateAlgorithmResult {
+    pub algorithm: String,
+    pub name: String,
+    pub url: String,
+    pub signature: Option<Signature>,
+    pub template: Option<String>,
+    pub statements: BTreeMap<String, u32>,
+    pub opaque_count: u32,
+    pub opaque: Option<Vec<ReviewItem>>,
+    pub calls: Option<Vec<CallView>>,
+    pub callers: Option<CallerList>,
+    pub unbound_calls: u32,
+    pub status: StateStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallView {
+    pub step_path: Option<String>,
+    pub callee: String,
+    pub callee_name: String,
+    pub form: CallForm,
+    pub confidence: Confidence,
+    pub args: Vec<ArgView>,
+    pub defaulted: u32,
+    pub defaulted_named: bool,
+    pub issues: Vec<BindingIssue>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArgView {
+    pub param: String,
+    pub value: String,
+    pub via: BoundVia,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallerList {
+    pub total: u32,
+    pub groups: Vec<CallerGroup>,
+    pub more: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallerGroup {
+    pub caller: String,
+    pub calls: Vec<CallView>,
+}
+
+/// The algorithm view of `spec#anchor`, or `None` when the anchor has neither
+/// an algorithm summary nor a signature.
+pub(crate) fn algorithm_view(
+    conn: &Connection,
+    snapshots: &[StateSnapshot],
+    spec: &str,
+    anchor: &str,
+    options: &StateQueryOptions,
+) -> Result<Option<StateAlgorithmResult>, StateError> {
+    let spec_ids = ids_of(snapshots, spec);
+    let summary = db::algorithm_summary(conn, &spec_ids, spec, anchor)?;
+    let signature = db::signature_for(conn, &spec_ids, spec, anchor)?;
+    if summary.is_none() && signature.is_none() {
+        return Ok(None);
+    }
+    let name = db::section_title(conn, &spec_ids, anchor)?.unwrap_or_else(|| anchor.to_string());
+    let base_url = snapshots
+        .iter()
+        .find(|s| s.spec == spec)
+        .map_or("", |s| s.base_url.as_str());
+    let template = signature
+        .as_ref()
+        .filter(|sig| sig.template.is_some())
+        .map(|sig| render_template(sig, &name));
+    let (statements, opaque) = summary.map_or_else(Default::default, |s| (s.statements, s.opaque));
+
+    let mut stored = db::calls_by_subject(conn, &spec_ids, spec, anchor)?;
+    stored.sort_by_cached_key(|c| {
+        (
+            step_key(c.step_path.as_deref()),
+            c.offset + c.call.span.start,
+        )
+    });
+    let targets: Vec<AnchorTarget> = stored
+        .iter()
+        .filter_map(|c| c.call.callee.target.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let all_ids: Vec<i64> = snapshots.iter().map(|s| s.id).collect();
+    let signatures = db::signatures_for_targets(conn, &all_ids, &targets)?;
+    let mut titles: HashMap<AnchorTarget, Option<String>> = HashMap::new();
+    let mut unbound_calls = 0;
+    let mut views = Vec::new();
+    for call in &stored {
+        let target = call.call.callee.target.as_ref();
+        let callee_signature = target.and_then(|t| signatures.get(t));
+        let binding = match callee_signature {
+            Some(sig) => bind(&call.call, &call.source, sig),
+            None => unsigned_binding(call),
+        };
+        if binding.confidence == Confidence::Unbound {
+            unbound_calls += 1;
+        }
+        if !options.calls {
+            continue;
+        }
+        let title = match target {
+            Some(t) if snapshots.iter().any(|s| s.spec == t.spec) => {
+                if !titles.contains_key(t) {
+                    let title = db::section_title(conn, &ids_of(snapshots, &t.spec), &t.anchor)?;
+                    titles.insert(t.clone(), title);
+                }
+                titles[t].clone()
+            }
+            _ => None,
+        };
+        let callee_name = title.as_deref().unwrap_or(&call.call.callee.visible_text);
+        views.push(call_view(call, &binding, callee_signature, callee_name));
+    }
+    let opaque_count = opaque.len() as u32;
+    Ok(Some(StateAlgorithmResult {
+        algorithm: format!("{spec}#{anchor}"),
+        name,
+        url: anchor_url(base_url, anchor),
+        signature,
+        template,
+        statements,
+        opaque_count,
+        opaque: options.opaque.then_some(opaque),
+        calls: options.calls.then_some(views),
+        callers: None,
+        unbound_calls,
+        status: StateStatus::new(
+            opaque_count == 0 && unbound_calls == 0,
+            BTreeSet::new(),
+            StatusCounts::default(),
+        ),
+    }))
+}
+
+fn ids_of(snapshots: &[StateSnapshot], spec: &str) -> Vec<i64> {
+    snapshots
+        .iter()
+        .filter(|s| s.spec == spec)
+        .map(|s| s.id)
+        .collect()
+}
+
+/// Step paths in document order: numeric components compare as numbers.
+fn step_key(step_path: Option<&str>) -> Vec<(u64, String)> {
+    step_path.map_or_else(Vec::new, |path| {
+        path.split('.')
+            .map(|part| match part.parse::<u64>() {
+                Ok(n) => (n, String::new()),
+                Err(_) => (u64::MAX, part.to_string()),
+            })
+            .collect()
+    })
+}
+
+/// The binding of a call whose callee has no signature: nothing aligns.
+fn unsigned_binding(stored: &StoredCall) -> Binding {
+    let callee = &stored.call.callee;
+    Binding {
+        call: stored.call.id.clone(),
+        callee: callee.target.clone().unwrap_or_else(|| AnchorTarget {
+            spec: String::new(),
+            anchor: callee.visible_text.clone(),
+        }),
+        args: Vec::new(),
+        initializers: Vec::new(),
+        confidence: Confidence::Unbound,
+        issues: vec![BindingIssue::NoSignature],
+    }
+}
+
+/// The signature's call template as prose: `navigate {navigable} to {url}`.
+pub fn render_template(signature: &Signature, callee_name: &str) -> String {
+    let Some(template) = &signature.template else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let mut after_open = true;
+    for piece in &template.pieces {
+        let word = match piece {
+            TemplatePiece::Head(words) | TemplatePiece::Literal(words) => words.clone(),
+            TemplatePiece::Callee => callee_name.to_string(),
+            TemplatePiece::Slot(index) => {
+                let name = signature
+                    .params
+                    .iter()
+                    .find(|p| p.passing == Passing::Positional { index: *index })
+                    .map_or_else(|| index.to_string(), |p| p.name.clone());
+                format!("{{{name}}}")
+            }
+            TemplatePiece::ListSep => ",".to_string(),
+            TemplatePiece::NamedGroup(_) => ", with named arguments".to_string(),
+        };
+        let glued = [",", "'s", ")"].iter().any(|p| word.starts_with(p));
+        if !out.is_empty() && !after_open && !glued {
+            out.push(' ');
+        }
+        after_open = word.ends_with('(');
+        out.push_str(&word);
+    }
+    out
+}
+
+/// One call bound against its callee (`signature` is the callee's).
+pub(crate) fn call_view(
+    stored: &StoredCall,
+    binding: &Binding,
+    signature: Option<&Signature>,
+    callee_name: &str,
+) -> CallView {
+    let callee = &stored.call.callee;
+    let param = |index: u32| signature.and_then(|sig| sig.params.get(index as usize));
+    let mut args = Vec::new();
+    let mut defaulted = 0;
+    let mut defaulted_named = true;
+    for arg in &binding.args {
+        let value = match &arg.value {
+            ArgValue::Default(_) => {
+                defaulted += 1;
+                defaulted_named &= param(arg.param).is_some_and(|p| p.passing == Passing::Named);
+                continue;
+            }
+            ArgValue::Unbound => continue,
+            // A named argument's span covers `name set to value`, not the value.
+            ArgValue::Expr(expr) if matches!(arg.via, BoundVia::Name(_)) => render::expr_text(expr),
+            ArgValue::Expr(expr) => arg
+                .span
+                .and_then(|span| stored.source.text.get(span.start..span.end))
+                .map_or_else(|| render::expr_text(expr), str::to_string),
+            ArgValue::Body(body) => arg
+                .span
+                .and_then(|span| stored.source.text.get(span.start..span.end))
+                .map_or_else(|| body.clone(), str::to_string),
+        };
+        args.push(ArgView {
+            param: param(arg.param).map_or_else(|| arg.param.to_string(), |p| p.name.clone()),
+            value,
+            via: arg.via.clone(),
+        });
+    }
+    CallView {
+        step_path: stored.step_path.clone(),
+        callee: callee.target.as_ref().map_or_else(
+            || callee.visible_text.clone(),
+            |t| format!("{}#{}", t.spec, t.anchor),
+        ),
+        callee_name: callee_name.to_string(),
+        form: stored.call.form,
+        confidence: binding.confidence,
+        args,
+        defaulted,
+        defaulted_named,
+        issues: binding.issues.clone(),
+        text: stored.source.text.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::bind::{BindingIssue, Confidence};
+    use crate::state::query::{query, StateQueryOptions, StateResponse};
+    use crate::state::testing::db_with;
+    use crate::state::testing::NAV_HTML;
+
+    fn view(
+        conn: &rusqlite::Connection,
+        selector: &str,
+        calls: bool,
+        callers: bool,
+        opaque: bool,
+        limit: Option<u32>,
+    ) -> StateAlgorithmResult {
+        let options = StateQueryOptions {
+            calls,
+            callers,
+            opaque,
+            limit,
+            ..StateQueryOptions::default()
+        };
+        match query(conn, selector, &options)
+            .unwrap_or_else(|e| panic!("{selector}: {}", e.message))
+        {
+            StateResponse::Algorithm(v) => v,
+            other => panic!("{selector} is not an algorithm view: {other:?}"),
+        }
+    }
+
+    const EXTRA_CALLERS: &str = r##"<div data-algorithm=""><p>To <dfn id="reload">reload</dfn> a <a href="#navigable">navigable</a> <var>n</var>:</p><ol><li><p><a href="#navigate">Navigate</a> <var>n</var> to <var>n</var>'s <a href="#nav-url">URL</a>.</p></li><li><p>Add <var>n</var> to the list of reloaded things.</p></li></ol></div>
+<div data-algorithm=""><p>To <dfn id="go">go</dfn> given <var>n</var>:</p><ol><li><p><a href="#navigate">Navigate</a> <var>n</var> to <var>u</var>.</p></li></ol></div>"##;
+
+    #[test]
+    fn navigate_view_template_and_statements() {
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        let v = view(&conn, "HTML#navigate", false, false, false, None);
+        assert_eq!(v.algorithm, "HTML#navigate");
+        assert_eq!(
+            v.template.as_deref(),
+            Some("navigate {navigable} to {url} using {sourceDocument}, with named arguments")
+        );
+        assert_eq!(v.signature.as_ref().unwrap().params.len(), 6);
+        assert_eq!(v.statements.get("in_parallel"), Some(&1));
+        assert!(v.calls.is_none() && v.callers.is_none() && v.opaque.is_none());
+    }
+
+    #[test]
+    fn calls_with_bindings_and_defaulted_count() {
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        let v = view(
+            &conn,
+            "HTML#location-object-navigate",
+            true,
+            false,
+            false,
+            None,
+        );
+        let calls = v.calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        let c = &calls[0];
+        assert_eq!(
+            (
+                c.step_path.as_deref(),
+                c.callee.as_str(),
+                c.callee_name.as_str(),
+                c.confidence
+            ),
+            (Some("4"), "HTML#navigate", "navigate", Confidence::Exact)
+        );
+        assert_eq!(
+            c.args
+                .iter()
+                .map(|a| (a.param.as_str(), a.value.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("navigable", "*navigable*"),
+                ("url", "*url*"),
+                ("sourceDocument", "*sourceDocument*"),
+                ("exceptionsEnabled", "true"),
+                ("historyHandling", "*historyHandling*")
+            ]
+        );
+        assert_eq!((c.defaulted, c.defaulted_named), (1, true));
+        assert_eq!(v.unbound_calls, 0);
+    }
+
+    #[test]
+    fn opaque_statements_and_callee_without_signature() {
+        let html = format!("{NAV_HTML}{EXTRA_CALLERS}");
+        let conn = db_with(&[("HTML", html.as_str())]);
+        let v = view(&conn, "HTML#reload", true, false, true, None);
+        assert_eq!(v.opaque_count, 1);
+        assert_eq!(v.opaque.unwrap()[0].step_path.as_deref(), Some("2"));
+        assert_eq!(v.status.coverage, crate::state::query::Coverage::Partial);
+        let other = r##"<div data-algorithm=""><p>To <dfn id="x">x</dfn> given a <var>n</var>:</p><ol><li><p><a href="https://dom.spec.whatwg.org/#concept-node-remove">Remove</a> <var>n</var>.</p></li></ol></div>"##;
+        let conn = db_with(&[("HTML", other)]);
+        let c = view(&conn, "HTML#x", true, false, false, None)
+            .calls
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            (c.confidence, c.issues.first()),
+            (Confidence::Unbound, Some(&BindingIssue::NoSignature))
+        );
+        assert_eq!(
+            (c.callee.as_str(), c.callee_name.as_str()),
+            ("DOM#concept-node-remove", "Remove")
+        );
+        let v = view(&conn, "HTML#x", false, false, false, None);
+        assert_eq!(
+            (v.unbound_calls, v.status.coverage),
+            (1, crate::state::query::Coverage::Partial)
+        );
+    }
+
+    #[test]
+    fn template_spacing_around_punctuation() {
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        let mut sig = view(&conn, "HTML#navigate", false, false, false, None)
+            .signature
+            .unwrap();
+        sig.template = Some(crate::state::model::Template {
+            pieces: vec![
+                TemplatePiece::Head("the".into()),
+                TemplatePiece::Callee,
+                TemplatePiece::Literal("of".into()),
+                TemplatePiece::Slot(0),
+                TemplatePiece::Literal("'s".into()),
+                TemplatePiece::ListSep,
+                TemplatePiece::Literal("(".into()),
+                TemplatePiece::Slot(1),
+                TemplatePiece::Literal(")".into()),
+            ],
+        });
+        assert_eq!(
+            render_template(&sig, "result"),
+            "the result of {navigable}'s, ({url})"
+        );
+    }
+
+    #[test]
+    fn step_paths_order_numerically() {
+        let mut paths = vec![Some("10"), Some("2.1"), None, Some("2"), Some("9.3")];
+        paths.sort_by_key(|p| step_key(*p));
+        assert_eq!(
+            paths,
+            [None, Some("2"), Some("2.1"), Some("9.3"), Some("10")]
+        );
+    }
+
+    /// Guard for the resolution order: passes before and after this task.
+    #[test]
+    fn non_algorithm_anchors_still_reach_the_sites_fallback() {
+        let conn = db_with(&[("HTML", NAV_HTML)]);
+        assert!(matches!(
+            query(
+                &conn,
+                "HTML#ongoing-navigation",
+                &StateQueryOptions::default()
+            )
+            .unwrap(),
+            StateResponse::Field(_)
+        ));
+    }
+}

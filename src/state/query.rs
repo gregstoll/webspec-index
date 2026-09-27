@@ -11,6 +11,7 @@ use crate::state::model::{
     OwnerBasis, OwnerRef, OwnerVia, Site, StateCatalog, StateIssueCode, StateSpec, SuperBasis,
     SuperEdge, TypeExpr, TypeKey, TypeKind,
 };
+use crate::state::query_algorithm::{algorithm_view, StateAlgorithmResult};
 use crate::state::{classify, extract, ir, rules};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,12 @@ pub struct StateQueryOptions {
     pub include_inits: bool,
     pub unclassified: bool,
     pub limit: Option<u32>,
+    #[serde(default)]
+    pub calls: bool,
+    #[serde(default)]
+    pub callers: bool,
+    #[serde(default)]
+    pub opaque: bool,
 }
 
 impl Default for StateQueryOptions {
@@ -34,6 +41,9 @@ impl Default for StateQueryOptions {
             include_inits: true,
             unclassified: false,
             limit: None,
+            calls: false,
+            callers: false,
+            opaque: false,
         }
     }
 }
@@ -233,7 +243,11 @@ pub struct StateStatus {
 }
 
 impl StateStatus {
-    fn new(complete: bool, issues: BTreeSet<StateIssueCode>, counts: StatusCounts) -> Self {
+    pub(crate) fn new(
+        complete: bool,
+        issues: BTreeSet<StateIssueCode>,
+        counts: StatusCounts,
+    ) -> Self {
         Self {
             state: StatusState::Ready,
             semantics: Semantics::May,
@@ -377,6 +391,7 @@ pub enum StateResponse {
     Type(StateTypeResult),
     Member(StateMemberResult),
     Fields(StateFieldListResult),
+    Algorithm(StateAlgorithmResult),
 }
 
 /// Resolve `selector` (§10.1) against the current snapshots' state rows.
@@ -519,7 +534,7 @@ fn like_match(pattern: &str, text: &str) -> bool {
     pattern[p..].iter().all(|&c| c == '%')
 }
 
-fn anchor_url(base_url: &str, anchor: &str) -> String {
+pub(crate) fn anchor_url(base_url: &str, anchor: &str) -> String {
     if base_url.is_empty() {
         String::new()
     } else if base_url.ends_with(".html") {
@@ -1233,6 +1248,17 @@ impl<'a> Scope<'a> {
             return Ok(StateResponse::Type(self.type_view(key)?));
         }
         let sites = self.sites_for_target(spec, anchor)?;
+        // An algorithm anchor written as a field keeps the field view.
+        let written = sites
+            .iter()
+            .any(|site| matches!(site.class.as_str(), "write" | "init" | "declared"));
+        if !written {
+            if let Some(view) =
+                algorithm_view(self.conn, &self.snapshots, spec, anchor, self.options)?
+            {
+                return Ok(StateResponse::Algorithm(view));
+            }
+        }
         let reflects = self.reflects(spec, anchor)?;
         if !sites.is_empty() || reflects.is_some() {
             let mut view = self.field_view(
@@ -2119,6 +2145,7 @@ mod tests {
             include_inits: false,
             unclassified: true,
             limit: Some(1),
+            ..StateQueryOptions::default()
         };
         let StateResponse::Field(f) = query(&conn, "DOM#concept-node-document", &options).unwrap()
         else {

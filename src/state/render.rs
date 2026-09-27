@@ -1,7 +1,8 @@
 //! Markdown renderings of state query results (§10.2–§10.5).
+use crate::state::ir::{Expr, Hop, Root};
 use crate::state::model::{
-    AnchorRole, InfraKind, InitialValue, OwnerBasis, Primitive, StateIssueCode, TypeExpr, TypeKey,
-    TypeRef,
+    AnchorRole, InfraKind, InitialValue, Literal, OwnerBasis, Primitive, StateIssueCode, TypeExpr,
+    TypeKey, TypeRef,
 };
 use crate::state::query::{
     Coverage, FieldListEntry, FieldRow, FoundOn, InheritedFields, MemberRow, OwnerInfo, SiteInfo,
@@ -16,6 +17,12 @@ pub fn response(response: &StateResponse) -> String {
         StateResponse::Type(result) => type_view(result),
         StateResponse::Member(result) => member(result),
         StateResponse::Fields(result) => field_list(result),
+        StateResponse::Algorithm(result) => format!(
+            "## {} — {}\n\n{}\n",
+            result.algorithm,
+            result.name,
+            result.template.as_deref().unwrap_or(&result.url)
+        ),
     }
 }
 
@@ -640,11 +647,144 @@ fn more_rows(out: &mut String, hidden: u32) {
     }
 }
 
+/// An expression as prose: variables `*x*`, paths `*x*'s field`, literals as
+/// written, enum values ``"`v`"``. Expressions carry no link text, so a link
+/// root prints its target anchor.
+pub fn expr_text(expr: &Expr) -> String {
+    match expr {
+        Expr::Var(name) => format!("*{name}*"),
+        Expr::This => "this".into(),
+        Expr::Literal(literal) => match literal {
+            Literal::Null => "null".into(),
+            Literal::Bool(true) => "true".into(),
+            Literal::Bool(false) => "false".into(),
+            Literal::Undefined => "undefined".into(),
+            Literal::Failure => "failure".into(),
+            Literal::Number(text) => text.clone(),
+            Literal::String(text) if text.is_empty() => "the empty string".into(),
+            Literal::String(text) => format!("\"{text}\""),
+        },
+        Expr::EnumValue { text, .. } => format!("\"`{text}`\""),
+        Expr::Path(path) => {
+            let mut hops = path.hops.iter().map(|hop| match hop {
+                Hop::Field { visible_text, .. } => visible_text.clone(),
+                Hop::CodeMember { name } => format!("`{name}`"),
+                Hop::Slot { name } => format!("[[{name}]]"),
+            });
+            let mut out = match &path.root {
+                Root::Var(name) => format!("*{name}*"),
+                Root::This => "this".into(),
+                Root::Link { link_id, target } => target
+                    .as_ref()
+                    .map_or_else(|| link_id.clone(), |t| t.anchor.clone()),
+                Root::Opaque { text } => text.clone(),
+                Root::Implicit => match hops.next() {
+                    Some(hop) => format!("the {hop}"),
+                    None => "the".into(),
+                },
+            };
+            for hop in hops {
+                out.push_str("'s ");
+                out.push_str(&hop);
+            }
+            if let Some(subscript) = &path.subscript {
+                out.push('[');
+                out.push_str(&expr_text(subscript));
+                out.push(']');
+            }
+            out
+        }
+        Expr::List(items) => format!(
+            "« {} »",
+            items.iter().map(expr_text).collect::<Vec<_>>().join(", ")
+        ),
+        Expr::New { ty, .. } => match ty {
+            Some(TypeRef::Known(key)) => format!("a new {}", fallback_name(&key.to_string())),
+            Some(TypeRef::Unresolved(target)) => format!("a new {}", target.anchor),
+            None => "a new".into(),
+        },
+        Expr::Call(_) => "(call)".into(),
+        Expr::AlgorithmRef { .. } => "(algorithm)".into(),
+        Expr::Conditional { .. } => "(conditional)".into(),
+        Expr::Opaque { text } => text.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::query::{query, StateQueryOptions};
     use crate::state::testing::query_fixture_db as both;
+
+    #[test]
+    fn expr_text_forms() {
+        use crate::parse::steps::AnchorTarget;
+        use crate::state::ir::Path;
+        let field = |text: &str| Hop::Field {
+            link_id: "l".into(),
+            target: None,
+            visible_text: text.into(),
+        };
+        let path = Expr::Path(Path {
+            root: Root::Var("d".into()),
+            hops: vec![
+                field("node document"),
+                Hop::Slot {
+                    name: "Realm".into(),
+                },
+            ],
+            subscript: Some(Box::new(Expr::Var("k".into()))),
+        });
+        let implicit = Expr::Path(Path {
+            root: Root::Implicit,
+            hops: vec![
+                field("URL"),
+                Hop::CodeMember {
+                    name: "href".into(),
+                },
+            ],
+            subscript: None,
+        });
+        let cases = [
+            (Expr::Literal(Literal::Null), "null"),
+            (Expr::Literal(Literal::Bool(false)), "false"),
+            (Expr::Literal(Literal::Number("0".into())), "0"),
+            (
+                Expr::Literal(Literal::String(String::new())),
+                "the empty string",
+            ),
+            (Expr::Literal(Literal::String("s".into())), "\"s\""),
+            (
+                Expr::EnumValue {
+                    text: "auto".into(),
+                    target: None,
+                },
+                "\"`auto`\"",
+            ),
+            (Expr::This, "this"),
+            (path, "*d*'s node document's [[Realm]][*k*]"),
+            (implicit, "the URL's `href`"),
+            (
+                Expr::List(vec![Expr::Var("a".into()), Expr::This]),
+                "« *a*, this »",
+            ),
+            (
+                Expr::New {
+                    ty: Some(TypeRef::Unresolved(AnchorTarget {
+                        spec: "DOM".into(),
+                        anchor: "concept-event".into(),
+                    })),
+                    init: None,
+                },
+                "a new concept-event",
+            ),
+            (Expr::Call("c".into()), "(call)"),
+            (Expr::Opaque { text: "it".into() }, "it"),
+        ];
+        for (expr, text) in cases {
+            assert_eq!(expr_text(&expr), text);
+        }
+    }
 
     #[test]
     fn field_view_matches_the_contract_layout() {
