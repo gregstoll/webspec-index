@@ -16,7 +16,7 @@ use webspec_index::state::bind::{bind, Binding, Confidence};
 use webspec_index::state::catalog::StateCatalog;
 use webspec_index::state::ir::{Expr, Origin, SourceContext, StatementKind};
 use webspec_index::state::model::{
-    AnchorTarget, ReviewItem, Signature, SignatureForm, StateSpec, TemplatePiece, TypeBasis,
+    AnchorTarget, Param, ReviewItem, Signature, SignatureForm, StateSpec, TemplatePiece, TypeBasis,
     TypeExpr,
 };
 
@@ -24,6 +24,17 @@ struct Floors {
     owner: f64,
     set: f64,
     unclassified: f64,
+    /// §14.5: `To`-form parameters typed, including by name and by `data-dfn-for`.
+    to_typed: f64,
+}
+
+/// §14.5 floor on typed `To` parameters; the type pass does not read the catalog.
+fn to_typed_floor(spec: &str) -> f64 {
+    if spec == "HTML" {
+        88.0
+    } else {
+        78.0
+    }
 }
 
 /// §12.4 floors with the bundled catalog: owner resolution is the value measured after the
@@ -35,12 +46,14 @@ fn bundled_floors(spec: &str) -> Floors {
             owner: 93.0,
             set: 91.0,
             unclassified: 2.2,
+            to_typed: to_typed_floor(spec),
         }
     } else {
         Floors {
             owner: 100.0,
             set: 95.0,
             unclassified: 1.9,
+            to_typed: to_typed_floor(spec),
         }
     }
 }
@@ -52,12 +65,39 @@ fn grammar_floors(spec: &str) -> Floors {
             owner: 77.0,
             set: 91.0,
             unclassified: 2.7,
+            to_typed: to_typed_floor(spec),
         }
     } else {
         Floors {
             owner: 94.0,
             set: 95.0,
             unclassified: 2.0,
+            to_typed: to_typed_floor(spec),
+        }
+    }
+}
+
+/// Whether a `To`-form parameter counts as typed for §14.5: a prose `Opaque` type does not.
+fn is_typed(param: &Param) -> bool {
+    match param.type_basis {
+        TypeBasis::Explicit => !matches!(param.ty, TypeExpr::Opaque { .. }),
+        TypeBasis::NameResolved | TypeBasis::DfnFor => true,
+        TypeBasis::Unknown => false,
+    }
+}
+
+/// The untyped `To`-form parameters for review: algorithm, parameter, type text.
+fn print_untyped(spec: &str, state: &StateSpec) {
+    for signature in state
+        .signatures
+        .iter()
+        .filter(|s| s.form == SignatureForm::To)
+    {
+        for param in signature.params.iter().filter(|p| !is_typed(p)) {
+            println!(
+                "  untyped: {spec}#{} {} [{}]",
+                signature.algorithm.anchor, param.name, param.type_text
+            );
         }
     }
 }
@@ -261,12 +301,7 @@ fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
         .filter(|s| s.form == SignatureForm::To)
         .flat_map(|s| &s.params)
         .fold((0, 0), |(typed, all), p| {
-            let is_typed = match p.type_basis {
-                TypeBasis::Explicit => !matches!(p.ty, TypeExpr::Opaque { .. }),
-                TypeBasis::NameResolved | TypeBasis::DfnFor => true,
-                TypeBasis::Unknown => false,
-            };
-            (typed + u32::from(is_typed), all + 1)
+            (typed + u32::from(is_typed(p)), all + 1)
         });
     println!(
         "  signatures (§6.2 terms): template or IDL {with_idl}/{} ({:.1}%), To-form params typed {to_typed}/{to_params} ({:.1}%)",
@@ -284,7 +319,11 @@ fn report(run: &str, spec: &str, state: &StateSpec, floors: &Floors) -> bool {
     if !ok {
         println!("FLOOR {spec} ({run}) below §12.4");
     }
-    ok
+    let to_typed_ok = pct(to_typed, to_params) >= floors.to_typed;
+    if !to_typed_ok {
+        println!("FLOOR {spec} ({run}) To params typed below §14.5");
+    }
+    ok && to_typed_ok
 }
 
 /// Exact / partial / unbound counts of one population of calls.
@@ -322,24 +361,17 @@ impl Rates {
 }
 
 /// §14.5 floor on exact bindings of calls to `To` targets with parameters.
-/// Stage 1 interim values (64% HTML / 78% DOM); the §14.5 targets (70% / 80%) require
-/// Stage 2 improvements to handle compound-noun task-source arguments and
-/// inline body descriptions that carry no nested body arg.
 fn binding_floor(spec: &str) -> f64 {
     if spec == "HTML" {
-        64.0
+        70.0
     } else {
-        78.0
+        80.0
     }
 }
 
 /// §13 budget for binding every call of HTML.
 const HTML_BIND_BUDGET_MS: f64 = 20.0;
 
-/// §6.3 / §14.5 binding rates and the §13 binding time over the stored calls of both
-/// snapshots; returns false when a floor or the budget is violated. `To`-like means the
-/// forms whose intro is a call template (`To`, `when the steps say`, given-list), as in
-/// `bind`. Over all calls, a call without a target or signature counts as unbound.
 /// A signature whose intro is a call template and that takes parameters.
 fn is_to_like(signature: &Signature) -> bool {
     matches!(
@@ -390,6 +422,10 @@ fn print_binding(stored: &StoredCall, signature: &Signature, binding: &Binding) 
     );
 }
 
+/// §6.3 / §14.5 binding rates and the §13 binding time over the stored calls of both
+/// snapshots; returns false when a floor or the budget is violated. `To`-like means the
+/// forms whose intro is a call template (`To`, `when the steps say`, given-list), as in
+/// `bind`. Over all calls, a call without a target or signature counts as unbound.
 fn report_bindings(conn: &rusqlite::Connection, snapshots: [i64; 2], review: bool) -> bool {
     let calls: Vec<Vec<StoredCall>> = snapshots
         .iter()
@@ -493,6 +529,7 @@ fn main() {
             print_review("review", &c.unclassified_review);
             print_review("assert", &c.assert_review);
             print_review("undeclared", &c.undeclared_review);
+            print_untyped(spec, &state);
         }
     }
     if !report_bindings(&conn, snapshots, review) {
