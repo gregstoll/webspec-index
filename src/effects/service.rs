@@ -1317,6 +1317,19 @@ pub fn get_effect_summary_on(
     let Some((publication, graph)) = graph_for(conn, &request.options)? else {
         return Ok(no_result(subject, false));
     };
+    if let Some(category) = request.filter.as_ref().and_then(|f| f.category.as_deref()) {
+        let known: BTreeSet<&str> = graph
+            .effect_categories
+            .values()
+            .map(String::as_str)
+            .collect();
+        if !known.contains(category) {
+            return Err(RequestError::invalid(format!(
+                "unknown effect category {category:?}; valid categories: {}",
+                known.into_iter().collect::<Vec<_>>().join(", ")
+            )));
+        }
+    }
     let m: InputManifest = serde_json::from_str(&publication.manifest_json).map_err(failure)?;
     let analysis_id = analysis_id(&publication);
 
@@ -1636,6 +1649,41 @@ mod tests {
 
         touch(&conn);
         assert!(get_cached_effect_preview_on(&conn, &req).unwrap().is_none());
+    }
+
+    #[test]
+    fn unknown_category_filter_is_rejected_with_the_valid_categories() {
+        let conn = db::open_test_db().unwrap();
+        seed(
+            &conn,
+            "DOM",
+            "<p>To <dfn id=concept-event-fire>fire an event</dfn>, dispatch it.</p>",
+        );
+        seed(
+            &conn,
+            "TEST",
+            "<div class=algorithm><p>To <dfn id=R>R</dfn>:</p><ol>
+             <li><a href='https://dom.spec.whatwg.org/#concept-event-fire'>Fire an event</a> named <code>hello</code>.</li>
+             </ol></div>",
+        );
+        let options = EffectsOptions::default();
+        publish_all(&conn, &default_catalog(&[]).unwrap(), &options);
+        let with_category = |category: &str| EffectsRequest {
+            filter: Some(EffectFilter {
+                category: Some(category.to_string()),
+                ..EffectFilter::default()
+            }),
+            ..request("TEST", "R")
+        };
+
+        let err = get_effect_summary_on(&conn, &with_category("bogus-xyz")).unwrap_err();
+        assert_eq!(err.code, RequestErrorCode::InvalidRequest);
+        assert!(err.message.contains("bogus-xyz"), "{}", err.message);
+        assert!(err.message.contains("events"), "{}", err.message);
+        assert!(err.message.contains("async"), "{}", err.message);
+
+        let events = get_effect_summary_on(&conn, &with_category("events")).unwrap();
+        assert_eq!(events.effects.len(), 1);
     }
 
     #[test]
