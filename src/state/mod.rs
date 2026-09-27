@@ -6,6 +6,7 @@ pub(crate) mod block;
 pub(crate) mod call;
 pub mod catalog;
 pub(crate) mod classify;
+pub(crate) mod control;
 pub(crate) mod declare;
 pub(crate) mod def_sig;
 pub(crate) mod expr;

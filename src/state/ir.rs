@@ -652,6 +652,7 @@ pub(crate) fn parse_source_with(source: &StatementSource, env: &Env) -> ParsedSo
                 .map(|(link, ..)| source.links[link].visible_text.to_lowercase())
         });
         let consumed = at < p.covered_until
+            || p.try_control(at)
             || p.try_call_statement(at)
             || p.try_infra_mutation(at)
             || p.try_set(at)
@@ -1444,7 +1445,14 @@ impl Parser<'_> {
         self.push(at, end, "opaque", kind)
     }
 
-    fn push(&mut self, start: usize, end: usize, kind_name: &str, kind: StatementKind) -> String {
+    /// Pushes a statement into the current inline block.
+    pub(crate) fn push(
+        &mut self,
+        start: usize,
+        end: usize,
+        kind_name: &str,
+        kind: StatementKind,
+    ) -> String {
         let span = self.enc.span(start, end);
         let id = statement_id(&self.source.id, kind_name, span);
         self.out.statements.push(Statement {
@@ -1452,7 +1460,7 @@ impl Parser<'_> {
             source_id: self.source.id.clone(),
             span,
             kind,
-            parent: None,
+            parent: self.inline_parent.clone(),
         });
         id
     }
@@ -2641,8 +2649,14 @@ mod tests {
             assert_eq!(p.calls.len(), 1);
             assert_eq!(p.calls[0].form, CallForm::ResultOf);
             assert_eq!(p.calls[0].statement_id, p.statements[0].id);
-            // Outside every statement it records nothing.
+            // An `If` condition owns the call its predicate finds.
             let (_, p) = parse("If the result of <a href=\"#x\">x</a> is true, return.", &e);
+            assert_eq!(p.calls[0].statement_id, p.statements[0].id);
+            // Outside every statement it records nothing.
+            let (_, p) = parse(
+                "When the result of <a href=\"#x\">x</a> is true, return.",
+                &e,
+            );
             assert!(p.calls.is_empty());
         }
 

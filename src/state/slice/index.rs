@@ -344,13 +344,13 @@ fn build_one<'a, 's>(
                 });
             }
             StatementKind::Init { .. } => {}
-            StatementKind::Opaque { .. } => {
+            StatementKind::Opaque { .. } | StatementKind::Call { .. } => {
                 let names =
                     in_span(&source.tokens, &source.links, &placed.statement.span).collect();
                 edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
             }
-            StatementKind::Call { .. }
-            | StatementKind::If { .. }
+            // Control flow reads its operands and defines nothing.
+            StatementKind::If { .. }
             | StatementKind::Otherwise { .. }
             | StatementKind::ForEach { .. }
             | StatementKind::While { .. }
@@ -363,11 +363,7 @@ fn build_one<'a, 's>(
             | StatementKind::Wait { .. }
             | StatementKind::InParallel { .. }
             | StatementKind::RunSteps { .. }
-            | StatementKind::Assert { .. } => {
-                let names =
-                    in_span(&source.tokens, &source.links, &placed.statement.span).collect();
-                edges.push(edge(DefKind::Opaque, None, uses_of(names), None));
-            }
+            | StatementKind::Assert { .. } => {}
         }
     }
 

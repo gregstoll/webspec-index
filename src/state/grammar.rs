@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::parse::steps::{AnchorTarget, InlineTokenKind, TextSpan};
-use crate::state::ir::{Hop, LinkRole, ParsedSource, Path, Root, StatementSource};
+use crate::state::ir::{Hop, LinkRole, ParsedSource, Path, Root, StatementParent, StatementSource};
 use crate::state::model::{Literal, TypeKey, TypeRef};
 
 // ---------------------------------------------------------------------------
@@ -365,6 +365,8 @@ pub(crate) struct Parser<'a> {
     pub(crate) covered_until: usize,
     /// Encoded position of each initializer's `a new` → its `Init` id.
     pub(crate) inits: BTreeMap<usize, String>,
+    /// The inline block the next pushed statement belongs to (§8.2).
+    pub(crate) inline_parent: Option<StatementParent>,
 }
 
 impl<'a> Parser<'a> {
@@ -377,6 +379,7 @@ impl<'a> Parser<'a> {
             opaque_clauses: Vec::new(),
             covered_until: 0,
             inits: BTreeMap::new(),
+            inline_parent: None,
         }
     }
 
