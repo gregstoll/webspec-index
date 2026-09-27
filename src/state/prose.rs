@@ -9,8 +9,9 @@ use regex::Regex;
 use scraper::{ElementRef, Html};
 use sha2::{Digest, Sha256};
 
-use crate::model::{ParsedSection, SectionType};
+use crate::model::ParsedSection;
 use crate::parse::algorithms::step_number;
+use crate::parse::references::SectionScope;
 use crate::parse::steps::{
     canonical_inline, resolve_href, structural_body_nodes, AnchorTarget, InlineContext,
 };
@@ -36,16 +37,7 @@ pub(crate) fn prose_sources(
     sections: &[ParsedSection],
     precomputed_bodies: Option<&HashSet<ego_tree::NodeId>>,
 ) -> ProseOutput {
-    let scope_anchors: HashSet<&str> = sections
-        .iter()
-        .filter(|s| {
-            matches!(
-                s.section_type,
-                SectionType::Heading | SectionType::Algorithm
-            )
-        })
-        .map(|s| s.anchor.as_str())
-        .collect();
+    let mut section_scope = SectionScope::new(sections);
     let bodies_owned;
     let bodies: &HashSet<ego_tree::NodeId> = if let Some(b) = precomputed_bodies {
         b
@@ -59,7 +51,6 @@ pub(crate) fn prose_sources(
         callouts_excluded: 0,
     };
 
-    let mut scope: Option<&str> = None;
     // Per open element: its path step, its same-name child counts, and
     // whether it excludes or marks as callout everything below it.
     let mut path: Vec<(&str, usize)> = Vec::new();
@@ -106,11 +97,8 @@ pub(crate) fn prose_sources(
         excluded_depth += usize::from(excluded);
         callout_depth += usize::from(callout);
 
-        if let Some(id) = element.value().id() {
-            if scope_anchors.contains(id) {
-                scope = Some(id);
-            }
-        }
+        section_scope.enter(&element);
+        let scope = section_scope.current();
         if excluded_depth > 0 || !is_block(&element) {
             continue;
         }
@@ -406,6 +394,24 @@ mod tests {
             .unwrap();
         assert_eq!(method.context, "prose");
         assert_eq!(method.text, "… set this’s stop propagation flag.");
+    }
+
+    #[test]
+    fn prose_after_an_algorithm_belongs_to_the_heading() {
+        let html = crate::state::testing::PROSE_DOM.replace(
+            r##"<div class="note">"##,
+            r##"<p>To <dfn id="frob">frob</dfn> an <var>event</var>:</p><ol><li><p>Return.</p></li></ol>
+<p>When the user agent is idle, set <a href="https://webidl.spec.whatwg.org/#this">this</a>’s <a href="#stop-propagation-flag">stop propagation flag</a>.</p>
+<div class="note">"##,
+        );
+        let s = state(&html);
+        let sites = crate::state::extract::derive_sites(&s);
+        let subjects: Vec<_> = sites
+            .iter()
+            .filter(|x| x.class == SiteClass::Write && x.role.as_deref() == Some("normative"))
+            .map(|x| x.subject.anchor.as_str())
+            .collect();
+        assert_eq!(subjects, ["interface-event"]);
     }
 
     #[test]

@@ -93,58 +93,91 @@ fn list_introduced_by_definition(item: &ElementRef, types: &HashMap<&str, Sectio
     defined.peek().is_some() && defined.all(|t| *t == SectionType::Definition)
 }
 
+/// The section in scope during a document-order pass over the elements of a document.
+///
+/// A heading's scope lasts until the next heading. An algorithm defined by a `<dfn>`
+/// covers only its own markup (see [`AlgorithmScope`]); past it, the heading is back in
+/// scope, so prose after an algorithm isn't credited to it. Definitions set no scope: a
+/// parameter or a term defined in an algorithm's intro must not take over the links in
+/// its steps.
+pub(crate) struct SectionScope<'s> {
+    types: HashMap<&'s str, SectionType>,
+    heading: Option<String>,
+    algorithm: Option<AlgorithmScope>,
+}
+
+impl<'s> SectionScope<'s> {
+    pub(crate) fn new(sections: &'s [ParsedSection]) -> Self {
+        SectionScope {
+            types: sections
+                .iter()
+                .map(|s| (s.anchor.as_str(), s.section_type))
+                .collect(),
+            heading: None,
+            algorithm: None,
+        }
+    }
+
+    /// Advance to `elem`, the next element in document order.
+    pub(crate) fn enter(&mut self, elem: &ElementRef) {
+        if self.algorithm.as_ref().is_some_and(|a| !a.contains(**elem)) {
+            self.algorithm = None;
+        }
+        match elem.value().attr("id").and_then(|id| self.types.get(id)) {
+            Some(SectionType::Algorithm) if elem.value().name() == "dfn" => {
+                if let Some(block) = enclosing_block(elem) {
+                    let id = elem.value().attr("id").unwrap_or_default();
+                    self.algorithm = Some(AlgorithmScope::new(id.to_string(), block));
+                }
+            }
+            // Headings, and ecmarkup clauses, which hold their algorithm's whole text.
+            Some(SectionType::Heading | SectionType::Algorithm) => {
+                self.heading = elem.value().attr("id").map(str::to_string);
+                self.algorithm = None;
+            }
+            _ => {
+                if let Some(anchor) = continued_section(elem, &self.types) {
+                    self.algorithm = Some(AlgorithmScope::new(anchor.to_string(), *elem));
+                }
+            }
+        }
+    }
+
+    /// The anchor of the section in scope.
+    pub(crate) fn current(&self) -> Option<&str> {
+        self.algorithm
+            .as_ref()
+            .map(|a| a.anchor.as_str())
+            .or(self.heading.as_deref())
+    }
+
+    /// The defining sentence of the algorithm in scope, when it has no list body.
+    fn sentence(&self) -> Option<NodeId> {
+        self.algorithm.as_ref().and_then(|a| a.sentence)
+    }
+}
+
 /// Extract all cross-references from a parsed HTML document.
 ///
-/// Uses a single document-order pass: walk all nodes, track the section in scope, and
-/// attribute each link to it. A heading's scope lasts until the next heading. An
-/// algorithm defined by a `<dfn>` covers only its own markup (see [`AlgorithmScope`]);
-/// past it, the heading is back in scope, so prose after an algorithm isn't credited to
-/// it. Definitions set no scope: a parameter or a term defined in an algorithm's intro
-/// must not take over the links in its steps.
+/// Uses a single document-order pass: walk all nodes, track the section in scope (see
+/// [`SectionScope`]), and attribute each link to it.
 pub fn extract_references(
     document: &Html,
     spec_name: &str,
     sections: &[ParsedSection],
     registry: &SpecRegistry,
 ) -> Vec<ParsedReference> {
-    let types: HashMap<&str, SectionType> = sections
-        .iter()
-        .map(|s| (s.anchor.as_str(), s.section_type))
-        .collect();
+    let mut scope = SectionScope::new(sections);
 
     let mut seen = std::collections::HashSet::new();
     let mut references = Vec::new();
-    let mut heading: Option<String> = None;
-    let mut algorithm: Option<AlgorithmScope> = None;
 
     // Single document-order pass over all nodes
     for node_ref in document.root_element().descendants() {
         let Some(elem) = scraper::ElementRef::wrap(node_ref) else {
             continue;
         };
-
-        if algorithm.as_ref().is_some_and(|a| !a.contains(node_ref)) {
-            algorithm = None;
-        }
-
-        match elem.value().attr("id").and_then(|id| types.get(id)) {
-            Some(SectionType::Algorithm) if elem.value().name() == "dfn" => {
-                if let Some(block) = enclosing_block(&elem) {
-                    let id = elem.value().attr("id").unwrap_or_default();
-                    algorithm = Some(AlgorithmScope::new(id.to_string(), block));
-                }
-            }
-            // Headings, and ecmarkup clauses, which hold their algorithm's whole text.
-            Some(SectionType::Heading | SectionType::Algorithm) => {
-                heading = elem.value().attr("id").map(str::to_string);
-                algorithm = None;
-            }
-            _ => {
-                if let Some(anchor) = continued_section(&elem, &types) {
-                    algorithm = Some(AlgorithmScope::new(anchor.to_string(), elem));
-                }
-            }
-        }
+        scope.enter(&elem);
 
         // Check if this is a link worth recording
         if elem.value().name() == "a" {
@@ -153,8 +186,7 @@ pub fn extract_references(
                     continue;
                 }
 
-                let section = algorithm.as_ref().map(|a| &a.anchor).or(heading.as_ref());
-                if let Some(section) = section {
+                if let Some(section) = scope.current() {
                     if let Some((mut to_spec, to_anchor)) = parse_href(href, registry) {
                         // Resolve intra-spec placeholder to the actual spec name
                         if to_spec == "self" {
@@ -164,14 +196,14 @@ pub fn extract_references(
                         let mut ctx = link_context(&elem);
                         if ctx.kind == RefKind::Prose {
                             // The only step of a one-sentence algorithm is its sentence.
-                            let sentence = algorithm.as_ref().and_then(|a| a.sentence);
+                            let sentence = scope.sentence();
                             if sentence.is_some_and(|s| elem.ancestors().any(|n| n.id() == s)) {
                                 ctx.kind = RefKind::Step;
                             }
                         } else if ctx.kind == RefKind::Step
                             && ctx
                                 .outermost_step
-                                .is_some_and(|li| list_introduced_by_definition(&li, &types))
+                                .is_some_and(|li| list_introduced_by_definition(&li, &scope.types))
                         {
                             ctx = LinkContext::prose();
                         }
@@ -183,7 +215,7 @@ pub fn extract_references(
                         // id separates them where it exists.
                         let call_site_id = elem.value().attr("id").map(str::to_string);
                         let key = (
-                            section.clone(),
+                            section.to_string(),
                             to_spec.clone(),
                             to_anchor.clone(),
                             ctx.step_path.clone(),
@@ -191,7 +223,7 @@ pub fn extract_references(
                         );
                         if seen.insert(key) {
                             references.push(ParsedReference {
-                                from_anchor: section.clone(),
+                                from_anchor: section.to_string(),
                                 to_spec,
                                 to_anchor,
                                 step_path: ctx.step_path,
