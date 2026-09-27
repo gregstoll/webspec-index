@@ -1682,6 +1682,41 @@ mod tests {
     }
 
     #[test]
+    fn which_is_serial_list_type_spans_its_commas() {
+        let out = run_declare(
+            r##"<pre class="idl">partial interface <dfn data-lt="" id="document">Document</dfn> {};</pre>
+<p>A <dfn id="navigation-id">navigation ID</dfn> is a string.</p>
+<p>Each <code><a href="#document">Document</a></code> has an <dfn id="ongoing-navigation" data-dfn-for="Document">ongoing navigation</dfn>, which is a <a href="#navigation-id">navigation ID</a>, "<code>traversal</code>", or null, initially null.</p>"##,
+            "HTML",
+        );
+        let f = field(&out, "ongoing-navigation");
+        let TypeExpr::Union(alts) = &f.declared_type else {
+            panic!("got {:?}", f.declared_type);
+        };
+        assert_eq!(alts.len(), 3, "got {alts:?}");
+        assert!(
+            matches!(&alts[0], TypeExpr::Nominal { text, .. } if text == "navigation ID"),
+            "got {alts:?}"
+        );
+        assert!(
+            matches!(&alts[1], TypeExpr::Enumerated(values) if values == &["traversal"]),
+            "got {alts:?}"
+        );
+        assert!(matches!(&alts[2], TypeExpr::Null), "got {alts:?}");
+        assert!(
+            matches!(
+                &f.initial,
+                Some(InitialValue::Literal {
+                    value: Literal::Null,
+                    ..
+                })
+            ),
+            "got {:?}",
+            f.initial
+        );
+    }
+
+    #[test]
     fn initial_value_quoted_code_element() {
         // Regression: `initially "<code>complete</code>"` was parsed as
         // InitialValue::Opaque with text `"` because the regex stopped at the

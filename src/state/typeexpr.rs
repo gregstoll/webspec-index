@@ -96,10 +96,15 @@ pub(crate) fn parse_type_phrase(phrase: &str, links: &[(String, TypeRef)]) -> Ty
     }
 }
 
-/// Split `s` on ` or ` outside `⟦...⟧` placeholders.
+/// Split `s` on ` or ` outside `⟦...⟧` placeholders, and on the commas of a serial list
+/// (`A, B, or C`).
 /// Returns individual alternative strings (owned, to avoid lifetime issues).
 fn split_on_or(s: &str) -> Vec<String> {
-    split_alternatives(s, &[" or "])
+    if split_alternatives(s, &[", or "]).len() > 1 {
+        split_alternatives(s, &[", or ", ", ", " or "])
+    } else {
+        split_alternatives(s, &[" or "])
+    }
 }
 
 /// Split `s` on any of `separators` (tried in order, so a longer separator sharing a prefix
@@ -164,7 +169,7 @@ fn parse_single_alt(s: &str, links: &[(String, TypeRef)]) -> TypeExpr {
     }
 
     // Quoted enumeration: ("a" or "b")
-    if let Some(en) = try_enumerated(s) {
+    if let Some(en) = try_enumerated(s).or_else(|| try_quoted_literal(s.trim())) {
         return en;
     }
 
@@ -200,6 +205,13 @@ fn try_enumerated(s: &str) -> Option<TypeExpr> {
         .map(|c| c[1].to_string())
         .collect();
     (!vals.is_empty()).then_some(TypeExpr::Enumerated(vals))
+}
+
+/// One quoted string alternative of a union (`"traversal"` in `a ⟦L⟧, "traversal", or null`).
+fn try_quoted_literal(s: &str) -> Option<TypeExpr> {
+    let inner = s.strip_prefix('"')?.strip_suffix('"')?;
+    (!inner.is_empty() && !inner.contains('"'))
+        .then(|| TypeExpr::Enumerated(vec![inner.to_string()]))
 }
 
 fn try_infra_word_phrase(bare: &str, links: &[(String, TypeRef)]) -> Option<TypeExpr> {
@@ -692,13 +704,13 @@ fn extract_type_phrase(
     let patterns: &[(&OnceLock<Regex>, &str)] = &[
         (
             &R1,
-            r"^,\s*which\s+is\s+(?:(?:an|a|either)\s+)?(.+?)(?:,\s*initially|[,\.;\)]|$)",
+            r"^,\s*which\s+is\s+(?:(?:an|a|either)\s+)?(.+?)(?:,\s*initially|[\.;\)]|$)",
         ),
-        (&R2, r"^,\s+(?:a|an)\s+(.+?)(?:,\s*initially|[,\.;\)]|$)"),
+        (&R2, r"^,\s+(?:a|an)\s+(.+?)(?:,\s*initially|[\.;\)]|$)"),
         (&R3, r"^\s*\((?:a|an)\s+(.+?)\)"),
         (
             &R4,
-            r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|[,\.;\)]|$)",
+            r"\bthat\s+is\s+(?:(?:an|a)\s+)?(.+?)(?:,\s*initially|[\.;\)]|$)",
         ),
         (&R5, r"^\s*\(null\s+or\s+(?:(?:an|a)\s+)?(.+?)\)"),
     ];
@@ -706,16 +718,55 @@ fn extract_type_phrase(
     for (cell, source) in patterns {
         if let Some(caps) = regex(cell, source).captures(post) {
             let raw_t = caps[1].trim();
-            // For R5 "(null or T)", prepend "null or ".
             let phrase_str = if source.starts_with(r"^\s*\(null") {
                 format!("null or {raw_t}")
-            } else {
+            } else if source.starts_with(r"^\s*\(") {
                 raw_t.to_string()
+            } else {
+                serial_list_prefix(raw_t).to_string()
             };
+            let phrase_str = substitute_quoted_code_tokens(&phrase_str, pat, tokens);
             return Some(renumber_links(&phrase_str, pat, tokens, resolve));
         }
     }
     None
+}
+
+/// The type at the start of `t`: everything up to the first top-level comma, or, when
+/// that comma opens a serial list (`A, B, or C`), everything through the list's `or` item.
+fn serial_list_prefix(t: &str) -> &str {
+    let commas = top_level_commas(t);
+    let Some(&first) = commas.first() else {
+        return t;
+    };
+    for (i, &comma) in commas.iter().enumerate() {
+        let end = commas.get(i + 1).copied().unwrap_or(t.len());
+        let item = t[comma + 1..end].trim_start();
+        if item.starts_with("or ") {
+            return &t[..end];
+        }
+        if item.split_whitespace().count() > 4 {
+            break;
+        }
+    }
+    &t[..first]
+}
+
+/// Byte offsets of the commas in `s` outside `⟦...⟧` placeholders and `"..."` quotes.
+fn top_level_commas(s: &str) -> Vec<usize> {
+    let mut commas = Vec::new();
+    let mut in_quote = false;
+    let mut in_placeholder = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' if !in_placeholder => in_quote = !in_quote,
+            '⟦' if !in_quote => in_placeholder = true,
+            '⟧' if !in_quote => in_placeholder = false,
+            ',' if !in_quote && !in_placeholder => commas.push(i),
+            _ => {}
+        }
+    }
+    commas
 }
 
 /// Parse the dd plain text as a type when it starts with "A"/"An" (capitalised or not).
@@ -817,6 +868,23 @@ pub(crate) fn substitute_code_tokens(s: &str, pat: &Pattern, tokens: &[BlockToke
             if let Some(&ti) = pat.slots.get(n) {
                 if let BlockToken::Code(text) = &tokens[ti] {
                     return text.clone();
+                }
+            }
+            caps[0].to_string()
+        })
+        .into_owned()
+}
+
+/// Substitute quoted `"⟦Cn⟧"` placeholders with their quoted code text, so an
+/// enumerated alternative like `"<code>traversal</code>"` reads as `"traversal"`.
+fn substitute_quoted_code_tokens(s: &str, pat: &Pattern, tokens: &[BlockToken]) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(&RE, r#""⟦C(\d+)⟧""#)
+        .replace_all(s, |caps: &regex::Captures<'_>| {
+            let n: usize = caps[1].parse().unwrap_or(usize::MAX);
+            if let Some(&ti) = pat.slots.get(n) {
+                if let BlockToken::Code(text) = &tokens[ti] {
+                    return format!("\"{text}\"");
                 }
             }
             caps[0].to_string()
